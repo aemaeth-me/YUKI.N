@@ -1,0 +1,15 @@
+/dist-newstyle/
+/cabal.project.local
+/cabal.project.local~
+/.ghc.environment.*
+/.env
+/.env.*
+!/.env.example
+/frontend/node_modules/
+/frontend/elm-stuff/
+/frontend/.elm-home/
+/frontend/dist/
+/.yuki-n/
+/cognition-v2/
+/journal.jsonl
+/providers.json

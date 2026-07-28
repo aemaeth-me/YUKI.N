@@ -1,0 +1,14 @@
+{
+  "name": "yuki-n-ag-ui-elm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "npm run build && node scripts/dev-server.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "elm": "0.19.1-6"
+  }
+}

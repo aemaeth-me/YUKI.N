@@ -1,0 +1,79 @@
+# YUKI.N
+
+分身本位的本地单用户 Agent runtime。Incarnation 是持续主体；task/thread 只是一次工作；
+transcript 是执行投影，短期记忆、长期记忆与印象分别治理。运行边界仍使用 AG-UI：
+`POST /agent` 返回 SSE 事件流。
+
+## 本机运行
+
+```console
+export DEEPSEEK_API_KEY=...
+./yuki
+```
+
+这一个入口检查 GHC/cabal、Node/npm、provider 配置与端口，完成必要构建，同时
+启动 backend 与 frontend；访问 <http://127.0.0.1:15173>。`Ctrl-C` 会一并停止
+两个服务及受管后台任务。只检查而不启动：`./yuki --check`；强制重建：
+`./yuki --rebuild`。平时仅在源码较新时重建，只有首次缺少前端依赖时才访问
+npm registry。
+
+启动器默认将项目根目录设为 `YUKI_WORK_DIR`；新任务继承它，因此主代理与
+子代理都有明确列出的本机文件、命令能力。能力页会显示当前任务的实际能力。
+
+启动与打开配置页不会请求 provider 的模型列表；只有发送消息才会访问所选
+provider。backend 默认使用 `18080`，frontend 默认使用 `15173`。两个服务
+留在启动器的进程组内，启动器退出时随之停止，不在后台遗留监听进程。
+
+默认使用 DeepSeek V4 Pro；也可设置 `YUKI_PROVIDER`、`YUKI_MODEL`、
+`YUKI_BASE_URL`、`YUKI_API_KEY`。本机状态默认写入 `~/.yuki-n`；
+`YUKI_DATA_DIR` 可改其位置。认知状态始终持久化于 `cognition-v2`；
+`YUKI_MEMORY_DIR` 可另定其根目录，`YUKI_MEMORY_MODEL` 可为 Prompt、Sleep 与
+Impression 的内部调用指定模型；未指定时沿用主模型。
+
+HTTP 入口为 `POST /agent`，最小请求体：
+
+```json
+{"threadId": "t", "runId": "r",
+ "messages": [{"id": "u", "role": "user", "content": "你好"}]}
+```
+
+## 审计
+
+通过 `./yuki` 启动时，每次 run 的效应记入
+`$YUKI_DATA_DIR/journal.jsonl`（默认 `~/.yuki-n/journal.jsonl`）；
+`cabal run yuki-n -- replay <file> [RUN_ID]` 回放并对账（前提：hooks 确定）。
+
+界面在每次模型调用前显示上下文估算与预算。达到边界或主动请求时，Yuki 进入
+Sleep：冻结 ContextEpoch，先裁决遗忘项，再生成 WakePacket，于同一任务醒来继续。
+原文仍在本机 Blob / Experience / Journal 中可审计，不再留在活跃短期记忆。
+
+### 睡眠判定与上下文配置
+
+自动 Sleep 不按轮数触发。每次模型调用前计算：
+
+```text
+触发线 = max(256, 模型上下文窗口 - 预留 token - 工具定义 token)
+```
+
+消息 token 估算严格大于触发线时压缩。多 provider 链取已知上下文窗口的最小值；
+模型未声明窗口时，以 `max(1024, YUKI_SPLICE_CHARS / 3)` 回退。工具定义按其
+JSON 字节数除以 3 估算；消息另计每条 4 token，非 ASCII 字符按 1 token、ASCII
+按约 3 字符 1 token 保守估算。
+
+能力页的上下文策略可为当前任务覆盖：
+
+- `预留 token`：直接控制时机；越大越早，默认 `16384`。
+- `保留轮组`：压缩后保留的最近因果轮组上限，默认 `12`；工具调用及其结果不可拆。
+- `摘要上限`：旧上下文摘要的 token 上限，最小 `96`，默认 `2048`。
+
+留空即继承全局。全局值仍可分别用 `YUKI_CONTEXT_RESERVE_TOKENS`、
+`YUKI_CONTEXT_KEEP_UNITS`、`YUKI_CONTEXT_SUMMARY_TOKENS` 设置。当前源码固定
+DeepSeek V4 Pro 与 GLM-5.2 为 `1000000`、Kimi K3 为 `1048576`；改模型时同步
+改 `Providers.hs`。provider 明确返回 context overflow 时，系统只再做一次
+半预算的紧急压缩与重试。
+
+## 开发
+
+```console
+cabal build all && cabal test all
+```
