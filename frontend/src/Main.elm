@@ -89,6 +89,7 @@ type alias Model =
     , messages : Dict String ChatMessage
     , messageOrder : List String
     , tools : Dict String ToolCall
+    , transcriptLoading : Bool
     , phase : Phase
     , activeRun : Maybe String
     , runNumber : Int
@@ -123,7 +124,6 @@ type alias Model =
     , tree : Remote (Maybe (List String))
     , sessions : Remote (List SessionMeta)
     , showArchived : Bool
-    , pendingSwitch : Maybe String
     , sessionTitleDraft : String
     , forkNodeDraft : String
     , sessionActionError : Maybe String
@@ -1030,6 +1030,7 @@ init flags =
             , messages = Dict.empty
             , messageOrder = []
             , tools = Dict.empty
+            , transcriptLoading = True
             , phase = Idle
             , activeRun = Nothing
             , runNumber = 0
@@ -1064,7 +1065,6 @@ init flags =
             , tree = Loading
             , sessions = Loading
             , showArchived = False
-            , pendingSwitch = Nothing
             , sessionTitleDraft = ""
             , forkNodeDraft = ""
             , sessionActionError = Nothing
@@ -1788,7 +1788,7 @@ isWhitespace char =
 
 retryLast : Model -> ( Model, Cmd Msg )
 retryLast model =
-    if isBusy model.phase || hasPendingFrontendTool model then
+    if model.transcriptLoading || isBusy model.phase || hasPendingFrontendTool model then
         ( model, Cmd.none )
 
     else
@@ -1880,7 +1880,7 @@ sendText raw model =
         content =
             String.trim raw
     in
-    if String.isEmpty content || isBusy model.phase || hasPendingFrontendTool model then
+    if String.isEmpty content || model.transcriptLoading || isBusy model.phase || hasPendingFrontendTool model then
         ( model, Cmd.none )
 
     else
@@ -2051,46 +2051,55 @@ resolveFrontendTool callId approved model =
 
 receiveAgentEvent : Decode.Value -> Model -> ( Model, Cmd Msg )
 receiveAgentEvent raw model =
-    case decodeAgentEvent raw of
-        Err message ->
-            ( { model
-                | phase = Failed
-                , error = Just ("协议事件无法解码：" ++ message)
-                , terminalSeen = True
-              }
-            , cancelCurrent model
-            )
+    if
+        Decode.decodeValue (Decode.field "threadId" Decode.string) raw
+            |> Result.toMaybe
+            |> Maybe.map ((/=) model.threadId)
+            |> Maybe.withDefault False
+    then
+        ( model, Cmd.none )
 
-        Ok event ->
-            let
-                applied =
-                    if model.phase == Failed then
-                        model
+    else
+        case decodeAgentEvent raw of
+            Err message ->
+                ( { model
+                    | phase = Failed
+                    , error = Just ("协议事件无法解码：" ++ message)
+                    , terminalSeen = True
+                  }
+                , cancelCurrent model
+                )
 
-                    else
-                        applyAgentEvent event model
+            Ok event ->
+                let
+                    applied =
+                        if model.phase == Failed then
+                            model
 
-                terminal =
-                    case event of
-                        RunFinished _ _ ->
-                            True
+                        else
+                            applyAgentEvent event model
 
-                        RunError _ _ ->
-                            True
+                    terminal =
+                        case event of
+                            RunFinished _ _ ->
+                                True
 
-                        _ ->
-                            False
+                            RunError _ _ ->
+                                True
 
-                ( next, inspectionCmd ) =
-                    if terminal then
-                        ( { applied | inspection = markLoading applied.inspection, tree = Loading }
-                        , Cmd.batch [ inspectionRefreshCmds applied, treeCmd applied, Task.perform AuditNow Time.now ]
-                        )
+                            _ ->
+                                False
 
-                    else
-                        ( applied, Cmd.none )
-            in
-            ( next, inspectionCmd )
+                    ( next, inspectionCmd ) =
+                        if terminal then
+                            ( { applied | inspection = markLoading applied.inspection, tree = Loading }
+                            , Cmd.batch [ inspectionRefreshCmds applied, treeCmd applied, Task.perform AuditNow Time.now ]
+                            )
+
+                        else
+                            ( applied, Cmd.none )
+                in
+                ( next, inspectionCmd )
 
 
 receiveTransportEvent : Decode.Value -> Model -> ( Model, Cmd Msg )
@@ -3636,7 +3645,7 @@ fallbackIncarnation identifier =
 
         else
             identifier
-    , direction = "一个持续形成判断、保留经验，并对自身工作方式负责的 Yuki 分身。"
+    , direction = "一位持续形成判断、保留经验，并对自身工作方式负责的 YUKI。"
     , promptRevision = Nothing
     , impressionModel = Nothing
     , revision = 1
@@ -3700,6 +3709,7 @@ switchIncarnation identifier model =
                     , messages = Dict.empty
                     , messageOrder = []
                     , tools = Dict.empty
+                    , transcriptLoading = False
                     , draft = ""
                     , pathSuggestions = []
                     , phase = Idle
@@ -4306,7 +4316,7 @@ applyInspection result model =
         [ "incarnations", "list" ] ->
             let
                 remote =
-                    resolveOptional "分身索引" (Decode.list incarnationDecoder)
+                    resolveOptional "YUKI 列表" (Decode.list incarnationDecoder)
 
                 current =
                     case remote of
@@ -4334,7 +4344,7 @@ applyInspection result model =
                 notice =
                     case remote of
                         OptionalUnavailable _ ->
-                            Just "分身接口尚未接通；当前以本机默认分身继续，任务与运行能力不受影响。"
+                            Just "YUKI 接口尚未接通；当前由本机默认 YUKI 继续，任务与运行能力不受影响。"
 
                         OptionalFailed message ->
                             Just message
@@ -4357,7 +4367,7 @@ applyInspection result model =
                     ( switched, switchCmd ) =
                         switchIncarnation current.id base
                 in
-                ( { switched | incarnationNotice = Just "上次使用的分身已移除；已回到可用分身。" }
+                ( { switched | incarnationNotice = Just "上次使用的 YUKI 已移除；已回到另一位可用的 YUKI。" }
                 , switchCmd
                 )
 
@@ -4422,6 +4432,7 @@ applyInspection result model =
                                     , messages = Dict.empty
                                     , messageOrder = []
                                     , tools = Dict.empty
+                                    , transcriptLoading = False
                                     , draft = ""
                                     , pathSuggestions = []
                                     , phase = Idle
@@ -4460,7 +4471,7 @@ applyInspection result model =
                 ( model, Cmd.none )
 
             else
-                case resolveOptional "分身详情" incarnationDecoder of
+                case resolveOptional "YUKI 详情" incarnationDecoder of
                     OptionalLoaded incarnation ->
                         ( { model
                             | incarnation = incarnation
@@ -4715,7 +4726,7 @@ applyInspection result model =
                 ( model, Cmd.none )
 
             else
-                ( { model | prompts = resolveOptional "分身 Prompt" (Decode.list promptRevisionDecoder) }, Cmd.none )
+                ( { model | prompts = resolveOptional "YUKI Prompt" (Decode.list promptRevisionDecoder) }, Cmd.none )
 
         [ "prompt", "edit", "root" ] ->
             if result.status >= 200 && result.status < 300 then
@@ -5294,9 +5305,6 @@ applyInspection result model =
             else
                 ( { model | sessionActionError = Just (statusLabel result) }, Cmd.none )
 
-        [ "switch", threadId, "transcript" ] ->
-            receiveThreadSwitch threadId result model
-
         [ "threads", threadId, "transcript" ] ->
             receiveTranscript threadId result model
 
@@ -5418,73 +5426,36 @@ sessionMutation result model =
         ( { model | sessionActionError = Just (statusLabel result) }, Cmd.none )
 
 
-receiveThreadSwitch : String -> InspectionResult -> Model -> ( Model, Cmd Msg )
-receiveThreadSwitch threadId result model =
-    if model.pendingSwitch /= Just threadId then
-        ( model, Cmd.none )
-
-    else if result.status >= 200 && result.status < 300 then
-        case Decode.decodeValue transcriptDecoder result.body of
-            Ok transcript ->
-                let
-                    reset =
-                        resetThreadState threadId model
-
-                    restored =
-                        restoreTranscript transcript reset
-
-                    ( configured, configCmd ) =
-                        if restored.tab == CapabilitiesTab then
-                            ensureConfigLoaded { restored | tree = Loading }
-
-                        else
-                            ( { restored | tree = Loading }, Cmd.none )
-
-                    title =
-                        sessionTitle threadId model.sessions
-                in
-                ( { configured
-                    | pendingSwitch = Nothing
-                    , currentTaskBelongs = True
-                    , sessionTitleDraft = Maybe.withDefault threadId title
-                    , sessionActionError = Nothing
-                  }
-                , Cmd.batch
-                    [ persistThreadId threadId
-                    , treeCmd configured
-                    , configCmd
-                    , followTranscript ()
-                    ]
-                )
-
-            Err _ ->
-                ( { model | pendingSwitch = Nothing, sessionActionError = Just "任务记录无法解码，已保留当前任务。" }
-                , Cmd.none
-                )
-
-    else
-        ( { model | pendingSwitch = Nothing, sessionActionError = Just ("切换失败，已保留当前任务：" ++ statusLabel result) }
-        , Cmd.none
-        )
-
-
 receiveTranscript : String -> InspectionResult -> Model -> ( Model, Cmd Msg )
 receiveTranscript threadId result model =
-    if threadId /= model.threadId || not (Dict.isEmpty model.messages) then
+    if threadId /= model.threadId then
         ( model, Cmd.none )
+
+    else if not (Dict.isEmpty model.messages) then
+        ( { model | transcriptLoading = False }, Cmd.none )
 
     else if result.status >= 200 && result.status < 300 then
         case Decode.decodeValue transcriptDecoder result.body of
             Ok transcript ->
-                ( restoreTranscript transcript model
+                ( restoreTranscript transcript { model | transcriptLoading = False, sessionActionError = Nothing }
                 , Cmd.batch [ followTranscript (), sessionsCmd model ]
                 )
 
             Err _ ->
-                ( model, Cmd.none )
+                ( { model
+                    | transcriptLoading = False
+                    , sessionActionError = Just "已切换任务，但任务记录无法解码。"
+                  }
+                , Cmd.none
+                )
 
     else
-        ( model, Cmd.none )
+        ( { model
+            | transcriptLoading = False
+            , sessionActionError = Just ("已切换任务，但记录载入失败：" ++ statusLabel result)
+          }
+        , Cmd.none
+        )
 
 
 sessionMetaDecoder : Decoder SessionMeta
@@ -6257,20 +6228,11 @@ nullableBool =
 
 requestThreadSwitch : String -> Model -> ( Model, Cmd Msg )
 requestThreadSwitch threadId model =
-    if threadId == model.threadId || model.pendingSwitch /= Nothing then
+    if threadId == model.threadId then
         ( model, Cmd.none )
 
-    else if isBusy model.phase then
-        ( { model | sessionActionError = Just "请先结束当前运行。" }, Cmd.none )
-
     else
-        ( { model | pendingSwitch = Just threadId, sessionActionError = Nothing }
-        , fetchInspection model
-            ("switch/" ++ threadId ++ "/transcript")
-            "GET"
-            Nothing
-            ("threads/" ++ threadId ++ "/transcript")
-        )
+        switchThread threadId model
 
 
 freshSessionId : String -> Model -> String
@@ -6300,13 +6262,22 @@ sessionTitle threadId remote =
 switchThread : String -> Model -> ( Model, Cmd Msg )
 switchThread newId model =
     let
+        title =
+            sessionTitle newId model.sessions
+                |> Maybe.withDefault newId
+
         next =
             resetThreadState newId model
 
         ( configured, configCmd ) =
             ensureConfigLoaded { next | tree = Loading }
     in
-    ( { configured | sessions = Loading, pendingSwitch = Nothing }
+    ( { configured
+        | sessions = Loading
+        , currentTaskBelongs = True
+        , sessionTitleDraft = title
+        , sessionActionError = Nothing
+      }
     , Cmd.batch
         [ if isBusy model.phase then
             cancelCurrent model
@@ -6331,6 +6302,7 @@ resetThreadState newId model =
         , messages = Dict.empty
         , messageOrder = []
         , tools = Dict.empty
+        , transcriptLoading = True
         , phase = Idle
         , activeRun = Nothing
         , runNumber = 0
@@ -6597,7 +6569,7 @@ viewIncarnationRail model =
             [ div [ Attr.class "sigil" ] [ text "Y/N" ]
             , span [ Attr.class "rail-wordmark" ] [ text "YUKI.N" ]
             ]
-        , div [ Attr.class "rail-label" ] [ text "分身" ]
+        , div [ Attr.class "rail-label" ] [ text "YUKI" ]
         , div [ Attr.class "incarnation-list" ] (viewIncarnationList model)
         , button
             [ Attr.class "new-incarnation"
@@ -6612,7 +6584,7 @@ viewIncarnationRail model =
             , Events.onClick OpenIncarnationForm
             ]
             [ span [] [ text "+" ]
-            , span [] [ text "新分身" ]
+            , span [] [ text "新 YUKI" ]
             ]
         , viewArchivedIncarnations model
         , div [ Attr.class "rail-system" ]
@@ -6990,9 +6962,9 @@ viewNoCurrentTask : Html Msg
 viewNoCurrentTask =
     div [ Attr.class "no-current-task" ]
         [ span [ Attr.class "eyebrow" ] [ text "运行适配边界" ]
-        , h2 [ Attr.class "snapshot-title" ] [ text "这个分身还没有任务" ]
+        , h2 [ Attr.class "snapshot-title" ] [ text "这位 YUKI 还没有任务" ]
         , p [ Attr.class "boundary-copy" ]
-            [ text "Direct Intent 的无任务运行接口尚未接通；现在创建任务，避免把另一个分身的 thread 错挂到这里。" ]
+            [ text "Direct Intent 的无任务运行接口尚未接通；现在创建任务，避免把另一位 YUKI 的 thread 错挂到这里。" ]
         , button
             [ Attr.class "send-button"
             , Attr.type_ "button"
@@ -7023,10 +6995,10 @@ viewTasks model =
     main_ [ Attr.class "page tasks-page" ]
         [ div [ Attr.class "page-heading" ]
             [ div []
-                [ span [ Attr.class "eyebrow" ] [ text "属于此分身" ]
+                [ span [ Attr.class "eyebrow" ] [ text "属于这位 YUKI" ]
                 , h2 [ Attr.class "page-title" ] [ text "任务" ]
                 , p [ Attr.class "page-description" ]
-                    [ text "任务承载一次具体工作；原始记录成为可回溯经历，但人格与提炼记忆仍属于分身。" ]
+                    [ text "任务承载一次具体工作；原始记录成为可回溯经历，但人格与提炼记忆仍属于这位 YUKI。" ]
                 ]
             , button
                 [ Attr.class "send-button"
@@ -7043,7 +7015,7 @@ viewTasks model =
                     [ span [ Attr.class "eyebrow" ] [ text "当前任务" ]
                     , h2 [ Attr.class "snapshot-title" ] [ text (currentTaskTitle model) ]
                     , p [ Attr.class "task-objective" ]
-                        [ text "目标与约束由当前任务上下文承载；分身的长期方向与记忆仍独立于它。" ]
+                        [ text "目标与约束由当前任务上下文承载；这位 YUKI 的长期方向与记忆仍独立于它。" ]
                     , div [ Attr.class "snapshot-meta" ]
                         [ meta "thread" model.threadId
                         , meta "state" (phaseLabel model)
@@ -7148,7 +7120,7 @@ viewImpressionPane model =
 viewImpressionState : ImpressionStateView -> Html Msg
 viewImpressionState state =
     if List.isEmpty state.items then
-        note "这个分身尚未形成稳定印象。"
+        note "这位 YUKI 尚未形成稳定印象。"
 
     else
         div []
@@ -7332,7 +7304,7 @@ viewLongMemoryPane model =
             [ span [ Attr.class "eyebrow" ] [ text "可回溯的长期记忆" ]
             , h2 [ Attr.class "section-heading-title" ] [ text "经历是原件，提炼是索引" ]
             , p [ Attr.class "boundary-copy" ]
-                [ text "Task Archive 保存同一分身全部 Task（含归档）的原始记录；提炼记录可修订、可作废、可由原件重建。两者都不会在未检索时预载正文。" ]
+                [ text "Task Archive 保存这位 YUKI 的全部 Task（含归档）的原始记录；提炼记录可修订、可作废、可由原件重建。两者都不会在未检索时预载正文。" ]
             ]
         , nav [ Attr.class "memory-record-modes", Attr.attribute "aria-label" "长期记忆类型" ]
             [ memoryRecordModeButton model TaskRecordMode "任务记录" "原始经历"
@@ -7408,7 +7380,7 @@ viewTaskRecordPane model =
                     [ text
                         (state.taskId
                             |> Maybe.map (\taskId -> "范围 · " ++ taskId)
-                            |> Maybe.withDefault "范围 · 本分身全部 Task（含归档）"
+                            |> Maybe.withDefault "范围 · 这位 YUKI 的全部 Task（含归档）"
                         )
                     ]
                 , span [ Attr.class "task-search-law" ] [ text "literal · 不做语义扩写" ]
@@ -7456,7 +7428,7 @@ viewTaskRecordCatalog model state =
 
             OptionalLoaded catalog ->
                 if List.isEmpty catalog then
-                    note "这个分身还没有可检索的任务记录。"
+                    note "这位 YUKI 还没有可检索的任务记录。"
 
                 else
                     div [ Attr.class "task-catalog-summary" ]
@@ -7482,7 +7454,7 @@ taskScopeAllButton state =
         , Events.onClick (TaskRecordTaskChanged "")
         ]
         [ span [ Attr.class "task-scope-name" ] [ text "全部 Task" ]
-        , span [ Attr.class "task-scope-preview" ] [ text "本分身完整任务历史，含已归档 Task" ]
+        , span [ Attr.class "task-scope-preview" ] [ text "这位 YUKI 的完整任务历史，含已归档 Task" ]
         ]
 
 
@@ -7671,11 +7643,6 @@ viewTaskRecordReader model =
                     [ button
                         [ Attr.class "send-button"
                         , Attr.type_ "button"
-                        , Attr.disabled
-                            (model.pendingSwitch
-                                /= Nothing
-                                || (context.taskId /= model.threadId && isBusy model.phase)
-                            )
                         , Events.onClick (ContinueTaskRecord context.taskId)
                         ]
                         [ text
@@ -7902,7 +7869,7 @@ viewDistilledRecordPane model =
             OptionalIdle ->
                 div [ Attr.class "memory-blank" ]
                     [ span [ Attr.class "memory-blank-mark" ] [ text "∅" ]
-                    , p [] [ text "提炼正文保持关闭，直到你或 Yuki 明确发起 grep。" ]
+                    , p [] [ text "提炼正文保持关闭，直到你或这位 YUKI 明确发起 grep。" ]
                     ]
 
             OptionalLoading ->
@@ -8034,7 +8001,7 @@ viewSleepControl model =
         div [ Attr.class "sleep-control" ]
             (if model.compactConfirm then
             [ p [ Attr.class "boundary-copy" ]
-                [ text "Yuki 会冻结当前短期记忆，先决定主动遗忘什么，再生成 WakePacket，并在同一任务中醒来继续。" ]
+                [ text "这位 YUKI 会冻结当前短期记忆，先决定主动遗忘什么，再生成 WakePacket，并在同一任务中醒来继续。" ]
             , div [ Attr.class "session-file-actions" ]
                 [ button
                     [ Attr.class "ghost-button"
@@ -8237,7 +8204,7 @@ viewSelf model =
                 [ promptLayer "01" "Root Constitution" "所有 Coordinator 与 Worker 共用的根律；可审计、版本化。"
                 , promptLayer "02" "Composite Incarnation Charter" "一次生成方向、风格、判断倾向、工具、记忆与自我管理协议；可审计、修改、激活。"
                 , promptLayer "03" "Workspace Contract" "项目规范与当前工作目录的真实约束，只在相关任务中生效。"
-                , promptLayer "04" "Task / Run Spec" "只为一次任务或执行生成，不反向定义分身。"
+                , promptLayer "04" "Task / Run Spec" "只为一次任务或执行生成，不反向定义这位 YUKI。"
                 ]
             , p [ Attr.class "boundary-copy" ]
                 [ text "Root 与 Charter 保留 source、generator、model invocation、effective hash 与历史版本；Workspace 与 Task 层由配置和 Journal 留痕。" ]
@@ -8261,11 +8228,11 @@ viewIncarnationLifecycle model =
     section [ Attr.class "incarnation-lifecycle" ]
         [ div []
             [ span [ Attr.class "eyebrow" ] [ text "生命周期" ]
-            , h2 [ Attr.class "section-heading-title" ] [ text "移除这个分身" ]
+            , h2 [ Attr.class "section-heading-title" ] [ text "移除这位 YUKI" ]
             , p [ Attr.class "boundary-copy" ]
                 [ text
                     (if model.incarnationId == "yuki" then
-                        "默认 Yuki 承担系统回退，不能移除。切换到其它分身后，可在这里移除。"
+                        "默认 YUKI 承担系统回退，不能移除。切换到另一位 YUKI 后，可在这里移除。"
 
                      else
                         "移除后，它会从常用列表消失，所属任务一并归档；记忆、经验、Prompt 与审计记录不会被物理擦除。"
@@ -8273,7 +8240,7 @@ viewIncarnationLifecycle model =
                 ]
             ]
         , if model.incarnationId == "yuki" then
-            span [ Attr.class "revision-chip" ] [ text "默认分身" ]
+            span [ Attr.class "revision-chip" ] [ text "默认 YUKI" ]
 
           else
             button
@@ -8285,7 +8252,7 @@ viewIncarnationLifecycle model =
                     )
                 , Events.onClick RequestArchiveIncarnation
                 ]
-                [ text "移除分身" ]
+                [ text "移除 YUKI" ]
         ]
 
 
@@ -8300,7 +8267,7 @@ viewIncarnationArchiveConfirmation model =
                 [ span [ Attr.class "eyebrow" ] [ text "可恢复移除" ]
                 , h2 [ Attr.class "form-title" ] [ text ("移除「" ++ model.incarnation.name ++ "」？") ]
                 , p [ Attr.class "boundary-copy" ]
-                    [ text "该分身的活动任务会同时归档，正在运行的任务会阻止本次操作。所有记忆、经验、Prompt 与来源记录仍会保留，并可从左栏恢复分身。" ]
+                    [ text "这位 YUKI 的活动任务会同时归档，正在运行的任务会阻止本次操作。所有记忆、经验、Prompt 与来源记录仍会保留，并可从左栏恢复。" ]
                 , model.selfMessage
                     |> Maybe.map (\message -> p [ Attr.class "section-note error" ] [ text message ])
                     |> Maybe.withDefault (text "")
@@ -8691,13 +8658,7 @@ viewSessions model =
                     ]
                     [ text "导入" ]
                 ]
-            , case model.pendingSwitch of
-                Just _ ->
-                    p [ Attr.class "section-note" ] [ text "切换中…" ]
-
-                Nothing ->
-                    text ""
-                , Maybe.map (\message -> p [ Attr.class "section-note error" ] [ text message ]) model.sessionActionError
+            , Maybe.map (\message -> p [ Attr.class "section-note error" ] [ text message ]) model.sessionActionError
                     |> Maybe.withDefault (text "")
                 ]
 
@@ -8724,7 +8685,7 @@ viewSessionList model =
                     List.filter (\session -> model.showArchived || not session.archived) sessions
             in
             if List.isEmpty visible then
-                note "这个分身尚无任务"
+                note "这位 YUKI 尚无任务"
 
             else
                 div [ Attr.class "session-list" ] (List.map (viewSessionRow model) visible)
@@ -8742,7 +8703,14 @@ viewSessionRow model session =
         [ button
             [ Attr.class "session-switch"
             , Attr.type_ "button"
-            , Attr.disabled (session.id == model.threadId || model.pendingSwitch /= Nothing || isBusy model.phase)
+            , Attr.disabled (session.id == model.threadId)
+            , Attr.title
+                (if isBusy model.phase then
+                    "切换任务；当前运行会先中止"
+
+                 else
+                    "切换到此任务"
+                )
             , Events.onClick (SwitchSession session.id)
             ]
             [ span [ Attr.class "session-title" ] [ text session.title ]
@@ -9076,7 +9044,7 @@ viewConfigForm model =
     in
     div []
         [ p [ Attr.class "section-note config-hint" ]
-            [ text "cwd 明确区分继承、无目录与指定目录；其余项留空即继承全局。任务级 legacy systemPrompt 不在此编辑，避免一次任务反向定义分身。" ]
+            [ text "cwd 明确区分继承、无目录与指定目录；其余项留空即继承全局。任务级 legacy systemPrompt 不在此编辑，避免一次任务反向定义这位 YUKI。" ]
         , div [ Attr.class "form-field" ]
             [ span [ Attr.class "field-label" ] [ text "工作目录 cwd" ]
             , div [ Attr.class "field-suggestions" ]
@@ -9535,14 +9503,14 @@ viewAudit model =
                 [ span [ Attr.class "eyebrow" ] [ text "Root / system plane" ]
                 , h2 [ Attr.class "page-title" ] [ text "系统审计" ]
                 , p [ Attr.class "page-description" ]
-                    [ text "低频检查层：Run、Journal、Replay 与工件。旧 brief / facts 不再作为分身记忆呈现。" ]
+                    [ text "低频检查层：Run、Journal、Replay 与工件。旧 brief / facts 不再作为 YUKI 的记忆呈现。" ]
                 ]
             , button
                 [ Attr.class "ghost-button"
                 , Attr.type_ "button"
                 , Events.onClick (SelectTab SelfTab)
                 ]
-                [ text "返回分身" ]
+                [ text "返回 YUKI" ]
             ]
         , div [ Attr.class "audit-grid" ]
             [ viewRunsSection model
@@ -9560,9 +9528,9 @@ viewIncarnationForm model =
         Just draft ->
             div [ Attr.class "overlay" ]
                 [ div [ Attr.class "session-form incarnation-form" ]
-                    [ h2 [ Attr.class "form-title" ] [ text "新分身" ]
+                    [ h2 [ Attr.class "form-title" ] [ text "新 YUKI" ]
                     , p [ Attr.class "boundary-copy" ]
-                        [ text "定义方向即可。系统会生成首个 Charter 草案；无需手写完整 system prompt。" ]
+                        [ text "每位 YUKI 都有自己的身份、方向与记忆。定义这一位的方向即可；系统会生成首个 Charter 草案。" ]
                     , div [ Attr.class "form-field" ]
                         [ span [ Attr.class "field-label" ] [ text "稳定 ID" ]
                         , input
@@ -9576,7 +9544,7 @@ viewIncarnationForm model =
                         [ span [ Attr.class "field-label" ] [ text "名称" ]
                         , input
                             [ Attr.value draft.name
-                            , Attr.placeholder "例如：研究 Yuki"
+                            , Attr.placeholder "例如：研究 YUKI"
                             , Attr.disabled draft.saving
                             , Events.onInput IncarnationNameChanged
                             ]
@@ -9652,7 +9620,7 @@ viewSessionForm model =
                         [ span [ Attr.class "field-label" ] [ text "任务 ID" ]
                         , input [ Attr.value form.targetId, Attr.disabled True ] []
                         , p [ Attr.class "field-inherit-hint" ]
-                            [ text ("归属分身 · " ++ model.incarnation.name ++ " / " ++ model.incarnationId) ]
+                            [ text ("归属 YUKI · " ++ model.incarnation.name ++ " / " ++ model.incarnationId) ]
                         ]
                     , div [ Attr.class "form-field" ]
                         [ span [ Attr.class "field-label" ] [ text "名称" ]
@@ -9730,7 +9698,10 @@ toggleRow labelText checked field =
 
 viewTranscript : Model -> List (Html Msg)
 viewTranscript model =
-    if Dict.isEmpty model.messages then
+    if model.transcriptLoading then
+        [ note "正在恢复任务记录…" ]
+
+    else if Dict.isEmpty model.messages then
         [ viewEmptyState ]
 
     else
@@ -9742,7 +9713,7 @@ viewTranscript model =
 viewEmptyState : Html Msg
 viewEmptyState =
     section [ Attr.class "empty-state" ]
-        [ h2 [ Attr.class "empty-title" ] [ text "把意图交给这个 Yuki。" ]
+        [ h2 [ Attr.class "empty-title" ] [ text "把意图交给这位 YUKI。" ]
         , p [ Attr.class "empty-description" ]
             [ text "可以提问、交付工作或纠正它。系统应先判断路由；只有持续工作才形成任务。" ]
         , div [ Attr.class "suggestions" ]
@@ -10276,22 +10247,28 @@ viewComposer model =
 
         pending =
             hasPendingFrontendTool model
+
+        blocked =
+            model.transcriptLoading || pending
     in
     section [ Attr.class "composer-zone" ]
         [ viewQuickConfig model
         , form [ Attr.class "composer", Events.onSubmit Submit ]
             [ textarea
                 [ Attr.placeholder <|
-                    if pending then
+                    if model.transcriptLoading then
+                        "正在恢复任务记录…"
+
+                    else if pending then
                         "请先处理上方的工具请求…"
 
                     else if busy then
                         "输入对当前运行的引导，或排入回答后的下一轮…"
 
                     else
-                        "交给这个 Yuki：提问、工作或纠正…"
+                        "交给这位 YUKI：提问、工作或纠正…"
                 , Attr.value model.draft
-                , Attr.disabled pending
+                , Attr.disabled blocked
                 , Attr.rows 2
                 , Events.onInput DraftChanged
                 ]
@@ -10317,7 +10294,7 @@ viewComposer model =
                     [ span [] [ text "POST" ]
                     , input
                         [ Attr.value model.endpoint
-                        , Attr.disabled busy
+                        , Attr.disabled (model.transcriptLoading || busy)
                         , Attr.attribute "aria-label" "AG-UI endpoint"
                         , Events.onInput EndpointChanged
                         ]
@@ -10352,7 +10329,7 @@ viewComposer model =
                         [ button
                             [ Attr.class "composer-tool"
                             , Attr.type_ "button"
-                            , Attr.disabled (lastUserIndex model == Nothing || pending)
+                            , Attr.disabled (lastUserIndex model == Nothing || blocked)
                             , Attr.title "保留最后一条用户消息，重新生成其后的回答"
                             , Events.onClick RetryLast
                             ]
@@ -10367,7 +10344,7 @@ viewComposer model =
                         , button
                             [ Attr.class "send-button"
                             , Attr.type_ "submit"
-                            , Attr.disabled (String.isEmpty (String.trim model.draft) || pending)
+                            , Attr.disabled (String.isEmpty (String.trim model.draft) || blocked)
                             ]
                             [ text "发送" ]
                         ]

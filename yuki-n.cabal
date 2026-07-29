@@ -1,8 +1,8 @@
 cabal-version: 3.0
 name:          yuki-n
 version:       0.1.0.0
-synopsis:      Agent runtime and AG-UI backend
-description:   A provider-configurable agent runtime with an AG-UI SSE backend.
+synopsis:      资讯统合思念体对有机生命体接触用人形界面
+description:   资讯统合思念体对有机生命体接触用人形界面
 homepage:      https://github.com/aemaeth-me/YUKI.N
 bug-reports:   https://github.com/aemaeth-me/YUKI.N/issues
 license:       BSD-3-Clause

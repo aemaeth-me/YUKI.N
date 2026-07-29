@@ -1,4 +1,4 @@
-import { postAgentControl } from "./control.js";
+import { contextualizeAgentEvent, postAgentControl } from "./control.js";
 import { copyToClipboard } from "./clipboard.js";
 import { createTranscriptScrollController } from "./scroll.js";
 
@@ -73,9 +73,9 @@ let active;
 const transport = (kind, extra = {}) =>
   app.ports.transportEvent.send({ kind, ...extra });
 
-const decodeEvent = (payload) => {
+const decodeEvent = (payload, context) => {
   try {
-    app.ports.agentEvent.send(JSON.parse(payload));
+    app.ports.agentEvent.send(contextualizeAgentEvent(payload, context));
   } catch (error) {
     throw new Error(`invalid AG-UI event: ${error.message}`);
   }
@@ -148,7 +148,12 @@ const run = async (command) => {
     if (!response.body) throw new Error("streaming response body unavailable");
 
     transport("open", { runId: command.runId });
-    await consumeSse(response.body, decodeEvent);
+    await consumeSse(response.body, (payload) =>
+      decodeEvent(payload, {
+        threadId: command.input.threadId,
+        runId: command.runId,
+      }),
+    );
     if (active?.token === token) transport("closed", { runId: command.runId });
   } catch (error) {
     if (active?.token !== token) return;

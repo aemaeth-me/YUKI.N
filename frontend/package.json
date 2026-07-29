@@ -1,6 +1,7 @@
 {
   "name": "yuki-n-ag-ui-elm",
   "version": "0.1.0",
+  "description": "资讯统合思念体对有机生命体接触用人形界面",
   "private": true,
   "type": "module",
   "scripts": {

@@ -1,7 +1,10 @@
 # YUKI.N
 
-分身本位的本地单用户 Agent runtime。Incarnation 是持续主体；task/thread 只是一次工作；
-transcript 是执行投影，短期记忆、长期记忆与印象分别治理。运行边界仍使用 AG-UI：
+> 资讯统合思念体对有机生命体接触用人形界面
+
+YUKI 本位的本地单用户 Agent runtime。YUKI.N 容纳一位位持续存在、各自记得、
+各自成形的 YUKI；每位对应一个 Incarnation。task/thread 只是一次工作，transcript
+只是执行投影；短期记忆、长期记忆与印象分别治理。运行边界仍使用 AG-UI：
 `POST /agent` 返回 SSE 事件流。
 
 ## 本机运行

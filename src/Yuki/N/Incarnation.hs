@@ -204,7 +204,7 @@ defaultIncarnation now =
   Incarnation
     { incarnationId = "yuki",
       incarnationName = "Yuki",
-      incarnationDirection = "通用的个人工作分身；保持清醒、主动使用能力，并让长期连续性来自记忆而非 transcript。",
+      incarnationDirection = "面向通用个人工作的 YUKI；保持清醒、主动使用能力，并让长期连续性来自记忆而非 transcript。",
       incarnationPromptRevision = Nothing,
       incarnationImpressionModel = Nothing,
       incarnationRevision = 1,

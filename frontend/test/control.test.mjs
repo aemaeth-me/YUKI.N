@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { agentActionUrl, postAgentControl } from "../web/control.js";
+import {
+  agentActionUrl,
+  contextualizeAgentEvent,
+  postAgentControl,
+} from "../web/control.js";
 
 test("derives control endpoints beside the configured agent endpoint", () => {
   assert.equal(
@@ -37,6 +41,33 @@ test("posts run controls with their semantic payload", async () => {
     runId: "run-1",
     text: "hold on",
   });
+});
+
+test("binds every streamed event to its originating task and run", () => {
+  assert.deepEqual(
+    contextualizeAgentEvent('{"type":"TEXT_MESSAGE_CONTENT","delta":"x"}', {
+      threadId: "task-a",
+      runId: "run-a",
+    }),
+    {
+      type: "TEXT_MESSAGE_CONTENT",
+      delta: "x",
+      threadId: "task-a",
+      runId: "run-a",
+    },
+  );
+
+  assert.deepEqual(
+    contextualizeAgentEvent(
+      '{"type":"RUN_STARTED","threadId":"server-task","runId":"server-run"}',
+      { threadId: "client-task", runId: "client-run" },
+    ),
+    {
+      type: "RUN_STARTED",
+      threadId: "server-task",
+      runId: "server-run",
+    },
+  );
 });
 
 test("surfaces failed control requests", async () => {

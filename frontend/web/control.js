@@ -10,6 +10,15 @@ export const agentActionUrl = (
   return new URL(`agent/${action}`, root);
 };
 
+export const contextualizeAgentEvent = (payload, context) => {
+  const event = JSON.parse(payload);
+  return {
+    ...event,
+    threadId: event.threadId ?? context.threadId,
+    runId: event.runId ?? context.runId,
+  };
+};
+
 export const postAgentControl = async (
   command,
   action,
