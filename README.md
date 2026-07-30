@@ -33,6 +33,20 @@ provider。backend 默认使用 `18080`，frontend 默认使用 `15173`。两个
 `YUKI_MEMORY_DIR` 可另定其根目录，`YUKI_MEMORY_MODEL` 可为 Prompt、Sleep 与
 Impression 的内部调用指定模型；未指定时沿用主模型。
 
+### 单次运行的轮次保护
+
+`YUKI_MAX_TURNS` 限制一次 run 内的模型调用轮数，默认 `32`。它是 YUKI.N
+的本地防失控保护，不是 provider API 或上下文窗口的限制：模型若反复调用工具、
+工具结果又令模型继续调用，理论上可以永不结束，同时持续消耗时间与 API 配额。
+达到上限时，运行返回 `MAX_TURNS_EXCEEDED`，并保留已经产生的记录。
+
+确属长任务时可在启动前提高，例如 `YUKI_MAX_TURNS=64 ./yuki`；若普通任务触发，
+应先从运行审计中检查重复工具调用或未能收敛的计划。该值改变后须重启服务。
+
+界面会区分本地轮次保护、provider、持久化、未分类运行时异常与浏览器传输错误，
+同时保留错误码和原始详情；历史中的旧式
+`AGENT_ERROR · maximum agent turns exceeded` 也按本地轮次保护解释。
+
 HTTP 入口为 `POST /agent`，最小请求体：
 
 ```json

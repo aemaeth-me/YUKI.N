@@ -701,6 +701,36 @@ summary {
   color: var(--green-deep);
 }
 
+.markdown table {
+  display: block;
+  width: 100%;
+  margin: 0 0 0.9em;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-family: Inter, "Noto Sans SC", sans-serif;
+  font-size: 0.84em;
+  line-height: 1.55;
+}
+
+.markdown th,
+.markdown td {
+  min-width: 84px;
+  padding: 7px 10px;
+  border: 1px solid rgba(232, 201, 144, 0.18);
+  text-align: left;
+  vertical-align: top;
+}
+
+.markdown th {
+  color: var(--amber);
+  background: rgba(232, 201, 144, 0.08);
+  font-weight: 600;
+}
+
+.markdown tbody tr:nth-child(even) {
+  background: rgba(156, 232, 216, 0.025);
+}
+
 .stream-caret::after {
   content: "";
   display: inline-block;
@@ -972,6 +1002,8 @@ summary {
   background: rgba(239, 155, 145, 0.05);
   font-size: 12px;
   line-height: 1.6;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .latest-button {

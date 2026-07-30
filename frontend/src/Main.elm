@@ -2126,7 +2126,7 @@ receiveTransportEvent raw model =
                         ( { model
                             | phase = Failed
                             , activeRun = Nothing
-                            , error = Just "SSE 流在终止事件前关闭。"
+                            , error = Just (transportErrorMessage "SSE 流在终止事件前关闭。")
                           }
                         , Cmd.none
                         )
@@ -2153,7 +2153,7 @@ receiveTransportEvent raw model =
                             | phase = Failed
                             , activeRun = Nothing
                             , activeStep = Nothing
-                            , error = Just message
+                            , error = Just (transportErrorMessage message)
                           }
                         , Cmd.none
                         )
@@ -2196,7 +2196,7 @@ applyAgentEvent event model =
                 , activeRun = Nothing
                 , activeStep = Nothing
                 , terminalSeen = True
-                , error = Just (Maybe.withDefault "RUN_ERROR" code ++ " · " ++ message)
+                , error = Just (runErrorMessage message code)
             }
 
         StepStarted name ->
@@ -2558,7 +2558,12 @@ classifySubEvent nested =
                 |> Result.withDefault SubIgnored
 
         Ok "RUN_ERROR" ->
-            Decode.decodeValue (Decode.field "message" Decode.string) nested
+            Decode.decodeValue
+                (Decode.map2 runErrorMessage
+                    (Decode.field "message" Decode.string)
+                    (Decode.maybe (Decode.field "code" Decode.string))
+                )
+                nested
                 |> Result.map SubFailed
                 |> Result.withDefault (SubFailed "子代理运行失败")
 
@@ -8887,7 +8892,7 @@ renderGlobal global =
         , div [ Attr.class "run-meta" ]
             [ meta "host" global.settings.host
             , meta "port" (String.fromInt global.settings.port_)
-            , meta "maxTurns" (String.fromInt global.settings.maxTurns)
+            , meta "maxTurns · 单次运行" (String.fromInt global.settings.maxTurns)
             , meta "toolExecution" global.settings.toolExecution
             , meta "workDir" (maybeDash global.settings.workDir)
             , meta "journalDir" (maybeDash global.settings.journalDir)
@@ -8898,6 +8903,8 @@ renderGlobal global =
             , meta "contextKeepUnits" (String.fromInt global.settings.contextKeepUnits)
             , meta "contextSummaryTokens" (String.fromInt global.settings.contextSummaryTokens)
             ]
+        , p [ Attr.class "section-note" ]
+            [ text "maxTurns 是 YUKI.N 的本地防失控保护，用于截断无限模型／工具循环；它不是 API 或上下文窗口限制。由 YUKI_MAX_TURNS 设置，重启后生效。" ]
         ]
 
 
@@ -9710,6 +9717,20 @@ viewTranscript model =
             |> (\banner -> banner :: List.concatMap (viewMessage model) (orderedMessages model))
 
 
+markdownOptions : Markdown.Options
+markdownOptions =
+    { githubFlavored = Just { tables = True, breaks = False }
+    , defaultHighlighting = Nothing
+    , sanitize = True
+    , smartypants = False
+    }
+
+
+renderMarkdown : String -> Html msg
+renderMarkdown =
+    Markdown.toHtmlWith markdownOptions []
+
+
 viewEmptyState : Html Msg
 viewEmptyState =
     section [ Attr.class "empty-state" ]
@@ -9793,7 +9814,7 @@ viewMessage model message =
 
                     else if assistant.complete then
                         [ div [ Attr.class "message-copy markdown" ]
-                            [ Markdown.toHtml [] assistant.content ]
+                            [ renderMarkdown assistant.content ]
                         ]
 
                     else
@@ -10112,6 +10133,76 @@ toolStageClass stage =
 viewError : String -> Html Msg
 viewError message =
     div [ Attr.class "error-banner" ] [ text message ]
+
+
+runErrorMessage : String -> Maybe String -> String
+runErrorMessage message code =
+    let
+        resolved =
+            if
+                code
+                    == Just "AGENT_ERROR"
+                    && String.contains "maximum agent turns exceeded" (String.toLower message)
+            then
+                Just "MAX_TURNS_EXCEEDED"
+
+            else
+                code
+
+        describe title source action =
+            String.join "\n"
+                [ title ++ "（" ++ Maybe.withDefault "RUN_ERROR" resolved ++ "）"
+                , source
+                , action
+                , "原始详情：" ++ message
+                ]
+    in
+    case resolved of
+        Just "MAX_TURNS_EXCEEDED" ->
+            describe
+                "运行已停止：达到单次运行的模型轮次上限"
+                "来源：YUKI.N 本地运行保护，不是模型 API 报错。它用于阻止模型与工具陷入无限循环，避免时间与 API 配额失控。"
+                "处理：检查是否存在重复工具调用；确属长任务时，可调整 YUKI_MAX_TURNS 并重启。"
+
+        Just "PROVIDER_ERROR" ->
+            describe
+                "模型服务调用失败"
+                "来源：provider 调用链，通常涉及上游 API、网络、鉴权、配额或模型响应。"
+                "处理：依据原始详情检查 provider 配置与服务状态。"
+
+        Just "PERSISTENCE_ERROR" ->
+            describe
+                "运行结果持久化失败"
+                "来源：YUKI.N 本地存储层；模型可能已经完成回复。"
+                "处理：检查数据目录、磁盘空间与文件权限。"
+
+        Just "UNHANDLED_ERROR" ->
+            describe
+                "后端发生未分类异常"
+                "来源：YUKI.N 本地运行时；这不是 provider API 的错误分类。"
+                "处理：依据原始异常文本与运行审计定位代码路径。"
+
+        Just "AGENT_ERROR" ->
+            describe
+                "代理运行失败"
+                "来源：YUKI.N 代理运行层，不属于模型 API 错误分类。"
+                "处理：依据原始详情与运行审计定位失败阶段。"
+
+        _ ->
+            describe
+                "运行失败"
+                "来源：尚未被更具体的错误码分类。"
+                "处理：保留错误码与原始详情，并在运行审计中查看终止前事件。"
+
+
+transportErrorMessage : String -> String
+transportErrorMessage message =
+    String.join "\n"
+        [ "连接运行后端失败（TRANSPORT_ERROR）"
+        , "来源：浏览器与 YUKI.N 后端之间的 HTTP／SSE 传输，不是 provider API 的错误分类。"
+        , "处理：检查后端进程、endpoint、代理配置与本机网络。"
+        , "原始详情：" ++ message
+        ]
 
 
 viewQuickConfig : Model -> Html Msg
@@ -11077,7 +11168,13 @@ applyEventRow row conversation =
                 |> Maybe.withDefault conversation
 
         Just "RUN_ERROR" ->
-            Maybe.map (\message -> openBlock ("error/" ++ String.fromInt row.seq) (CRunError message) conversation)
+            Maybe.map
+                (\message ->
+                    openBlock
+                        ("error/" ++ String.fromInt row.seq)
+                        (CRunError (runErrorMessage message (field "code")))
+                        conversation
+                )
                 (field "message")
                 |> Maybe.withDefault conversation
 
@@ -11276,7 +11373,7 @@ viewConvBlock block =
                 div [ Attr.class "message-row assistant" ]
                     [ div [ Attr.class "message" ]
                         [ p [ Attr.class "message-label" ] [ text "YUKI.N" ]
-                        , div [ Attr.class "message-copy markdown" ] [ Markdown.toHtml [] content ]
+                        , div [ Attr.class "message-copy markdown" ] [ renderMarkdown content ]
                         ]
                     ]
 
@@ -11435,7 +11532,7 @@ viewSubBody sub =
                 []
 
             else
-                [ div [ Attr.class "memory-copy markdown" ] [ Markdown.toHtml [] sub.content ] ]
+                [ div [ Attr.class "memory-copy markdown" ] [ renderMarkdown sub.content ] ]
            )
 
 

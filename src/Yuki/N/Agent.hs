@@ -215,7 +215,12 @@ runAgent runtime input emit =
           runtimeSteer = maybe (runtimeSteer runtime) (\registry _ -> drainSteering registry runId) (runtimeRuns runtime),
           runtimeFollowUp = maybe (runtimeFollowUp runtime) (\registry _ -> drainFollowUps registry runId) (runtimeRuns runtime)
         }
-    emit' event = recordMaybe journal (AgentEventEntry event) *> observeEvent hooks input event *> emit event
+    emit' event = recordMaybe journal (AgentEventEntry event) *> observeEvent hooks input event *> deliver event
+    deliver event = try @SomeException (emit event) >>= either relay pure
+    relay exception
+      | isJust (fromException exception :: Maybe RunCancelled) = throwIO exception
+      | isJust (fromException exception :: Maybe SomeAsyncException) = throwIO exception
+      | otherwise = throwIO (DeliveryFailure exception)
     hooks = runtimeHooks runtime
     settle checkpoint =
       newIORef False >>= \accounted ->
@@ -260,8 +265,11 @@ runAgent runtime input emit =
     terminal checkpoint =
       (Completed <$> runCore runtime' input emit' checkpoint)
         `catches` [ Handler (\RunCancelled {} -> pure Cancelled),
-                    Handler (\(AgentFailure message) -> pure (Failed message "AGENT_ERROR")),
-                    Handler (\(ProviderFailure message) -> pure (Failed message "PROVIDER_ERROR"))
+                    Handler (\(AgentFailure code message) -> pure (Failed message code)),
+                    Handler (\(ProviderFailure message) -> pure (Failed message "PROVIDER_ERROR")),
+                    Handler (\(DeliveryFailure exception) -> throwIO exception),
+                    Handler (\(exception :: SomeAsyncException) -> throwIO exception),
+                    Handler (\(exception :: SomeException) -> pure (Failed (Text.pack (displayException exception)) "UNHANDLED_ERROR"))
                   ]
 trySync :: IO value -> IO (Either Text value)
 trySync action =
@@ -308,19 +316,24 @@ renderId :: Integer -> Int -> Text
 renderId micros unique =
   "yuki-" <> Text.pack (show micros) <> "-" <> Text.pack (show unique)
 
-newtype AgentFailure = AgentFailure Text
+data AgentFailure = AgentFailure Text Text
   deriving stock (Show)
 
 instance Exception AgentFailure
 
+newtype DeliveryFailure = DeliveryFailure SomeException
+  deriving stock (Show)
+
+instance Exception DeliveryFailure
+
 failAgent :: Text -> IO value
-failAgent = throwIO . AgentFailure
+failAgent = throwIO . AgentFailure "AGENT_ERROR"
 
 runCore :: Runtime -> AGUI.RunAgentInput -> (Event -> IO ()) -> IORef [ChatMessage] -> IO [ChatMessage]
 runCore runtime input emit checkpoint =
   mkContext
     >>= \runContext ->
-      either (throwIO . AgentFailure) pure (initialMessages runtime input) >>= loop runContext 1
+      either failAgent pure (initialMessages runtime input) >>= loop runContext 1
   where
     hooks = runtimeHooks runtime
     tools = availableTools runtime input
@@ -332,7 +345,14 @@ runCore runtime input emit checkpoint =
 
     loop runContext stepNum history
       | stepNum > runtimeMaxTurns runtime =
-          throwIO (AgentFailure "maximum agent turns exceeded")
+          throwIO
+            ( AgentFailure
+                "MAX_TURNS_EXCEEDED"
+                ( "YUKI.N stopped this run after reaching its configured limit of "
+                    <> Text.pack (show (runtimeMaxTurns runtime))
+                    <> " model turns (YUKI_MAX_TURNS); this local guard prevents unbounded model/tool loops."
+                )
+            )
       | otherwise =
           runtimeSteer runtime stepNum >>= appendSteering stepNum history >>= \history' ->
             spliceContext runtime runContext history'

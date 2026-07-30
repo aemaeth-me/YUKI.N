@@ -375,6 +375,8 @@ agentTests =
     [ testCase "streams reasoning and text through normalized AG-UI events" reasoningEvents,
       testCase "executes backend tools concurrently and continues the model loop" parallelTools,
       testCase "hands client tools back without another model call" frontendTools,
+      testCase "classifies the local model-turn guard distinctly" turnLimitError,
+      testCase "surfaces an unexpected synchronous exception with its detail" unexpectedError,
       testCase "emits RUN_ERROR without a following RUN_FINISHED" runError
     ]
 
@@ -481,6 +483,36 @@ verifyFrontend calls events =
             (all ((/= "TOOL_CALL_RESULT") . eventType) events),
           eventType (last events) @?= "RUN_FINISHED"
         ]
+
+turnLimitError :: Assertion
+turnLimitError =
+  testRuntime looping [echoTool] Sequential >>= \base ->
+    collectEvents base {runtimeMaxTurns = 1} (sampleInput []) >>= \events ->
+      case [(message, code) | RunError message code <- events] of
+        [(message, code)] ->
+          sequence_
+            [ code @?= Just "MAX_TURNS_EXCEEDED",
+              assertBool "error identifies the configured local limit" ("1 model turns" `Text.isInfixOf` message),
+              assertBool "error identifies the configuration key" ("YUKI_MAX_TURNS" `Text.isInfixOf` message)
+            ]
+        failures -> assertFailure ("expected one turn-limit error, got " <> show failures)
+  where
+    looping =
+      fakeModel $ \_ emit ->
+        emit (ModelToolCallDelta 0 (Just "call-echo") (Just "echo") "{}") $> ToolUse
+
+unexpectedError :: Assertion
+unexpectedError =
+  testRuntime okModel [] Parallel >>= \base ->
+    let hooks = defaultHooks {transformContext = \_ _ -> ioError (userError "context transformer exploded")}
+     in collectEvents base {runtimeHooks = hooks} (sampleInput []) >>= \events ->
+          case [(message, code) | RunError message code <- events] of
+            [(message, code)] ->
+              sequence_
+                [ code @?= Just "UNHANDLED_ERROR",
+                  assertBool "error retains the original exception detail" ("context transformer exploded" `Text.isInfixOf` message)
+                ]
+            failures -> assertFailure ("expected one unhandled error, got " <> show failures)
 
 runError :: Assertion
 runError =
