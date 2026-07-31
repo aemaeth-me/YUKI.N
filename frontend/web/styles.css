@@ -6,12 +6,12 @@
   --surface-strong: color-mix(in srgb, #1e211c 12%, #d0dac6);
   --ink: #1e211c;
   --ink-soft: #3a3e36;
-  --quiet: #575b4d;
+  --quiet: #4c5043;
   --green: #3c4a37;
   --alert: #823a26;
-  --working: #456b78;
-  --success: #4f6b46;
-  --warning: #8a642d;
+  --working: #3a5c68;
+  --success: #425c3a;
+  --warning: #6f501b;
   --voice: "Iowan Old Style", "Source Serif Pro", Charter, "Noto Serif SC",
     "Songti SC", serif;
   --whisper: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Noto Sans SC",
@@ -166,7 +166,7 @@ button:disabled {
   place-items: center;
   background: var(--surface);
   font-family: var(--voice);
-  font-size: 0.72rem;
+  font-size: 0.75rem;
 }
 
 .identity-button.current .identity-mark {
@@ -177,10 +177,10 @@ button:disabled {
 .identity-name {
   overflow: hidden;
   opacity: 0;
-  font-size: 0.68rem;
+  font-size: 0.75rem;
   letter-spacing: 0.08em;
   text-overflow: ellipsis;
-  transition: opacity 0.5s ease;
+  transition: opacity 0.25s ease;
   white-space: nowrap;
 }
 
@@ -206,15 +206,41 @@ button:disabled {
 }
 
 .archived-yuki {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--quiet);
+  font-size: 0.75rem;
+}
+
+.archived-yuki-actions {
   display: flex;
   justify-content: space-between;
   gap: 0.8rem;
-  color: var(--quiet);
-  font-size: 0.7rem;
 }
 
 .archived-yuki button {
   color: var(--green);
+}
+
+.archived-yuki-delete {
+  color: var(--alert);
+}
+
+.delete-yuki-confirm {
+  padding: 0.5rem 0.6rem;
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+}
+
+.delete-yuki-confirm p {
+  margin: 0 0 0.5rem;
+}
+
+.delete-yuki-confirm > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
 }
 
 .eyebrow,
@@ -251,8 +277,8 @@ button:disabled {
   opacity: 0;
   transform: translateY(-8px);
   transition:
-    opacity 1.2s ease,
-    transform 1.2s ease;
+    opacity 0.35s ease,
+    transform 0.35s ease;
   pointer-events: none;
 }
 
@@ -262,10 +288,11 @@ button:disabled {
   left: 50%;
   color: var(--quiet);
   font-family: var(--whisper);
-  font-size: 9px;
+  font-size: 12px;
   letter-spacing: 0.18em;
   transform: translateX(-50%);
-  transition: opacity 0.5s ease;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
 }
 
 .top-edge:hover .top-edge-hint,
@@ -285,7 +312,7 @@ button:disabled {
   font-family: var(--whisper);
   font-size: 12px;
   letter-spacing: 0.2em;
-  transition: color 0.8s ease;
+  transition: color 0.25s ease;
 }
 
 .top-nav button:hover {
@@ -308,11 +335,6 @@ button:disabled {
   overflow-y: auto;
   padding: 7.8rem 2rem 8.5rem;
   scroll-behavior: smooth;
-  scrollbar-width: none;
-}
-
-.field::-webkit-scrollbar {
-  display: none;
 }
 
 .field:focus-visible {
@@ -327,7 +349,7 @@ button:disabled {
 
 .turn {
   margin: 0 0 2.75rem;
-  transition: color 1.2s ease;
+  transition: color 0.5s ease;
 }
 
 .turn .who {
@@ -358,7 +380,7 @@ button:disabled {
 
 .turn.yuki.in-flight .answer {
   color: var(--ink-soft);
-  transition: color 1.2s ease;
+  transition: color 0.5s ease;
 }
 
 .depth-mid,
@@ -741,7 +763,7 @@ button:disabled {
   text-decoration: underline;
   text-decoration-color: transparent;
   text-underline-offset: 0.22em;
-  transition: text-decoration-color 0.8s ease;
+  transition: text-decoration-color 0.3s ease;
 }
 
 .probe:hover > summary,
@@ -852,7 +874,7 @@ button:disabled {
   font-family: var(--voice);
   font-size: 18px;
   line-height: 1.6;
-  transition: border-color 0.8s ease;
+  transition: border-color 0.3s ease;
 }
 
 .write-line::placeholder {
@@ -903,7 +925,7 @@ button:disabled {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   opacity: 0;
-  transition: opacity 1s ease;
+  transition: opacity 0.3s ease;
 }
 
 .write:focus-within .write-hint {
@@ -979,10 +1001,9 @@ button:disabled {
   opacity: 0;
   transform: translateX(10px);
   transition:
-    opacity 1.3s ease,
-    transform 1.3s ease;
+    opacity 0.4s ease,
+    transform 0.4s ease;
   pointer-events: none;
-  scrollbar-width: none;
 }
 
 .right-edge:hover .memory-margin,
@@ -1016,14 +1037,14 @@ button:disabled {
 
 .margin-item p {
   margin: 0.2rem 0;
-  font-size: 0.86rem;
+  font-size: 0.9rem;
   line-height: 1.7;
 }
 
 .margin-label {
   color: var(--quiet);
   font-family: var(--whisper);
-  font-size: 10px !important;
+  font-size: 12px !important;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
@@ -1031,7 +1052,7 @@ button:disabled {
 .margin-note {
   margin: 1.8rem 0;
   color: var(--quiet);
-  font-size: 0.82rem;
+  font-size: 0.88rem;
   font-style: italic;
 }
 
@@ -1048,7 +1069,7 @@ button:disabled {
   z-index: 6;
   right: 2rem;
   bottom: 1.55rem;
-  transition: opacity 1s ease;
+  transition: opacity 0.4s ease;
 }
 
 .presence {
@@ -1077,8 +1098,8 @@ button:disabled {
   opacity: 0;
   transform: translateY(8px);
   transition:
-    opacity 0.9s ease,
-    transform 0.9s ease;
+    opacity 0.3s ease,
+    transform 0.3s ease;
   pointer-events: none;
 }
 
@@ -1136,11 +1157,15 @@ button:disabled {
   margin: 0 auto;
   overflow-y: auto;
   padding: 7rem 0 5rem;
-  scrollbar-width: none;
 }
 
-.paper-page::-webkit-scrollbar {
-  display: none;
+.tasks-page,
+.capabilities-page {
+  --measure: 46rem;
+}
+
+.self-page {
+  --measure: 42rem;
 }
 
 .page-intro {
@@ -1327,7 +1352,7 @@ button:disabled {
   max-width: 28rem;
   margin: 0.4rem 0 0;
   color: var(--quiet);
-  font-size: 0.86rem;
+  font-size: 0.9rem;
 }
 
 .impression-list,
@@ -1766,7 +1791,7 @@ button.primary {
 .self-manifest p {
   margin: 0;
   color: var(--ink-soft);
-  font-size: 0.82rem;
+  font-size: 0.88rem;
 }
 
 .self-editor {
@@ -2411,11 +2436,24 @@ button.primary {
   z-index: 8;
   top: 1.55rem;
   right: 2rem;
+  display: flex;
+  gap: 0.8rem;
+  align-items: center;
   max-width: 24rem;
   margin: 0;
+  padding: 0.35rem 0.7rem;
+  color: var(--ink-soft);
+  background: color-mix(in srgb, var(--paper) 92%, var(--ink));
+  font-family: var(--whisper);
+  font-size: 12px;
+}
+
+.notice-dismiss {
+  flex: 0 0 auto;
   color: var(--quiet);
   font-family: var(--whisper);
-  font-size: 11px;
+  font-size: 14px;
+  line-height: 1;
 }
 
 @media (max-width: 900px) {
@@ -2496,8 +2534,7 @@ button.primary {
   }
 
   .presence-wrap {
-    right: 1rem;
-    bottom: 4.25rem;
+    display: none;
   }
 
   .right-edge {
@@ -2578,7 +2615,7 @@ button.primary {
     right: 1rem;
     bottom: auto;
     left: 1rem;
-    text-align: right;
+    justify-content: space-between;
   }
 }
 
@@ -2591,4 +2628,116 @@ button.primary {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
   }
+}
+
+/* Readability floors: interactive/metadata text is never below 12px. */
+.top-edge-hint,
+.tool-state,
+.tool-history,
+.tool-history-action,
+.tool-history-note,
+.tool-material summary,
+.tool-target,
+.tool-verb,
+.write-hint,
+.write-actions,
+.latest,
+.edge-rail,
+.presence,
+.margin-more,
+.margin-head button,
+.section-heading button,
+.context-head button,
+.memory-tabs,
+.memory-search button,
+.case-toggle,
+.search-stats,
+.source,
+.snippet-meta,
+.strength,
+.task-row-meta,
+.task-id,
+.row-action,
+.text-action,
+.page-actions button,
+.page-actions button.primary,
+.task-provenance span,
+.rename-task label,
+.revision-label,
+.prompt-revision,
+.prompt-buttons button,
+.prompt-entry summary,
+.prompt-editor label,
+.choice-row button,
+.config-form > label,
+.dialog-actions button,
+.replay-check button,
+.audit-facets button,
+.task-record-search button,
+.task-record-more,
+.memory-snippet-actions button,
+.remember-form button,
+.tree-section .section-heading button,
+.global-config-source,
+.context-time,
+.prompt-lineage,
+.run-summary span,
+.trace-heading span:last-child,
+.journal-row summary,
+.archived-yuki,
+.archived-yuki button,
+.sub-agent,
+.capability-id,
+.endpoint-note,
+.notice-dismiss {
+  font-size: 12px;
+}
+
+/* Raw code / JSON dumps get a modest floor so dense audit material stays legible. */
+.journal-row pre,
+.run-trace pre,
+.replay-check pre,
+.artifact pre,
+.global-config-source pre,
+.tree-material,
+.prompt-entry pre,
+.raw-memory pre,
+.task-record-entry pre,
+.run-summary p,
+.run-card span:first-child,
+.archive-id,
+.trace-artifacts button,
+.artifact summary button,
+.prompt-editor input,
+.prompt-editor textarea {
+  font-size: 0.72rem;
+}
+
+/* Thin, visible scrollbars instead of fully hidden ones. */
+.field,
+.paper-page,
+.memory-margin {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--quiet) 45%, transparent) transparent;
+}
+
+.field::-webkit-scrollbar,
+.paper-page::-webkit-scrollbar,
+.memory-margin::-webkit-scrollbar {
+  width: 8px;
+}
+
+.field::-webkit-scrollbar-thumb,
+.paper-page::-webkit-scrollbar-thumb,
+.memory-margin::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--quiet) 45%, transparent);
+  background-clip: content-box;
+}
+
+.field::-webkit-scrollbar-track,
+.paper-page::-webkit-scrollbar-track,
+.memory-margin::-webkit-scrollbar-track {
+  background: transparent;
 }

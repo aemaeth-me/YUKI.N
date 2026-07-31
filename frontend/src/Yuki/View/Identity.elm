@@ -69,7 +69,7 @@ archivedYukis model =
                         ]
                         [ text ("·" ++ String.fromInt (List.length archived)) ]
                     , if model.showArchivedYukis then
-                        div [ Attr.class "identity-archive-list" ] (List.map archivedYuki archived)
+                        div [ Attr.class "identity-archive-list" ] (List.map (archivedYuki model) archived)
 
                       else
                         text ""
@@ -79,15 +79,39 @@ archivedYukis model =
             text ""
 
 
-archivedYuki : Incarnation -> Html Msg
-archivedYuki yuki =
+archivedYuki : Model -> Incarnation -> Html Msg
+archivedYuki model yuki =
     div [ Attr.class "archived-yuki" ]
-        [ span [] [ text yuki.name ]
-        , button
-            [ Attr.type_ "button"
-            , Events.onClick (RestoreYuki yuki.id yuki.revision)
+        [ span [ Attr.class "archived-yuki-name" ] [ text yuki.name ]
+        , div [ Attr.class "archived-yuki-actions" ]
+            [ button
+                [ Attr.type_ "button"
+                , Events.onClick (RestoreYuki yuki.id yuki.revision)
+                ]
+                [ text "恢复" ]
+            , button
+                [ Attr.class "archived-yuki-delete"
+                , Attr.type_ "button"
+                , Events.onClick (DeleteYuki yuki.id yuki.revision)
+                ]
+                [ text "删除" ]
             ]
-            [ text "恢复" ]
+        , if model.deleteYukiConfirm == Just ( yuki.id, yuki.revision ) then
+            div [ Attr.class "delete-yuki-confirm", Attr.attribute "role" "alert" ]
+                [ p [] [ text "连同任务与记忆一并删除，不可恢复。" ]
+                , div []
+                    [ button [ Attr.type_ "button", Events.onClick CancelDeleteYuki ] [ text "取消" ]
+                    , button
+                        [ Attr.class "danger-action"
+                        , Attr.type_ "button"
+                        , Events.onClick ConfirmDeleteYuki
+                        ]
+                        [ text "确认删除" ]
+                    ]
+                ]
+
+          else
+            text ""
         ]
 
 

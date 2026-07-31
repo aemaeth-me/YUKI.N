@@ -31,6 +31,7 @@ import qualified Yuki.N.AGUI.Types as AGUI
 import Yuki.N.Agent (BackendTool (..), Runtime (..), compactHistory, newId, runAgent, runtimeContextWindow, toChatMessages)
 import Yuki.N.Config (Settings (..))
 import Yuki.N.Cognition
+import qualified Yuki.N.Cognition as Cognition
 import Yuki.N.Context
   ( Compaction (..),
     ContextConfig (..),
@@ -211,6 +212,7 @@ application cors inspection configs runs runtimeFor request respond =
     route "PATCH" ["incarnations", incarnationId] = withCognition (updateIncarnation incarnationId)
     route "POST" ["incarnations", incarnationId, "archive"] = withCognition (archiveIncarnation incarnationId)
     route "POST" ["incarnations", incarnationId, "restore"] = withCognition (restoreIncarnation incarnationId)
+    route "POST" ["incarnations", incarnationId, "delete"] = withCognition (deleteIncarnation incarnationId)
     route "GET" ["prompts", "root"] = withCognition rootPrompts
     route "POST" ["prompts", "root"] = withCognition editRootPrompt
     route "POST" ["prompts", "root", promptId, "activate"] =
@@ -406,6 +408,18 @@ application cors inspection configs runs runtimeFor request respond =
       withBody "invalid incarnation restore request: " $ \(ActivatePromptRequest expected) ->
         incarnationRestore (cognitionIncarnations cognition) identifier expected
           >>= respond . either cognitionError ok
+    deleteIncarnation identifier cognition =
+      withBody "invalid incarnation delete request: " $ \(ActivatePromptRequest expected) ->
+        Cognition.deleteIncarnation cognition identifier expected >>= \case
+          Left failure -> respond (cognitionError failure)
+          Right _ ->
+            maybe
+              (respond (ok (object ["deleted" .= identifier])))
+              ( \service ->
+                  deleteIncarnationSessions service identifier
+                    *> respond (ok (object ["deleted" .= identifier]))
+              )
+              (inspectionSessions =<< inspection)
     archivePreflight cognition identifier expected =
       incarnationRead (cognitionIncarnations cognition) identifier <&> \case
         Nothing -> Left ("unknown incarnation: " <> identifier)
@@ -564,7 +578,7 @@ application cors inspection configs runs runtimeFor request respond =
       withBody "invalid task record search: " $ \(TaskRecordSearchRequest query task kinds sensitive limit offset includeProcess) ->
         taskArchiveGrep
           (cognitionArchive cognition)
-          (ArchiveGrepRequest identifier query task kinds sensitive limit offset includeProcess)
+          (ArchiveGrepRequest identifier query task kinds sensitive limit offset includeProcess Nothing)
           >>= respond . either cognitionError ok
     readTaskRecord identifier entryId cognition =
       taskArchiveRead

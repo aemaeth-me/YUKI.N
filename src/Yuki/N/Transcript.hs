@@ -10,6 +10,7 @@ where
 
 import Control.Concurrent.MVar (newMVar, withMVar)
 import Control.Exception (IOException, try)
+import Control.Monad (when)
 import Data.Aeson (Value, decodeFileStrict, object, (.=))
 import Data.Functor ((<&>))
 import Data.IORef (modifyIORef', newIORef, readIORef)
@@ -17,7 +18,7 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as Text
-import System.Directory (createDirectoryIfMissing)
+import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
 import qualified Yuki.N.AGUI.Types as AGUI
 import Yuki.N.Agent (AgentHooks (..), defaultHooks)
 import Yuki.N.AtomicFile (atomicEncodeFile)
@@ -28,20 +29,26 @@ import Yuki.N.Model (AssistantTurn (..), ChatMessage (..), ModelToolCall (..))
 
 data TranscriptStore = TranscriptStore
   { transcriptSave :: Text -> [ChatMessage] -> IO (),
-    transcriptLoad :: Text -> IO (Maybe [ChatMessage])
+    transcriptLoad :: Text -> IO (Maybe [ChatMessage]),
+    transcriptDelete :: Text -> IO ()
   }
 
 newTranscriptStore :: FilePath -> IO TranscriptStore
 newTranscriptStore dir =
   createDirectoryIfMissing True (transcriptsPath dir)
     *> newMVar ()
-    <&> \lock -> TranscriptStore (save lock) load
+    <&> \lock -> TranscriptStore (save lock) load (delete lock)
   where
     save lock threadId messages =
       withMVar lock (const (atomicEncodeFile (transcriptPath dir threadId) (withoutSystem messages)))
     load threadId =
       either (const Nothing) id
         <$> (try (decodeFileStrict (transcriptPath dir threadId)) :: IO (Either IOException (Maybe [ChatMessage])))
+    delete lock threadId =
+      withMVar lock (const (removeIfExists (transcriptPath dir threadId)))
+
+removeIfExists :: FilePath -> IO ()
+removeIfExists path = doesFileExist path >>= flip when (removeFile path)
 
 newMemoryTranscriptStore :: IO TranscriptStore
 newMemoryTranscriptStore =
@@ -50,6 +57,7 @@ newMemoryTranscriptStore =
       TranscriptStore
         (\threadId -> modifyIORef' transcripts . Map.insert threadId . withoutSystem)
         (\threadId -> Map.lookup threadId <$> readIORef transcripts)
+        (\threadId -> modifyIORef' transcripts (Map.delete threadId))
 
 transcriptHooks :: TranscriptStore -> AgentHooks
 transcriptHooks store = defaultHooks {afterRun = persist}

@@ -485,11 +485,16 @@ entry dir depth name =
     packed = Text.pack name
     classify = doesDirectoryExist full >>= bool (pure [packed]) expand
     expand
+      | isNoiseDirectory name = pure [packed <> "/"]
       | depth <= 1 = pure [packed <> "/"]
       | otherwise =
           sort <$> listDirectory full
             >>= fmap (concatMap (fmap ("  " <>))) . traverse (entry full (depth - 1))
             <&> (packed <> "/" :)
+
+isNoiseDirectory :: FilePath -> Bool
+isNoiseDirectory name =
+  name `elem` [".git", ".hg", ".svn", "node_modules", "dist", "dist-newstyle", ".yuki-n", "elm-stuff", ".elm-home"]
 
 runGlob :: Maybe ArtifactStore -> FilePath -> FsGlob -> IO (Either Text Text)
 runGlob store root (FsGlob pattern path) =

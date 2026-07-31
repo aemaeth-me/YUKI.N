@@ -1,7 +1,8 @@
 module Yuki.View exposing (view)
 
-import Html exposing (Html, div, p, text)
+import Html exposing (Html, button, div, span, text)
 import Html.Attributes as Attr
+import Html.Events as Events
 import Yuki.Types exposing (..)
 import Yuki.View.Capabilities as Capabilities
 import Yuki.View.Conversation as Conversation
@@ -26,7 +27,11 @@ view model =
         , Identity.rail model
         , Edges.top model
         , mainView model
-        , Memory.rail model
+        , if model.page == Memory then
+            text ""
+
+          else
+            Memory.rail model
         , Edges.presence model
         , Tasks.dialog model
         , Identity.dialog model
@@ -59,5 +64,17 @@ mainView model =
 viewNotice : Maybe String -> Html Msg
 viewNotice maybeNotice =
     maybeNotice
-        |> Maybe.map (\message -> p [ Attr.class "paper-notice", Attr.attribute "role" "status" ] [ text message ])
+        |> Maybe.map
+            (\message ->
+                div [ Attr.class "paper-notice", Attr.attribute "role" "status" ]
+                    [ span [] [ text message ]
+                    , button
+                        [ Attr.class "notice-dismiss"
+                        , Attr.type_ "button"
+                        , Attr.attribute "aria-label" "关闭提示"
+                        , Events.onClick ClearNotice
+                        ]
+                        [ text "×" ]
+                    ]
+            )
         |> Maybe.withDefault (text "")

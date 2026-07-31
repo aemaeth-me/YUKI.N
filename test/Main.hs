@@ -2846,6 +2846,7 @@ cognitionTests =
       testCase "keeps tool diagnostics out of impressions" cognitionImpressionDiagnosticGuard,
       testCase "migrates the known false grep impression with provenance" cognitionImpressionFalseMigration,
       testCase "archives and restores non-default incarnations safely" cognitionIncarnationLifecycle,
+      testCase "deletes an archived incarnation and every derived store" cognitionDeleteIncarnation,
       testCase "seeds and activates auditable prompt revisions" cognitionPrompts,
       testCase "upgrades an automatic legacy Root to the Task Archive protocol" cognitionRootMigration,
       testCase "generates charters from the active audited Root revision" cognitionPromptRoot,
@@ -3009,24 +3010,25 @@ cognitionTaskArchiveRetrieval =
       ArchiveRunDraft "other" "task-c" "run-c" Nothing "completed" Nothing
         [entry "user-c" ArchiveUser "NEEDLE must remain isolated." Nothing Nothing Nothing]
     verify store =
-      search store (ArchiveGrepRequest "art" "needle" (Just task) [] False 20 0 False) >>= \insensitive ->
-        search store (ArchiveGrepRequest "art" "needle" (Just task) [] True 20 0 False) >>= \sensitive ->
-          search store (ArchiveGrepRequest "art" "secret-reasoning" Nothing [] False 20 0 False) >>= \defaultReasoning ->
-            search store (ArchiveGrepRequest "art" "secret-reasoning" Nothing [ArchiveReasoning] False 20 0 False) >>= \explicitReasoning ->
-              search store (ArchiveGrepRequest "art" "needle" Nothing [] False 20 0 False) >>= \allOwn ->
-                search store (ArchiveGrepRequest "art" "tool-A-evidence" (Just task) [] False 20 0 False) >>= \anchorSearch ->
-                  search store (ArchiveGrepRequest "art" "repeat" (Just task) [] True 20 0 False) >>= \repeated ->
-                    search store (ArchiveGrepRequest "art" "needle" Nothing [] False 1 0 False) >>= \firstPage ->
-                      search store (ArchiveGrepRequest "art" "needle" Nothing [] False 1 1 False) >>= \secondPage ->
-                        search store (ArchiveGrepRequest "art" "recursive-noise" (Just task) [] True 20 0 False) >>= \processHidden ->
-                          search store (ArchiveGrepRequest "art" "recursive-noise" (Just task) [] True 20 0 True) >>= \processShown ->
+      search store (ArchiveGrepRequest "art" "needle" (Just task) [] False 20 0 False Nothing) >>= \insensitive ->
+        search store (ArchiveGrepRequest "art" "needle" (Just task) [] True 20 0 False Nothing) >>= \sensitive ->
+          search store (ArchiveGrepRequest "art" "secret-reasoning" Nothing [] False 20 0 False Nothing) >>= \defaultReasoning ->
+            search store (ArchiveGrepRequest "art" "secret-reasoning" Nothing [ArchiveReasoning] False 20 0 False Nothing) >>= \explicitReasoning ->
+              search store (ArchiveGrepRequest "art" "needle" Nothing [] False 20 0 False Nothing) >>= \allOwn ->
+                search store (ArchiveGrepRequest "art" "needle" Nothing [] False 20 0 False (Just task)) >>= \excluded ->
+                  search store (ArchiveGrepRequest "art" "tool-A-evidence" (Just task) [] False 20 0 False Nothing) >>= \anchorSearch ->
+                  search store (ArchiveGrepRequest "art" "repeat" (Just task) [] True 20 0 False Nothing) >>= \repeated ->
+                    search store (ArchiveGrepRequest "art" "needle" Nothing [] False 1 0 False Nothing) >>= \firstPage ->
+                      search store (ArchiveGrepRequest "art" "needle" Nothing [] False 1 1 False Nothing) >>= \secondPage ->
+                        search store (ArchiveGrepRequest "art" "recursive-noise" (Just task) [] True 20 0 False Nothing) >>= \processHidden ->
+                          search store (ArchiveGrepRequest "art" "recursive-noise" (Just task) [] True 20 0 True Nothing) >>= \processShown ->
                             taskArchiveTasks store "art" 20 >>= \catalog ->
                               case archiveGrepResultHits anchorSearch of
                                 [anchor] ->
                                   taskArchiveRead store (ArchiveReadRequest "art" (archiveHitEntryId anchor) 0 0 (archiveHitMatchOffset anchor) 256)
-                                    >>= withTextRight (verifyWindow store insensitive sensitive defaultReasoning explicitReasoning allOwn repeated firstPage secondPage processHidden processShown catalog anchor)
+                                    >>= withTextRight (verifyWindow store insensitive sensitive defaultReasoning explicitReasoning allOwn excluded repeated firstPage secondPage processHidden processShown catalog anchor)
                                 hits -> assertFailure ("unexpected Task archive anchor hits: " <> show (length hits))
-    verifyWindow store insensitive sensitive defaultReasoning explicitReasoning allOwn repeated firstPage secondPage processHidden processShown catalog anchor window =
+    verifyWindow store insensitive sensitive defaultReasoning explicitReasoning allOwn excluded repeated firstPage secondPage processHidden processShown catalog anchor window =
       taskArchiveRead store (ArchiveReadRequest "art" (archiveHitEntryId anchor) 0 0 (archiveHitMatchOffset anchor) 1)
         >>= withTextRight
           ( \tiny ->
@@ -3040,6 +3042,7 @@ cognitionTaskArchiveRetrieval =
                         archiveGrepResultHits defaultReasoning @?= [],
                         fmap archiveHitKind (archiveGrepResultHits explicitReasoning) @?= [ArchiveReasoning],
                         sort (fmap archiveHitTaskId (archiveGrepResultHits allOwn)) @?= [task, "task-b"],
+                        sort (fmap archiveHitTaskId (archiveGrepResultHits excluded)) @?= ["task-b"],
                         fmap archiveHitEntryMatchIndex (archiveGrepResultHits repeated) @?= [1, 2, 3],
                         fmap archiveHitEntryMatchCount (archiveGrepResultHits repeated) @?= [3, 3, 3],
                         archiveGrepResultTotalHits firstPage @?= 2,
@@ -3099,17 +3102,17 @@ cognitionTaskArchiveHooks =
               *> afterRunOutcome hooks input RunSucceeded finalMessages
               *> taskArchiveGrep
                 (cognitionArchive cognition)
-                (ArchiveGrepRequest "yuki" "complete-result-sentinel" (Just "raw-hook-task") [] True 20 0 False)
+                (ArchiveGrepRequest "yuki" "complete-result-sentinel" (Just "raw-hook-task") [] True 20 0 False Nothing)
               >>= withTextRight
                 ( \full ->
                     taskArchiveGrep
                       (cognitionArchive cognition)
-                      (ArchiveGrepRequest "yuki" "projected-result-stub" (Just "raw-hook-task") [] True 20 0 False)
+                      (ArchiveGrepRequest "yuki" "projected-result-stub" (Just "raw-hook-task") [] True 20 0 False Nothing)
                       >>= withTextRight
                         ( \stub ->
                             taskArchiveGrep
                               (cognitionArchive cognition)
-                              (ArchiveGrepRequest "yuki" accepted (Just "raw-hook-task") [] True 20 0 False)
+                              (ArchiveGrepRequest "yuki" accepted (Just "raw-hook-task") [] True 20 0 False Nothing)
                               >>= withTextRight
                                 ( \user ->
                                     taskArchiveRuns (cognitionArchive cognition) "yuki" (Just "raw-hook-task") >>= \runs ->
@@ -3652,6 +3655,64 @@ impressionCueWithoutMemoryModel =
           )
       )
       $> Stop
+
+cognitionDeleteIncarnation :: Assertion
+cognitionDeleteIncarnation =
+  withWorkDir $ \dir ->
+    newCognition dir [] Nothing >>= withTextRight (\cognition ->
+      let identity = "yuki-del"
+          incarnationStore = cognitionIncarnations cognition
+       in incarnationCreate incarnationStore identity "Del" "To be deleted." Nothing
+            >>= withTextRight (\created ->
+              let expected = incarnationRevision created
+               in seedStores cognition identity
+                    *> incarnationArchive incarnationStore identity expected
+                    >>= withTextRight (\archived ->
+                      deleteIncarnation cognition identity (incarnationRevision archived)
+                        >>= withTextRight (\_ -> verifyGone cognition identity))))
+  where
+    seedStores cognition identity = do
+      taskArchiveAppend
+        (cognitionArchive cognition)
+        (ArchiveRunDraft identity "del-task" "del-run" (Just "del-intent") "completed" Nothing
+          [ArchiveEntryDraft "user" ArchiveUser "delete me from the archive" Nothing Nothing Nothing])
+        >>= either (ioError . userError . Text.unpack) (const (pure ()))
+      longTermRemember
+        (cognitionLongTerm cognition)
+        (RememberRequest identity MemoryPrivate "preference" "delete me from long-term memory" [] ["src"])
+        >>= either (ioError . userError . Text.unpack) (const (pure ()))
+      let cursor = ExperienceCursor ("experience/" <> identity) 0
+      experienceAppend
+        (cognitionExperiences cognition)
+        Nothing
+        (ExperienceDraft identity "del-op" identity Nothing Nothing Nothing Nothing Nothing "UserInputAccepted" "payload-ref" "payload-hash")
+        >>= either (ioError . userError . Text.unpack) (const (pure ()))
+      workingCreate (cognitionWorking cognition) identity cursor
+        >>= either (ioError . userError . Text.unpack) (const (pure ()))
+      impressionCommit
+        (cognitionImpressions cognition)
+        identity
+        0
+        (emptyImpressionState identity)
+        (ImpressionRevision "del-impression-revision" identity "del-experience" 0 1 "test seed" [] [] "del-invocation" "test/model" 0)
+        >>= either (ioError . userError . Text.unpack) (const (pure ()))
+    verifyGone cognition identity =
+      incarnationList (cognitionIncarnations cognition) >>= \incarnations ->
+        promptList (cognitionIncarnations cognition) (Just identity) >>= \prompts ->
+          taskArchiveTasks (cognitionArchive cognition) identity 20 >>= \archives ->
+            experienceEvents (cognitionExperiences cognition) identity >>= \events ->
+              workingRead (cognitionWorking cognition) identity >>= \working ->
+                longTermCatalog (cognitionLongTerm cognition) identity 20 >>= \catalog ->
+                  impressionRead (cognitionImpressions cognition) identity >>= \impression ->
+                    sequence_
+                      [ assertBool "incarnation record removed" (all ((/= identity) . incarnationId) incarnations),
+                        assertBool "charter prompts removed" (null prompts),
+                        assertBool "task archive removed" (null archives),
+                        assertBool "experience events removed" (null events),
+                        assertBool "working memory removed" (working == Nothing),
+                        assertBool "long-term catalog removed" (null catalog),
+                        assertBool "impression state emptied" (null (impressionItems impression))
+                      ]
 
 cognitionPrompts :: Assertion
 cognitionPrompts =

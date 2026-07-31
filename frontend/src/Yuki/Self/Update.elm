@@ -2,6 +2,7 @@ module Yuki.Self.Update exposing
     ( activatePrompt
     , archive
     , create
+    , delete
     , generatePrompt
     , mapDraft
     , mapPromptEditor
@@ -56,6 +57,7 @@ switch identifier model =
                     , selfDirectionDraft = incarnation.direction
                     , selfImpressionModelDraft = Maybe.withDefault "" incarnation.impressionModel
                     , archiveYukiConfirm = False
+                    , deleteYukiConfirm = Nothing
                     , sessions = Loading
                     , taskReady = False
                     , transcriptLoading = True
@@ -83,6 +85,7 @@ switch identifier model =
                     , tasksOpen = False
                     , memoryPinned = False
                     , page = Conversation
+                    , notice = Nothing
                 }
         in
         ( next
@@ -288,4 +291,16 @@ restore identifier revision model =
             "POST"
             (Just (Encode.object [ ( "expectedRevision", Encode.int revision ) ]))
             ("incarnations/" ++ identifier ++ "/restore")
+    )
+
+
+delete : String -> Int -> Model -> ( Model, Effect )
+delete identifier revision model =
+    ( { model | deleteYukiConfirm = Nothing, selfSaving = True }
+    , Inspect <|
+        Encoder.inspectionRequest model
+            ("yuki/delete/" ++ identifier)
+            "POST"
+            (Just (Encode.object [ ( "expectedRevision", Encode.int revision ) ]))
+            ("incarnations/" ++ identifier ++ "/delete")
     )

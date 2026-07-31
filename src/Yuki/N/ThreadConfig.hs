@@ -26,7 +26,8 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import Network.HTTP.Client (Manager)
-import System.Directory (createDirectoryIfMissing)
+import Control.Monad (when)
+import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
 import Yuki.N.AGUI.Types (toolName)
 import Yuki.N.Agent
 import Yuki.N.Artifact (ArtifactStore, artifactReadToolName)
@@ -154,17 +155,23 @@ instance FromJSON ThreadConfig where
 
 data ThreadConfigStore = ThreadConfigStore
   { threadConfigRead :: Text -> IO ThreadConfig,
-    threadConfigWrite :: Text -> ThreadConfig -> IO ()
+    threadConfigWrite :: Text -> ThreadConfig -> IO (),
+    threadConfigDelete :: Text -> IO ()
   }
 
 newThreadConfigStore :: FilePath -> IO ThreadConfigStore
 newThreadConfigStore dir =
   createDirectoryIfMissing True (configsPath dir)
     *> newMVar ()
-    <&> \lock -> ThreadConfigStore (load dir) (save lock)
+    <&> \lock -> ThreadConfigStore (load dir) (save lock) (delete lock)
   where
     save lock threadId config =
       withMVar lock (const (atomicEncodeFile (configPath dir threadId) config))
+    delete lock threadId =
+      withMVar lock $ \_ ->
+        doesFileExist target >>= flip when (removeFile target)
+      where
+        target = configPath dir threadId
 
 load :: FilePath -> Text -> IO ThreadConfig
 load dir threadId =
@@ -184,6 +191,7 @@ newMemoryThreadConfigStore =
       ThreadConfigStore
         (\threadId -> Map.findWithDefault emptyThreadConfig threadId <$> readIORef configs)
         (\threadId config -> modifyIORef' configs (Map.insert threadId config))
+        (\threadId -> modifyIORef' configs (Map.delete threadId))
 
 resolveRuntime :: Manager -> OpenAIConfig -> Maybe ArtifactStore -> Runtime -> ThreadConfig -> ProviderRegistry -> Map.Map String Text -> IO Runtime
 resolveRuntime manager provider artifacts base config registry keyMap =

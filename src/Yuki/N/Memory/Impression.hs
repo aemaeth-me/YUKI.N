@@ -277,7 +277,8 @@ data ImpressionStore = ImpressionStore
     impressionCommit :: Text -> Int -> ImpressionState -> ImpressionRevision -> IO (Either Text ImpressionState),
     impressionActivationAppend :: ImpressionActivation -> IO (),
     impressionActivations :: Text -> IO [ImpressionActivation],
-    impressionRevisions :: Text -> IO [ImpressionRevision]
+    impressionRevisions :: Text -> IO [ImpressionRevision],
+    impressionDelete :: Text -> IO ()
   }
 
 data ImpressionStoreState = ImpressionStoreState
@@ -347,7 +348,16 @@ mkStore persist lock =
       impressionRevisions = \incarnation ->
         filter ((== incarnation) . impressionRevisionIncarnationId)
           . storeRevisions
-          <$> readMVar lock
+          <$> readMVar lock,
+      impressionDelete = \incarnation ->
+        modifyMVar_ lock $ \state ->
+          let changed =
+                state
+                  { storeStates = Map.delete incarnation (storeStates state),
+                    storeActivations = filter ((/= incarnation) . impressionActivationIncarnationId) (storeActivations state),
+                    storeRevisions = filter ((/= incarnation) . impressionRevisionIncarnationId) (storeRevisions state)
+                  }
+           in changed <$ persist changed
     }
   where
     commit incarnation expected state revision =

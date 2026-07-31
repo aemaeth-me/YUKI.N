@@ -49,6 +49,7 @@ type alias Model =
     , selfSaving : Bool
     , selfError : Maybe String
     , archiveYukiConfirm : Bool
+    , deleteYukiConfirm : Maybe ( String, Int )
     , yukiForm : Maybe YukiDraft
     , showArchivedYukis : Bool
     , prompts : Remote (List PromptRevision)
@@ -601,6 +602,9 @@ type Msg
     | ArchiveYuki
     | ConfirmArchiveYuki
     | CancelArchiveYuki
+    | DeleteYuki String Int
+    | ConfirmDeleteYuki
+    | CancelDeleteYuki
     | RestoreYuki String Int
     | ToggleArchivedYukis
     | RefreshPrompts
@@ -628,6 +632,7 @@ type Msg
     | ToggleMemory
     | ToggleTasks
     | CloseEdges
+    | ClearNotice
     | SwitchTask String
     | CreateTask
     | MemoryQueryChanged String

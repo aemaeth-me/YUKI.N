@@ -10,7 +10,7 @@ where
 
 import Control.Concurrent.MVar
 import Control.Exception (IOException, displayException, try)
-import Control.Monad ((>=>))
+import Control.Monad (forM_, (>=>))
 import Data.Aeson
 import qualified Data.ByteString.Lazy as LazyByteString
 import Data.Functor ((<&>))
@@ -22,7 +22,7 @@ import qualified Data.Text as Text
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
-import System.IO (IOMode (AppendMode), hFlush, withFile)
+import System.IO (IOMode (AppendMode, WriteMode), hFlush, withFile)
 import System.IO.Error (isDoesNotExistError)
 import Yuki.N.Blob (sha256)
 
@@ -116,7 +116,8 @@ data ExperienceStore = ExperienceStore
   { experienceAppend :: Maybe ExperienceCursor -> ExperienceDraft -> IO (Either Text ExperienceEvent),
     experienceReadAfter :: Text -> Int -> IO [ExperienceEvent],
     experienceEvents :: Text -> IO [ExperienceEvent],
-    experienceHead :: Text -> IO ExperienceCursor
+    experienceHead :: Text -> IO ExperienceCursor,
+    experienceDelete :: Text -> IO ()
   }
 
 data ExperienceState = ExperienceState
@@ -130,14 +131,16 @@ emptyState = ExperienceState Map.empty Map.empty
 newExperienceStore :: FilePath -> IO (Either Text ExperienceStore)
 newExperienceStore dir =
   createDirectoryIfMissing True (eventsDir dir)
-    *> loadEvents (eventsPath dir)
-    >>= traverse (newMVar >=> pure . mkStore (appendEventFile (eventsPath dir)))
+    *> loadEvents path
+    >>= traverse (\loaded -> newMVar loaded <&> mkStore (appendEventFile path) (rewriteEvents path))
+  where
+    path = eventsPath dir
 
 newMemoryExperienceStore :: IO ExperienceStore
-newMemoryExperienceStore = newMVar emptyState <&> mkStore (const (pure ()))
+newMemoryExperienceStore = newMVar emptyState <&> mkStore (const (pure ())) (const (pure ()))
 
-mkStore :: (ExperienceEvent -> IO ()) -> MVar ExperienceState -> ExperienceStore
-mkStore persist lock =
+mkStore :: (ExperienceEvent -> IO ()) -> (ExperienceState -> IO ()) -> MVar ExperienceState -> ExperienceStore
+mkStore persist rewrite lock =
   ExperienceStore
     { experienceAppend = append,
       experienceReadAfter = \incarnation seqNo ->
@@ -151,7 +154,15 @@ mkStore persist lock =
         ExperienceCursor (streamId incarnation)
           . Map.findWithDefault 0 incarnation
           . stateHeads
-          <$> readMVar lock
+          <$> readMVar lock,
+      experienceDelete = \incarnation ->
+        () <$ modifyMVar lock (\state ->
+              let changed =
+                    state
+                      { stateEvents = Map.delete incarnation (stateEvents state),
+                        stateHeads = Map.delete incarnation (stateHeads state)
+                      }
+               in rewrite changed *> pure (changed, ()))
     }
   where
     append expected draft =
@@ -228,6 +239,14 @@ appendEventFile :: FilePath -> ExperienceEvent -> IO ()
 appendEventFile path event =
   withFile path AppendMode $ \handle ->
     LazyByteString.hPutStr handle (encode event <> "\n") *> hFlush handle
+
+rewriteEvents :: FilePath -> ExperienceState -> IO ()
+rewriteEvents path state =
+  withFile path WriteMode $ \handle ->
+    forM_ events $ \event ->
+      LazyByteString.hPutStr handle (encode event <> "\n")
+  where
+    events = concat (Map.elems (stateEvents state))
 
 loadEvents :: FilePath -> IO (Either Text ExperienceState)
 loadEvents path =

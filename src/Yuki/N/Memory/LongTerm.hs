@@ -416,7 +416,8 @@ data LongTermStore = LongTermStore
     longTermVoid :: VoidRequest -> IO (Either Text LongMemory),
     longTermSpace :: Text -> MemoryVisibility -> IO (Either Text MemorySpace),
     longTermCatalog :: Text -> Int -> IO [MemoryCatalogItem],
-    longTermReceipts :: Text -> IO [MemoryReadReceipt]
+    longTermReceipts :: Text -> IO [MemoryReadReceipt],
+    longTermDelete :: Text -> IO ()
   }
 
 data LongTermState = LongTermState
@@ -489,7 +490,19 @@ makeStore persist lock =
       longTermVoid = void persist lock,
       longTermSpace = inspectSpace lock,
       longTermCatalog = catalog lock,
-      longTermReceipts = receipts lock
+      longTermReceipts = receipts lock,
+      longTermDelete = \incarnation ->
+        () <$ modifyMVar lock (\state ->
+              let changed =
+                    state
+                      { stateSpaces = Map.filter ((/= incarnation) . memorySpaceOwner) (stateSpaces state),
+                        stateMemories =
+                          Map.filter (not . Map.null)
+                            . Map.map (Map.filter ((/= incarnation) . longMemoryOwner))
+                            $ stateMemories state,
+                        stateReceipts = Map.filter ((/= incarnation) . memoryReadReceiptIncarnationId) (stateReceipts state)
+                      }
+               in persist changed *> pure (changed, ()))
     }
 
 prepareDirectory :: FilePath -> IO (Either Text ())

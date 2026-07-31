@@ -13,6 +13,7 @@ module Yuki.N.Cognition
     cognitionSleepMessages,
     cognitionTools,
     compileIncarnationPrompt,
+    deleteIncarnation,
     ensureIncarnation,
     newCognition,
     rootConstitution,
@@ -923,7 +924,7 @@ cognitionTools cognition incarnation =
   where
     identity = incarnationId incarnation
     named tool = (AGUI.toolName (backendToolSpec tool), tool)
-    grepMemory _ call =
+    grepMemory context call =
       taskArchiveGrep
         (cognitionArchive cognition)
         ( ArchiveGrepRequest
@@ -935,6 +936,7 @@ cognitionTools cognition incarnation =
             (fromMaybe 20 (grepCallLimit call))
             (fromMaybe 0 (grepCallOffset call))
             (grepCallIncludeProcess call)
+            (if grepCallTaskId call == Nothing then Just (toolContextThreadId context) else Nothing)
         )
     readMemory _ call =
       taskArchiveRead
@@ -1085,7 +1087,7 @@ grepSpec, readSpec, inspectSpec, updateSpec, sleepSpec :: AGUI.ToolSpec
 grepSpec =
   toolSpec
     "memory_grep"
-    "Deterministically scan this incarnation's Task archive for a fixed string. Source evidence is ranked before derived assistant text; memory_grep/memory_read process records are excluded unless includeProcess is true. Pagination and source completeness are explicit. Follow source hits with bounded memory_read before relying on them."
+    "Deterministically scan this incarnation's Task archive for a fixed string. The current task is excluded by default since its transcript is already in context; pass an explicit taskId to search a specific task including the current one. Source evidence is ranked before derived assistant text; memory_grep/memory_read process records are excluded unless includeProcess is true. Pagination and source completeness are explicit. Follow source hits with bounded memory_read before relying on them."
     ( object
         [ "query" .= stringSchema,
           "taskId" .= stringSchema,
@@ -2034,6 +2036,47 @@ withIncarnationLock cognition identity action =
         Nothing ->
           newMVar () >>= \lock ->
             pure (Map.insert identity lock locks, lock)
+
+deleteIncarnation :: Cognition -> Text -> Int -> IO (Either Text ())
+deleteIncarnation cognition identifier expected =
+  incarnationRead (cognitionIncarnations cognition) identifier >>= \case
+    Nothing -> pure (Left ("unknown incarnation: " <> identifier))
+    Just incarnation
+      | identifier == "yuki" -> pure (Left "default incarnation yuki cannot be deleted")
+      | incarnationRevision incarnation /= expected ->
+          pure (Left (staleIncarnation expected (incarnationRevision incarnation)))
+      | incarnationStatus incarnation /= IncarnationArchived ->
+          pure (Left ("incarnation is not archived: " <> identifier))
+      | otherwise ->
+          deleteStores cognition identifier *> deleteRecord
+  where
+    deleteRecord =
+      incarnationDelete (cognitionIncarnations cognition) identifier expected
+        >>= either (pure . Left) (const (pure (Right ())))
+    deleteStores cognition identifier =
+      taskArchiveDeleteIncarnation (cognitionArchive cognition) identifier
+        >>= either (pure . Left) (const (deleteDerived cognition identifier))
+    deleteDerived cognition identifier =
+      impressionDelete (cognitionImpressions cognition) identifier
+        *> experienceDelete (cognitionExperiences cognition) identifier
+        *> workingDelete (cognitionWorking cognition) identifier
+        *> longTermDelete (cognitionLongTerm cognition) identifier
+        *> contextEpochDeleteIncarnation (cognitionContexts cognition) identifier
+        *> clearCaches cognition identifier
+        *> pure (Right ())
+    clearCaches cognition identifier =
+      modifyMVar_ (cognitionSleepRequests cognition) (pure . Set.filter ((/= identifier) . fst))
+        *> modifyMVar_ (cognitionActivationCache cognition) (pure . Map.filterWithKey (\key _ -> firstOfThree key /= identifier))
+        *> modifyMVar_ (cognitionContextCache cognition) (pure . Map.filterWithKey (\key _ -> firstOfThree key /= identifier))
+        *> modifyMVar_ (cognitionRunLocks cognition) (pure . Map.delete identifier)
+    firstOfThree (a, _, _) = a
+
+staleIncarnation :: Int -> Int -> Text
+staleIncarnation expected actual =
+  "stale incarnation revision: expected "
+    <> Text.pack (show expected)
+    <> ", actual "
+    <> Text.pack (show actual)
 
 suffixAfterLastUser :: [ChatMessage] -> [ChatMessage]
 suffixAfterLastUser = reverse . takeWhile notUser . reverse

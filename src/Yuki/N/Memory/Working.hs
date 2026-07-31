@@ -435,7 +435,8 @@ data WorkingStore = WorkingStore
     workingReadWakePacket :: Text -> IO (Maybe WakePacket),
     workingReadSleepCycle :: Text -> IO (Maybe SleepCycle),
     workingSleepCycles :: Text -> IO [SleepCycle],
-    workingRecover :: Text -> ExperienceCursor -> IO (Either Text WorkingMemoryHead)
+    workingRecover :: Text -> ExperienceCursor -> IO (Either Text WorkingMemoryHead),
+    workingDelete :: Text -> IO ()
   }
 
 data WorkingState = WorkingState
@@ -505,7 +506,17 @@ mkStore persist lock =
           . Map.elems
           . stateSleepCycles
           <$> readMVar lock,
-      workingRecover = recover
+      workingRecover = recover,
+      workingDelete = \incarnation ->
+        () <$ modifyMVar lock (\state ->
+              let changed =
+                    state
+                      { stateHeads = Map.delete incarnation (stateHeads state),
+                        stateCheckpoints = Map.filter ((/= incarnation) . workingCheckpointIncarnationId) (stateCheckpoints state),
+                        stateWakePackets = Map.filter ((/= incarnation) . wakePacketIncarnationId) (stateWakePackets state),
+                        stateSleepCycles = Map.filter ((/= incarnation) . sleepCycleIncarnationId) (stateSleepCycles state)
+                      }
+               in persist changed *> pure (changed, ()))
     }
   where
     create incarnation cursor

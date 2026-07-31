@@ -225,7 +225,9 @@ Task 的 active / archived 状态不参与 archive ownership，也不缩小默�
 - `memory_read(entryId, offset?, chars?, before?, after?)`
 
 `memory_grep` 是确定性的固定字符串扫描，不做 embedding、语义改写或隐藏 query
-扩写；未指定 `taskId` 时扫描当前分身全部 Task，包括已归档 Task。它只返回稳定
+扩写；未指定 `taskId` 时扫描当前分身全部 Task（包括已归档 Task），但默认排除
+**当前任务**——当前任务的 transcript 已在上下文里，不应充当可回忆的长期记忆；
+需要检索当前任务时显式传入 `taskId`。它只返回稳定
 task / run / entry 锚点与受限 excerpt。
 
 `memory_read` 只接受精确 entry id，并按字符切片及前后条数读取有界窗口；若需更多正文，

@@ -194,7 +194,8 @@ data ContextEpochStore = ContextEpochStore
     contextEpochRead :: Text -> IO (Maybe ContextEpoch),
     contextEpochList :: Text -> Text -> IO [ContextEpoch],
     contextSegmentRead :: Text -> IO (Maybe ContextSegment),
-    contextEpochProject :: Text -> IO (Either Text [(ContextSegment, Text)])
+    contextEpochProject :: Text -> IO (Either Text [(ContextSegment, Text)]),
+    contextEpochDeleteIncarnation :: Text -> IO ()
   }
 
 data ContextState = ContextState
@@ -249,7 +250,8 @@ mkStore persist blobs lock =
           . stateEpochs
           <$> readMVar lock,
       contextSegmentRead = \identifier -> Map.lookup identifier . stateSegments <$> readMVar lock,
-      contextEpochProject = project
+      contextEpochProject = project,
+      contextEpochDeleteIncarnation = deleteIncarnation persist lock
     }
   where
     commit incarnation task expected inputs wake =
@@ -331,6 +333,25 @@ materializeSegments blobs incarnation task =
         (segmentInputCausalGroup input)
         (segmentInputTurnGroup input)
         now
+
+deleteIncarnation :: (ContextState -> IO ()) -> MVar ContextState -> Text -> IO ()
+deleteIncarnation persist lock incarnation =
+  () <$ modifyMVar lock (\state ->
+        let owned = Map.filter ((== incarnation) . contextEpochIncarnationId) (stateEpochs state)
+            segmentIds = Set.fromList (concatMap contextEpochSegmentIds (Map.elems owned))
+            keptEpochs = Map.filter ((/= incarnation) . contextEpochIncarnationId) (stateEpochs state)
+            keptSegments = Map.filterWithKey (\key _ -> Set.notMember key segmentIds) (stateSegments state)
+            keptHeads =
+              Map.filterWithKey
+                (\_ epochId -> maybe True ((/= incarnation) . contextEpochIncarnationId) (Map.lookup epochId (stateEpochs state)))
+                (stateHeads state)
+            changed =
+              state
+                { stateEpochs = keptEpochs,
+                  stateSegments = keptSegments,
+                  stateHeads = keptHeads
+                }
+         in persist changed *> pure (changed, ()))
 
 epochHash :: Text -> Text -> Int -> [Text] -> Maybe Text -> Text
 epochHash incarnation task revision segments wake =

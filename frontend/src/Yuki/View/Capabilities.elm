@@ -242,7 +242,7 @@ treeView model =
                     quiet "目录为空。"
 
                 else
-                    pre [ Attr.class "tree-material" ] [ text (String.join "\n" paths) ]
+                    pre [ Attr.class "tree-material" ] [ text (String.join "\n" (List.take 400 paths)) ]
         ]
 
 

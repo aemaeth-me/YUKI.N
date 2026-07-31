@@ -256,7 +256,8 @@ data ArchiveGrepRequest = ArchiveGrepRequest
     archiveGrepCaseSensitive :: Bool,
     archiveGrepLimit :: Int,
     archiveGrepOffset :: Int,
-    archiveGrepIncludeProcess :: Bool
+    archiveGrepIncludeProcess :: Bool,
+    archiveGrepExcludeTaskId :: Maybe Text
   }
   deriving stock (Eq, Show)
 
@@ -270,7 +271,8 @@ instance ToJSON ArchiveGrepRequest where
         "caseSensitive" .= archiveGrepCaseSensitive request,
         "limit" .= archiveGrepLimit request,
         "offset" .= archiveGrepOffset request,
-        "includeProcess" .= archiveGrepIncludeProcess request
+        "includeProcess" .= archiveGrepIncludeProcess request,
+        "excludeTaskId" .= archiveGrepExcludeTaskId request
       ]
 
 instance FromJSON ArchiveGrepRequest where
@@ -284,6 +286,7 @@ instance FromJSON ArchiveGrepRequest where
       <*> fields .:? "limit" .!= defaultGrepLimit
       <*> fields .:? "offset" .!= 0
       <*> fields .:? "includeProcess" .!= False
+      <*> fields .:? "excludeTaskId"
 
 data ArchiveHit = ArchiveHit
   { archiveHitEntryId :: Text,
@@ -462,7 +465,8 @@ data TaskArchiveStore = TaskArchiveStore
     taskArchiveRecent :: Text -> Int -> IO [ArchiveEntryCatalog],
     taskArchiveGrep :: ArchiveGrepRequest -> IO (Either Text ArchiveGrepResult),
     taskArchiveRead :: ArchiveReadRequest -> IO (Either Text ArchiveReadResult),
-    taskArchiveRuns :: Text -> Maybe Text -> IO [ArchiveRun]
+    taskArchiveRuns :: Text -> Maybe Text -> IO [ArchiveRun],
+    taskArchiveDeleteIncarnation :: Text -> IO (Either Text ())
   }
 
 data ArchiveState = ArchiveState
@@ -543,8 +547,24 @@ makeStore persist blobs lock =
       taskArchiveRecent = recentEntries lock,
       taskArchiveGrep = grepArchive blobs lock,
       taskArchiveRead = readArchive blobs lock,
-      taskArchiveRuns = listRuns lock
+      taskArchiveRuns = listRuns lock,
+      taskArchiveDeleteIncarnation = deleteIncarnation persist lock
     }
+
+deleteIncarnation :: (ArchiveState -> IO (Either Text ())) -> MVar ArchiveState -> Text -> IO (Either Text ())
+deleteIncarnation persist lock incarnation =
+  modifyMVar lock $ \state ->
+    let prefix = scopeKey incarnation ""
+        keptRuns = Map.filter ((/= incarnation) . archiveRunIncarnationId) (stateRuns state)
+        keptEntries = Map.filter ((/= incarnation) . archiveEntryIncarnationId) (stateEntries state)
+        keptHeads = Map.filterWithKey (\key _ -> not (prefix `Text.isPrefixOf` key)) (stateHeads state)
+        changed =
+          state
+            { stateRuns = keptRuns,
+              stateEntries = keptEntries,
+              stateHeads = keptHeads
+            }
+     in persist changed <&> (changed,)
 
 prepareDirectory :: FilePath -> IO (Either Text ())
 prepareDirectory dir =
@@ -1015,6 +1035,7 @@ cleanGrep request =
       { archiveGrepIncarnationId = incarnation,
         archiveGrepQuery = query,
         archiveGrepTaskId = nonBlank =<< archiveGrepTaskId request,
+        archiveGrepExcludeTaskId = nonBlank =<< archiveGrepExcludeTaskId request,
         archiveGrepKinds = Set.toList (Set.fromList (archiveGrepKinds request))
       }
   where
@@ -1025,6 +1046,7 @@ grepEntry :: ArchiveState -> ArchiveGrepRequest -> ArchiveEntry -> Bool
 grepEntry state request entry =
   archiveEntryIncarnationId entry == archiveGrepIncarnationId request
     && maybe True (== archiveEntryTaskId entry) (archiveGrepTaskId request)
+    && maybe True (/= archiveEntryTaskId entry) (archiveGrepExcludeTaskId request)
     && archiveEntryKind entry `elem` kinds
     && (archiveGrepIncludeProcess request || not (processEntry state entry))
   where

@@ -35,6 +35,9 @@ apply result model =
         [ "yuki", "archive", identifier ] ->
             yukiLifecycle "Yuki 已归档。" identifier result model
 
+        [ "yuki", "delete", identifier ] ->
+            yukiLifecycle "Yuki 已删除，记忆与任务已一并清除。" identifier result model
+
         [ "yuki", "restore", identifier ] ->
             yukiLifecycle "Yuki 已恢复。" identifier result model
 
@@ -175,14 +178,20 @@ tasks result model =
                 in
                 case ( selected, List.head active ) of
                     ( Just current, _ ) ->
-                        ( { model
-                            | sessions = Ready entries
-                            , taskReady = True
-                            , taskTitle = State.taskName current
-                            , taskTitleDraft = State.taskName current
-                          }
-                        , None
-                        )
+                        let
+                            updated =
+                                { model
+                                    | sessions = Ready entries
+                                    , taskReady = True
+                                    , taskTitle = State.taskName current
+                                    , taskTitleDraft = State.taskName current
+                                }
+                        in
+                        if model.taskReady then
+                            ( updated, None )
+
+                        else
+                            loadTaskResources updated
 
                     ( Nothing, Just first ) ->
                         switchTask first.id { model | sessions = Ready entries }
@@ -329,10 +338,10 @@ yukiLifecycle successMessage identifier result model =
                 { model | selfSaving = False, notice = Just successMessage }
 
         else
-            ( { model | notice = Just successMessage, archiveYukiConfirm = False }, Request.incarnations model )
+            ( { model | notice = Just successMessage, archiveYukiConfirm = False, deleteYukiConfirm = Nothing }, Request.incarnations model )
 
     else
-        ( { model | selfSaving = False, selfError = Just (statusLabel result) }, None )
+        ( { model | selfSaving = False, selfError = Just (statusLabel result), deleteYukiConfirm = Nothing }, None )
 
 
 promptList : String -> Bool -> InspectionResult -> Model -> ( Model, Effect )
@@ -614,6 +623,7 @@ switchTask identifier model =
                     , usage = Nothing
                     , contextGauge = Nothing
                     , capabilities = Loading
+                    , notice = Nothing
                 }
         in
         ( next
@@ -627,6 +637,24 @@ switchTask identifier model =
             , Request.sessions next
             ]
         )
+
+
+loadTaskResources : Model -> ( Model, Effect )
+loadTaskResources model =
+    ( { model
+        | transcriptLoading = True
+        , messages = Dict.empty
+        , messageOrder = []
+        , tools = Dict.empty
+      }
+    , Batch
+        [ Request.transcript model
+        , Request.capabilities model
+        , Request.config model
+        , Request.contextPolicy model
+        , Request.tree model
+        ]
+    )
 
 
 taskMutation : String -> String -> InspectionResult -> Model -> ( Model, Effect )

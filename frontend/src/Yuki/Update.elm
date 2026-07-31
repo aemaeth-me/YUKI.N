@@ -41,6 +41,7 @@ init flags =
             , selfSaving = False
             , selfError = Nothing
             , archiveYukiConfirm = False
+            , deleteYukiConfirm = Nothing
             , yukiForm = Nothing
             , showArchivedYukis = False
             , prompts = Loading
@@ -141,11 +142,9 @@ init flags =
     ( model
     , Batch
         [ Request.sessions model
-        , Request.transcript model
         , Request.incarnations model
         , Request.incarnation model
         , Request.impression model
-        , Request.capabilities model
         ]
     )
 
@@ -240,6 +239,20 @@ update msg model =
 
         CancelArchiveYuki ->
             ( { model | archiveYukiConfirm = False }, None )
+
+        DeleteYuki identifier revision ->
+            ( { model | deleteYukiConfirm = Just ( identifier, revision ) }, None )
+
+        ConfirmDeleteYuki ->
+            case model.deleteYukiConfirm of
+                Just ( identifier, revision ) ->
+                    SelfUpdate.delete identifier revision model
+
+                Nothing ->
+                    ( model, None )
+
+        CancelDeleteYuki ->
+            ( { model | deleteYukiConfirm = Nothing }, None )
 
         RestoreYuki identifier revision ->
             SelfUpdate.restore identifier revision model
@@ -347,11 +360,15 @@ update msg model =
                 , taskFormOpen = False
                 , yukiForm = Nothing
                 , archiveYukiConfirm = False
+                , deleteYukiConfirm = Nothing
                 , selectedMemory = Nothing
                 , selectedTaskRecord = Nothing
               }
             , None
             )
+
+        ClearNotice ->
+            ( { model | notice = Nothing }, None )
 
         SwitchTask identifier ->
             Inspection.switchTask identifier model

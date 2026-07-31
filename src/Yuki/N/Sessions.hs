@@ -5,6 +5,7 @@ module Yuki.N.Sessions
     SessionService (..),
     SessionStore (..),
     archiveSession,
+    deleteIncarnationSessions,
     exportSession,
     forkSession,
     importSession,
@@ -83,7 +84,8 @@ data SessionStore = SessionStore
     createSession :: Text -> Maybe Text -> Text -> Maybe Text -> Maybe Text -> IO (Either Text SessionMeta),
     claimSessionOwner :: Text -> Text -> IO (Either Text SessionMeta),
     renameSession :: Text -> Text -> IO (Either Text SessionMeta),
-    setSessionArchived :: Text -> Bool -> IO (Either Text SessionMeta)
+    setSessionArchived :: Text -> Bool -> IO (Either Text SessionMeta),
+    deleteSessionsFor :: Text -> IO [SessionMeta]
   }
 
 data SessionService = SessionService
@@ -153,7 +155,8 @@ newSessionStore dir =
           createSession = create lock index,
           claimSessionOwner = claim lock index,
           renameSession = rename lock index,
-          setSessionArchived = archive lock index
+          setSessionArchived = archive lock index,
+          deleteSessionsFor = deleteForIncarnation lock index
         }
 
 ensure :: MVar (Map Text SessionMeta) -> FilePath -> Text -> Maybe Text -> Text -> IO SessionMeta
@@ -179,6 +182,19 @@ ensure lock path threadId title rawOwner =
     refreshedTitle current
       | sessionTitle current == threadId = cleanTitle threadId title
       | otherwise = sessionTitle current
+
+deleteForIncarnation :: MVar (Map Text SessionMeta) -> FilePath -> Text -> IO [SessionMeta]
+deleteForIncarnation lock path incarnation =
+  getPOSIXTime >>= \now ->
+    modifyMVar lock $ \sessions ->
+      let removed =
+            [ meta
+              | meta <- Map.elems sessions,
+                sessionIncarnationId meta == incarnation
+            ]
+          kept = Map.filter ((/= incarnation) . sessionIncarnationId) sessions
+          updated = kept
+       in persist path updated $> (updated, removed)
 
 create :: MVar (Map Text SessionMeta) -> FilePath -> Text -> Maybe Text -> Text -> Maybe Text -> Maybe Text -> IO (Either Text SessionMeta)
 create lock path threadId title rawOwner parent node
@@ -287,6 +303,14 @@ archiveSession :: SessionService -> Text -> IO (Either Text SessionMeta)
 archiveSession service threadId =
   setSessionArchived (serviceSessions service) threadId True >>= \result ->
     result <$ either (const (pure ())) (const (serviceArchiveThread service threadId)) result
+
+deleteIncarnationSessions :: SessionService -> Text -> IO ()
+deleteIncarnationSessions service incarnation =
+  deleteSessionsFor (serviceSessions service) incarnation >>= mapM_ cleanup
+  where
+    cleanup meta = do
+      transcriptDelete (serviceTranscripts service) (sessionId meta)
+      threadConfigDelete (serviceConfigs service) (sessionId meta)
 
 restoreSession :: SessionService -> Text -> IO (Either Text SessionMeta)
 restoreSession service threadId = setSessionArchived (serviceSessions service) threadId False

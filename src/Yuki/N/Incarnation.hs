@@ -171,6 +171,7 @@ data IncarnationStore = IncarnationStore
     incarnationUpdate :: Text -> Int -> Text -> Text -> Maybe Text -> IO (Either Text Incarnation),
     incarnationArchive :: Text -> Int -> IO (Either Text Incarnation),
     incarnationRestore :: Text -> Int -> IO (Either Text Incarnation),
+    incarnationDelete :: Text -> Int -> IO (Either Text Incarnation),
     promptAppend :: Maybe Text -> PromptLayer -> Text -> Text -> Text -> Maybe Text -> Maybe Text -> PromptStatus -> IO PromptRevision,
     promptRead :: Text -> IO (Maybe PromptRevision),
     promptList :: Maybe Text -> IO [PromptRevision],
@@ -241,6 +242,7 @@ mkStore persist lock =
       incarnationUpdate = update,
       incarnationArchive = archive,
       incarnationRestore = restore,
+      incarnationDelete = delete,
       promptAppend = appendPrompt,
       promptRead = \identifier -> Map.lookup identifier . statePrompts <$> readMVar lock,
       promptList = \owner ->
@@ -295,6 +297,25 @@ mkStore persist lock =
             incarnationRevision = expected + 1,
             incarnationUpdated = now
           }
+    delete "yuki" _ = pure (Left "default incarnation yuki cannot be deleted")
+    delete identifier expected =
+      getPOSIXTime >>= \now ->
+        modifyMVar lock $ \state ->
+          case Map.lookup identifier (stateIncarnations state) of
+            Nothing -> pure (state, Left ("unknown incarnation: " <> identifier))
+            Just incarnation
+              | incarnationRevision incarnation /= expected ->
+                  pure (state, Left (stale expected (incarnationRevision incarnation)))
+              | incarnationStatus incarnation /= IncarnationArchived ->
+                  pure (state, Left ("incarnation is not archived: " <> identifier))
+              | otherwise ->
+                  let kept = filter ((/= Just identifier) . promptIncarnationId) (Map.elems (statePrompts state))
+                      changed =
+                        state
+                          { stateIncarnations = Map.delete identifier (stateIncarnations state),
+                            statePrompts = Map.fromList [(promptRevisionId prompt, prompt) | prompt <- kept]
+                          }
+                   in persist changed *> pure (changed, Right incarnation)
     mutate identifier expected allowed change =
       getPOSIXTime >>= \now ->
         modifyMVar lock $ \state ->
