@@ -80,9 +80,21 @@ const harness = () => {
   };
 };
 
-test("content growth is coalesced into one animation frame", () => {
+test("initial mount jumps to the latest content once", () => {
   const state = harness();
   assert.equal(state.pending(), 1);
+
+  state.flush();
+
+  assert.equal(state.writes(), 1);
+  assert.equal(state.transcript.scrollTop, 700);
+  assert.equal(state.controller.isFollowing(), true);
+});
+
+test("content growth is measured without forcing scrollTop", () => {
+  const state = harness();
+  state.flush();
+  state.transcript.scrollHeight = 1400;
 
   state.controller.notifyContentChanged();
   state.controller.notifyContentChanged();
@@ -92,61 +104,34 @@ test("content growth is coalesced into one animation frame", () => {
   state.flush();
   assert.equal(state.writes(), 1);
   assert.equal(state.transcript.scrollTop, 700);
-});
-
-test("upward wheel cancels a pending follow before it can write", () => {
-  const state = harness();
-
-  state.root.dispatch("wheel", {
-    target: state.transcript,
-    deltaY: -1,
-  });
-  state.transcript.scrollHeight = 1400;
-  state.controller.notifyContentChanged();
-  state.flush();
-
   assert.equal(state.controller.isFollowing(), false);
-  assert.equal(state.pending(), 0);
-  assert.equal(state.writes(), 0);
   assert.deepEqual(state.following, [false]);
 });
 
-test("browse mode never writes scrollTop as content grows", () => {
+test("reaching the bottom never enables sticky following", () => {
   const state = harness();
-  state.root.dispatch("wheel", {
-    target: state.transcript,
-    deltaY: -20,
-  });
-
-  for (const height of [1100, 1300, 1800]) {
-    state.transcript.scrollHeight = height;
-    state.controller.notifyContentChanged();
-    state.flush();
-  }
-
-  assert.equal(state.writes(), 0);
-  assert.equal(state.transcript.scrollTop, 0);
-});
-
-test("scrolling back to the bottom restores follow mode", () => {
-  const state = harness();
+  state.flush();
   state.root.dispatch("wheel", {
     target: state.transcript,
     deltaY: -20,
   });
   state.setScrollTop(700);
-
   state.root.dispatch("scroll", { target: state.transcript });
-
   assert.equal(state.controller.isFollowing(), true);
-  assert.deepEqual(state.following, [false, true]);
-  assert.equal(state.pending(), 1);
+
+  state.transcript.scrollHeight = 1400;
+  state.controller.notifyContentChanged();
   state.flush();
+
+  assert.equal(state.writes(), 1);
   assert.equal(state.transcript.scrollTop, 700);
+  assert.equal(state.controller.isFollowing(), false);
+  assert.deepEqual(state.following, [false, true, false]);
 });
 
-test("explicit follow restores and reaches the latest content", () => {
+test("explicit follow is a one-time jump", () => {
   const state = harness();
+  state.flush();
   state.root.dispatch("wheel", {
     target: state.transcript,
     deltaY: -20,
@@ -158,10 +143,31 @@ test("explicit follow restores and reaches the latest content", () => {
 
   assert.equal(state.controller.isFollowing(), true);
   assert.equal(state.transcript.scrollTop, 1300);
-  assert.deepEqual(state.following, [false, true]);
+  assert.equal(state.writes(), 2);
+
+  state.transcript.scrollHeight = 1900;
+  state.controller.notifyContentChanged();
+  state.flush();
+  assert.equal(state.writes(), 2);
+  assert.equal(state.controller.isFollowing(), false);
 });
 
-test("PageUp inside the transcript and touch movement enter browse mode", () => {
+test("upward wheel cancels a pending jump", () => {
+  const state = harness();
+
+  state.root.dispatch("wheel", {
+    target: state.transcript,
+    deltaY: -1,
+  });
+  state.flush();
+
+  assert.equal(state.controller.isFollowing(), false);
+  assert.equal(state.pending(), 0);
+  assert.equal(state.writes(), 0);
+  assert.deepEqual(state.following, [false]);
+});
+
+test("PageUp and touch movement immediately hand control to the user", () => {
   const keyboard = harness();
   keyboard.root.dispatch("keydown", {
     target: keyboard.transcript,
@@ -172,32 +178,17 @@ test("PageUp inside the transcript and touch movement enter browse mode", () => 
   assert.equal(keyboard.writes(), 0);
 
   const touch = harness();
-  touch.root.dispatch("touchstart", { target: touch.transcript });
   touch.root.dispatch("touchmove", { target: touch.transcript });
   touch.flush();
   assert.equal(touch.controller.isFollowing(), false);
   assert.equal(touch.writes(), 0);
 });
 
-test("a tap inside the transcript pauses pending work without leaving follow mode", () => {
+test("upward keys outside the transcript do not change its position", () => {
   const state = harness();
-
-  state.root.dispatch("touchstart", { target: state.transcript });
-  assert.equal(state.controller.isFollowing(), true);
-  assert.equal(state.pending(), 0);
-
-  state.root.dispatch("touchend", { target: state.transcript });
-  assert.equal(state.pending(), 1);
   state.flush();
-  assert.equal(state.controller.isFollowing(), true);
-  assert.equal(state.writes(), 1);
-});
-
-test("upward keys outside the transcript do not change follow mode", () => {
-  const state = harness();
 
   state.root.dispatch("keydown", { target: {}, key: "PageUp" });
-  state.flush();
 
   assert.equal(state.controller.isFollowing(), true);
   assert.equal(state.writes(), 1);

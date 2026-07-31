@@ -79,7 +79,7 @@ dialectFromText other = Left ("unknown dialect: " <> other)
 defaultProviders :: ProviderRegistry
 defaultProviders =
   Map.fromList
-    [ ("deepseek", ProviderEntry "deepseek" "https://api.deepseek.com" DeepSeek "deepseek-v4-pro" (Just "DEEPSEEK_API_KEY") Nothing 1000000),
+    [ ("deepseek", ProviderEntry "deepseek" "https://api.deepseek.com" DeepSeek "deepseek-v4-flash" (Just "DEEPSEEK_API_KEY") Nothing 1000000),
       ("zai", ProviderEntry "zai" "https://open.bigmodel.cn/api/paas/v4" OpenAICompatible "glm-5.2" (Just "ZAI_API_KEY") (Just "zai") 1000000),
       ("kimi-coding", ProviderEntry "kimi-coding" "https://api.kimi.com/coding/v1" OpenAICompatible "k3" (Just "KIMI_API_KEY") (Just "kimi-coding") 1048576)
     ]

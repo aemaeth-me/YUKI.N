@@ -79,28 +79,28 @@ instance FromJSON ReasoningEffort where
 openAIModel :: Manager -> OpenAIConfig -> Model
 openAIModel manager config =
   Model
-      { modelProvider = openAIProvider config,
-        modelName = openAIModelName config,
-        modelContextTokens = openAIContextTokens config,
-        streamModel = streamChatCompletions manager config,
+    { modelProvider = openAIProvider config,
+      modelName = openAIModelName config,
+      modelContextTokens = openAIContextTokens config,
+      streamModel = streamProvider manager config,
       modelRender = requestValue config
     }
 
-streamChatCompletions ::
+streamProvider ::
   Manager ->
   OpenAIConfig ->
   ModelRequest ->
   (ModelEvent -> IO ()) ->
   IO FinishReason
-streamChatCompletions manager config modelRequest emit =
+streamProvider manager config modelRequest emit =
   action `catch` rethrowHttp
   where
-    action = buildRequest config modelRequest >>= \request -> withResponse request manager (consumeResponse emit)
+    action = buildRequest config modelRequest >>= \request -> withResponse request manager (consumeResponse (openAIDialect config) emit)
     rethrowHttp = throwIO . ProviderFailure . ("provider request failed: " <>) . httpError
 
 buildRequest :: OpenAIConfig -> ModelRequest -> IO Request
 buildRequest config modelRequest =
-  parseRequest (Text.unpack (completionEndpoint (openAIBaseUrl config)))
+  parseRequest (Text.unpack (apiEndpoint config))
     <&> \request ->
       request
         { method = "POST",
@@ -113,10 +113,16 @@ buildRequest config modelRequest =
           responseTimeout = responseTimeoutNone
         }
 
-completionEndpoint :: Text -> Text
-completionEndpoint base
-  | "/chat/completions" `Text.isSuffixOf` trimmed = trimmed
-  | otherwise = trimmed <> "/chat/completions"
+apiEndpoint :: OpenAIConfig -> Text
+apiEndpoint config =
+  apiRoot (openAIBaseUrl config)
+    <> case openAIDialect config of
+      DeepSeek -> "/responses"
+      OpenAICompatible -> "/chat/completions"
+
+apiRoot :: Text -> Text
+apiRoot base =
+  fromMaybe trimmed (Text.stripSuffix "/chat/completions" trimmed <|> Text.stripSuffix "/responses" trimmed <|> Text.stripSuffix "/models" trimmed)
   where
     trimmed = Text.dropWhileEnd (== '/') base
 
@@ -137,14 +143,16 @@ fetchModelIds manager config =
     modelList = withObject "ModelList" (\body -> body .: "data" >>= mapM (withObject "model" (.: "id")))
 
 modelsEndpoint :: Text -> Text
-modelsEndpoint base
-  | "/models" `Text.isSuffixOf` trimmed = trimmed
-  | otherwise = trimmed <> "/models"
-  where
-    trimmed = Text.dropWhileEnd (== '/') base
+modelsEndpoint = (<> "/models") . apiRoot
 
 requestValue :: OpenAIConfig -> ModelRequest -> Value
-requestValue config modelRequest =
+requestValue config =
+  case openAIDialect config of
+    DeepSeek -> responsesRequestValue config
+    OpenAICompatible -> chatRequestValue config
+
+chatRequestValue :: OpenAIConfig -> ModelRequest -> Value
+chatRequestValue config modelRequest =
   object $
     [ "model" .= openAIModelName config,
       "messages" .= fmap (chatMessageValue config) (requestMessages modelRequest),
@@ -156,6 +164,81 @@ requestValue config modelRequest =
       <> thinkingFields config
   where
     tools = nonEmpty (toolValue <$> requestTools modelRequest)
+
+responsesRequestValue :: OpenAIConfig -> ModelRequest -> Value
+responsesRequestValue config modelRequest =
+  object $
+    [ "model" .= openAIModelName config,
+      "input" .= concatMap responseInputValues (requestMessages modelRequest),
+      "stream" .= True
+    ]
+      <> pair "tools" tools
+      <> pair "max_output_tokens" (openAIMaxTokens config)
+      <> responseReasoningFields (openAIThinking config)
+  where
+    tools = nonEmpty (responseToolValue <$> requestTools modelRequest)
+
+responseReasoningFields :: ThinkingMode -> [Pair]
+responseReasoningFields ThinkingDisabled = []
+responseReasoningFields (ThinkingEnabled effort) = ["reasoning" .= object ["effort" .= effortText effort]]
+
+responseInputValues :: ChatMessage -> [Value]
+responseInputValues = \case
+  ChatSystem content -> [responseMessage "system" content]
+  ChatUser content -> [responseMessage "user" content]
+  ChatToolResult call content ->
+    [ object
+        [ "type" .= ("function_call_output" :: Text),
+          "call_id" .= call,
+          "output" .= content
+        ]
+    ]
+  ChatAssistant turn ->
+    maybeToList (responseReasoningValue turn)
+      <> maybeToList (responseAssistantValue turn)
+      <> fmap responseToolCallValue (turnToolCalls turn)
+
+responseMessage :: Text -> Text -> Value
+responseMessage role content =
+  object
+    [ "type" .= ("message" :: Text),
+      "role" .= role,
+      "content" .= content
+    ]
+
+responseReasoningValue :: AssistantTurn -> Maybe Value
+responseReasoningValue turn =
+  turnReasoning turn <&> \content ->
+    object
+      [ "type" .= ("reasoning" :: Text),
+        "content"
+          .= [ object
+                 [ "type" .= ("reasoning_text" :: Text),
+                   "text" .= content
+                 ]
+             ]
+      ]
+
+responseAssistantValue :: AssistantTurn -> Maybe Value
+responseAssistantValue turn = responseMessage "assistant" <$> turnText turn
+
+responseToolCallValue :: ModelToolCall -> Value
+responseToolCallValue call =
+  object
+    [ "type" .= ("function_call" :: Text),
+      "call_id" .= modelToolCallId call,
+      "name" .= modelToolName call,
+      "arguments" .= modelToolArguments call
+    ]
+
+responseToolValue :: ToolSpec -> Value
+responseToolValue tool =
+  object
+    [ "type" .= ("function" :: Text),
+      "name" .= toolName tool,
+      "description" .= toolDescription tool,
+      "parameters" .= toolParameters tool
+    ]
 
 thinkingFields :: OpenAIConfig -> [Pair]
 thinkingFields config
@@ -230,8 +313,8 @@ effortFromText "high" = Right High
 effortFromText "max" = Right Max
 effortFromText value = Left ("reasoningEffort must be low, high, or max; got " <> value)
 
-consumeResponse :: (ModelEvent -> IO ()) -> Response BodyReader -> IO FinishReason
-consumeResponse emit response
+consumeResponse :: ApiDialect -> (ModelEvent -> IO ()) -> Response BodyReader -> IO FinishReason
+consumeResponse dialect emit response
   | statusCode status < 200 || statusCode status >= 300 =
       brConsume (responseBody response)
         >>= throwIO . ProviderFailure . responseError status . ByteString.concat
@@ -243,27 +326,94 @@ consumeResponse emit response
     readBody decoder reason = brRead reader >>= consumeBody decoder reason
     consumeBody decoder reason chunk
       | ByteString.null chunk =
-          consumePayloads emit reason (snd (finishSse decoder)) >>= requireFinish . fst
+          consumePayloads dialect emit reason (snd (finishSse decoder)) >>= requireFinish . fst
       | otherwise =
           let (decoder', payloads) = feedSse decoder chunk
-           in consumePayloads emit reason payloads >>= continue decoder'
+           in consumePayloads dialect emit reason payloads >>= continue decoder'
     continue _ (reason, True) = requireFinish reason
     continue decoder (reason, False) = readBody decoder reason
 
 consumePayloads ::
+  ApiDialect ->
   (ModelEvent -> IO ()) ->
   Maybe FinishReason ->
   [ByteString] ->
   IO (Maybe FinishReason, Bool)
-consumePayloads emit initial = foldM consume (initial, False)
+consumePayloads dialect emit initial = foldM consume (initial, False)
   where
     consume result@(_, True) _ = pure result
     consume (reason, False) payload
       | payload == "[DONE]" = pure (reason, True)
-      | otherwise = either throwIO apply (decodeChunk payload >>= chunkEvents)
+      | otherwise = either throwIO apply (providerPayload dialect payload)
       where
-        apply (events, reason') =
-          traverse_ emit events *> pure (reason' <|> reason, False)
+        apply (events, reason', done) =
+          traverse_ emit events
+            *> pure
+              ( reason' <|> reason <|> bool Nothing (Just Stop) (done && dialect == DeepSeek),
+                done
+              )
+
+providerPayload :: ApiDialect -> ByteString -> Either ProviderFailure ([ModelEvent], Maybe FinishReason, Bool)
+providerPayload DeepSeek payload = decodeResponsesEvent payload >>= responseEvent
+providerPayload OpenAICompatible payload =
+  decodeChunk payload >>= chunkEvents <&> \(events, reason) -> (events, reason, False)
+
+responseEvent :: ResponsesEvent -> Either ProviderFailure ([ModelEvent], Maybe FinishReason, Bool)
+responseEvent event =
+  case responsesEventType event of
+    "response.output_text.delta" -> Right (textDelta ModelTextDelta, Nothing, False)
+    "response.reasoning_text.delta" -> Right (textDelta ModelReasoningDelta, Nothing, False)
+    "response.function_call_arguments.delta" -> Right (argumentDelta, Nothing, False)
+    "response.output_item.added" -> Right (itemEvents, itemFinish, False)
+    "response.completed" -> Right (usage, Nothing, True)
+    "response.incomplete" -> Right (usage, Just Length, True)
+    "response.failed" -> Left (ProviderFailure ("provider response failed: " <> failure))
+    "error" -> Left (ProviderFailure ("provider stream error: " <> failure))
+    _ -> Right ([], Nothing, False)
+  where
+    textDelta constructor = maybeToList (constructor <$> mfilter (not . Text.null) (responsesEventDelta event))
+    argumentDelta = maybeToList (ModelToolCallDelta (responsesEventOutputIndex event) Nothing Nothing <$> responsesEventDelta event)
+    itemEvents = maybe [] (responseItemEvents (responsesEventOutputIndex event)) (responsesEventItem event)
+    itemFinish = bool Nothing (Just ToolUse) (maybe False ((== "function_call") . responseItemType) (responsesEventItem event))
+    usage = maybeToList (ModelUsage . responseUsageValue <$> responseUsage event)
+    failure = maybe "unknown response failure" compactValue (responseFailure event)
+
+responseItemEvents :: Int -> ResponseItem -> [ModelEvent]
+responseItemEvents index item
+  | responseItemType item /= "function_call" = []
+  | otherwise =
+      [ ModelToolCallDelta
+          index
+          (responseItemCallId item <|> responseItemId item)
+          (responseItemName item)
+          (fromMaybe "" (responseItemArguments item))
+      ]
+
+responseUsage :: ResponsesEvent -> Maybe ResponseUsage
+responseUsage event =
+  responsesEventResponse event
+    >>= parseMaybe (withObject "response" (.:? "usage"))
+    >>= id
+
+responseFailure :: ResponsesEvent -> Maybe Value
+responseFailure event =
+  responsesEventError event
+    <|> ( responsesEventResponse event
+            >>= parseMaybe (withObject "response" (.:? "error"))
+            >>= id
+        )
+
+responseUsageValue :: ResponseUsage -> Usage
+responseUsageValue usage =
+  Usage
+    (responseInputTokens usage)
+    (responseOutputTokens usage)
+    (responseCachedTokens usage)
+    ((-) <$> responseInputTokens usage <*> responseCachedTokens usage)
+
+decodeResponsesEvent :: ByteString -> Either ProviderFailure ResponsesEvent
+decodeResponsesEvent =
+  first (ProviderFailure . ("invalid Responses API stream event: " <>) . Text.pack) . eitherDecodeStrict'
 
 chunkEvents :: ChatChunk -> Either ProviderFailure ([ModelEvent], Maybe FinishReason)
 chunkEvents chunk
@@ -356,6 +506,55 @@ data DeltaFunction = DeltaFunction
   { deltaFunctionName :: Maybe Text,
     deltaFunctionArguments :: Maybe Text
   }
+
+data ResponsesEvent = ResponsesEvent
+  { responsesEventType :: Text,
+    responsesEventDelta :: Maybe Text,
+    responsesEventOutputIndex :: Int,
+    responsesEventItem :: Maybe ResponseItem,
+    responsesEventResponse :: Maybe Value,
+    responsesEventError :: Maybe Value
+  }
+
+data ResponseItem = ResponseItem
+  { responseItemType :: Text,
+    responseItemId :: Maybe Text,
+    responseItemCallId :: Maybe Text,
+    responseItemName :: Maybe Text,
+    responseItemArguments :: Maybe Text
+  }
+
+data ResponseUsage = ResponseUsage
+  { responseInputTokens :: Maybe Int,
+    responseOutputTokens :: Maybe Int,
+    responseCachedTokens :: Maybe Int
+  }
+
+instance FromJSON ResponsesEvent where
+  parseJSON = withObject "ResponsesEvent" $ \fields ->
+    ResponsesEvent
+      <$> (firstPresent fields ["type", "event"] >>= maybe (fail "missing response event type") pure)
+      <*> fields .:? "delta"
+      <*> (fields .:? "output_index" .!= 0)
+      <*> fields .:? "item"
+      <*> fields .:? "response"
+      <*> fields .:? "error"
+
+instance FromJSON ResponseItem where
+  parseJSON = withObject "ResponseItem" $ \fields ->
+    ResponseItem
+      <$> fields .: "type"
+      <*> fields .:? "id"
+      <*> fields .:? "call_id"
+      <*> fields .:? "name"
+      <*> fields .:? "arguments"
+
+instance FromJSON ResponseUsage where
+  parseJSON = withObject "ResponseUsage" $ \fields ->
+    ResponseUsage
+      <$> fields .:? "input_tokens"
+      <*> fields .:? "output_tokens"
+      <*> (fields .:? "input_tokens_details" >>= maybe (pure Nothing) (withObject "InputTokenDetails" (.:? "cached_tokens")))
 
 instance FromJSON ChatChunk where
   parseJSON = withObject "ChatCompletionChunk" $ \fields ->

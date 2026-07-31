@@ -27,7 +27,7 @@ npm registry。
 provider。backend 默认使用 `18080`，frontend 默认使用 `15173`。两个服务
 留在启动器的进程组内，启动器退出时随之停止，不在后台遗留监听进程。
 
-默认使用 DeepSeek V4 Pro；也可设置 `YUKI_PROVIDER`、`YUKI_MODEL`、
+默认使用 DeepSeek V4 Flash，并通过 DeepSeek Responses API 调用；也可设置 `YUKI_PROVIDER`、`YUKI_MODEL`、
 `YUKI_BASE_URL`、`YUKI_API_KEY`。本机状态默认写入 `~/.yuki-n`；
 `YUKI_DATA_DIR` 可改其位置。认知状态始终持久化于 `cognition-v2`；
 `YUKI_MEMORY_DIR` 可另定其根目录，`YUKI_MEMORY_MODEL` 可为 Prompt、Sleep 与
@@ -85,7 +85,7 @@ JSON 字节数除以 3 估算；消息另计每条 4 token，非 ASCII 字符按
 
 留空即继承全局。全局值仍可分别用 `YUKI_CONTEXT_RESERVE_TOKENS`、
 `YUKI_CONTEXT_KEEP_UNITS`、`YUKI_CONTEXT_SUMMARY_TOKENS` 设置。当前源码固定
-DeepSeek V4 Pro 与 GLM-5.2 为 `1000000`、Kimi K3 为 `1048576`；改模型时同步
+DeepSeek V4 Flash 与 GLM-5.2 为 `1000000`、Kimi K3 为 `1048576`；改模型时同步
 改 `Providers.hs`。provider 明确返回 context overflow 时，系统只再做一次
 半预算的紧急压缩与重试。
 

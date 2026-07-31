@@ -46,7 +46,7 @@ import Yuki.N.ContextEpoch
   )
 import Yuki.N.Artifact (ArtifactStore (..))
 import Yuki.N.Facts (FactStore (..))
-import Yuki.N.Inspect (Inspection (..), forRun, runIds, runSummary)
+import Yuki.N.Inspect (Inspection (..), forRun, runIds, runSummary, runTrace)
 import Yuki.N.Incarnation
 import Yuki.N.Journal (journalSnapshot)
 import Yuki.N.Memory (ThreadStore (..))
@@ -152,7 +152,7 @@ instance FromJSON MemorySearchRequest where
       <*> fields .:? "visibility"
       <*> fields .:? "limit" .!= 8
 
-data TaskRecordSearchRequest = TaskRecordSearchRequest Text (Maybe Text) [ArchiveKind] Bool Int
+data TaskRecordSearchRequest = TaskRecordSearchRequest Text (Maybe Text) [ArchiveKind] Bool Int Int Bool
 
 instance FromJSON TaskRecordSearchRequest where
   parseJSON = withObject "TaskRecordSearchRequest" $ \fields ->
@@ -162,6 +162,8 @@ instance FromJSON TaskRecordSearchRequest where
       <*> fields .:? "kinds" .!= []
       <*> fields .:? "caseSensitive" .!= False
       <*> fields .:? "limit" .!= 20
+      <*> fields .:? "offset" .!= 0
+      <*> fields .:? "includeProcess" .!= False
 
 data RememberMemoryRequest = RememberMemoryRequest MemoryVisibility Text Text [Text] [Text]
 
@@ -259,6 +261,7 @@ application cors inspection configs runs runtimeFor request respond =
     route "GET" ["artifacts", identifier] = withStore (artifact identifier)
     route "GET" ["journal", "runs"] = withJournal journalRuns
     route "GET" ["journal", "runs", runId, "summary"] = withJournal (summaryFor runId)
+    route "GET" ["journal", "runs", runId, "trace"] = withJournal (traceFor runId)
     route "GET" ["journal"] = withJournal journalEntries
     route _ ["agent"] =
       respond (jsonResponse cors status405 [("Allow", "POST, OPTIONS")] (message "method not allowed"))
@@ -558,10 +561,10 @@ application cors inspection configs runs runtimeFor request respond =
     taskRecords identifier cognition =
       taskArchiveTasks (cognitionArchive cognition) identifier (queryLimit 1000 request) >>= respond . ok
     searchTaskRecords identifier cognition =
-      withBody "invalid task record search: " $ \(TaskRecordSearchRequest query task kinds sensitive limit) ->
+      withBody "invalid task record search: " $ \(TaskRecordSearchRequest query task kinds sensitive limit offset includeProcess) ->
         taskArchiveGrep
           (cognitionArchive cognition)
-          (ArchiveGrepRequest identifier query task kinds sensitive limit)
+          (ArchiveGrepRequest identifier query task kinds sensitive limit offset includeProcess)
           >>= respond . either cognitionError ok
     readTaskRecord identifier entryId cognition =
       taskArchiveRead
@@ -834,6 +837,7 @@ application cors inspection configs runs runtimeFor request respond =
     artifact identifier store = maybe (missing "artifact not found") plain <$> artifactFetch store identifier
     journalRuns = respond . ok . runIds
     summaryFor runId = respond . maybe (missing "run not found") ok . runSummary runId
+    traceFor runId = respond . maybe (missing "run not found") ok . runTrace runId
     journalEntries = respond . ok . forRun runParam
     replayReport memory entries =
       strictRequestBody request

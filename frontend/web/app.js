@@ -193,23 +193,23 @@ app.ports.persistThreadId.subscribe(persistThreadId);
 app.ports.persistIncarnationId.subscribe(persistIncarnationId);
 app.ports.copyText.subscribe((text) => void copyToClipboard(text));
 
-app.ports.exportSessionFile.subscribe(({ threadId: id, bundle }) => {
-  const safe = String(id || "session").replace(/[^A-Za-z0-9._-]/g, "-");
+app.ports.exportSessionFile?.subscribe(({ threadId: id, bundle }) => {
+  const safe = String(id || "task").replace(/[^A-Za-z0-9._-]/g, "-");
   const blob = new Blob([`${JSON.stringify(bundle, null, 2)}\n`], {
     type: "application/json",
   });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${safe}.yuki-session.json`;
+  link.download = `${safe}.yuki-task.json`;
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 0);
 });
 
-app.ports.chooseSessionImport.subscribe(() => {
+app.ports.chooseSessionImport?.subscribe(() => {
   const input = document.createElement("input");
   input.type = "file";
-  input.accept = "application/json,.json,.yuki-session.json";
+  input.accept = "application/json,.json,.yuki-task.json,.yuki-session.json";
   input.addEventListener(
     "change",
     async () => {

@@ -98,4 +98,4 @@ fi
 
 # --- markdown 行 ---
 DATE=$(date +%F)
-echo "| ${DATE} | （里程碑） | ${TASK} | deepseek-v4-pro：${TURNS} 轮、tools [${TOOLS}]；prompt ${PROMPT}（miss ${MISS} / hit ${HIT}）、completion ${COMPLETION} | ${PI_ACCOUNT} | （判定） |"
+echo "| ${DATE} | （里程碑） | ${TASK} | deepseek-v4-flash：${TURNS} 轮、tools [${TOOLS}]；prompt ${PROMPT}（miss ${MISS} / hit ${HIT}）、completion ${COMPLETION} | ${PI_ACCOUNT} | （判定） |"

@@ -20,41 +20,44 @@ export const createTranscriptScrollController = ({
   onFollowingChange = () => {},
   bottomThreshold = 40,
 } = {}) => {
-  let following = true;
+  let atLatest = true;
   let frame = null;
-  let pointerActive = false;
+  let pending = null;
 
-  const setFollowing = (next) => {
-    if (following === next) return;
-    following = next;
+  const setAtLatest = (next) => {
+    if (atLatest === next) return;
+    atLatest = next;
     onFollowingChange(next);
   };
 
   const cancelPending = () => {
-    if (frame === null) return;
-    cancelFrame?.(frame);
+    if (frame !== null) cancelFrame?.(frame);
     frame = null;
+    pending = null;
   };
 
-  const atBottom = (transcript) =>
+  const isAtBottom = (transcript) =>
     transcript.scrollHeight -
       transcript.scrollTop -
       transcript.clientHeight <=
     bottomThreshold;
 
-  const schedule = () => {
-    if (!following || pointerActive || frame !== null || !requestFrame) return;
+  const schedule = (kind) => {
+    if (!requestFrame) return;
+    if (frame !== null) {
+      if (kind === "jump") pending = "jump";
+      return;
+    }
+    pending = kind;
     frame = requestFrame(() => {
       frame = null;
-      if (!following || pointerActive) return;
+      const action = pending;
+      pending = null;
       const transcript = getTranscript();
-      if (transcript) transcript.scrollTop = transcript.scrollHeight;
+      if (!transcript) return;
+      if (action === "jump") transcript.scrollTop = transcript.scrollHeight;
+      setAtLatest(isAtBottom(transcript));
     });
-  };
-
-  const browse = () => {
-    cancelPending();
-    setFollowing(false);
   };
 
   const insideTranscript = (target) => {
@@ -66,19 +69,19 @@ export const createTranscriptScrollController = ({
     );
   };
 
+  const beginBrowsing = () => {
+    cancelPending();
+    setAtLatest(false);
+  };
+
   const onScroll = (event) => {
     const transcript = getTranscript();
     if (!transcript || event.target !== transcript) return;
-    if (atBottom(transcript)) {
-      setFollowing(true);
-      schedule();
-    } else {
-      browse();
-    }
+    setAtLatest(isAtBottom(transcript));
   };
 
   const onWheel = (event) => {
-    if (event.deltaY < 0 && insideTranscript(event.target)) browse();
+    if (event.deltaY < 0 && insideTranscript(event.target)) beginBrowsing();
   };
 
   const onKeyDown = (event) => {
@@ -87,50 +90,30 @@ export const createTranscriptScrollController = ({
       upwardKeys.has(event.key) &&
       insideTranscript(event.target)
     ) {
-      browse();
+      beginBrowsing();
     }
   };
 
   const onPointerDown = (event) => {
-    if (!insideTranscript(event.target)) return;
-    pointerActive = true;
-    cancelPending();
-  };
-
-  const onPointerUp = () => {
-    if (!pointerActive) return;
-    pointerActive = false;
-    schedule();
-  };
-
-  const onTouchStart = (event) => {
-    onPointerDown(event);
+    if (insideTranscript(event.target)) cancelPending();
   };
 
   const onTouchMove = (event) => {
-    if (insideTranscript(event.target)) browse();
+    if (insideTranscript(event.target)) beginBrowsing();
   };
 
   root?.addEventListener?.("scroll", onScroll, true);
   root?.addEventListener?.("wheel", onWheel, { capture: true, passive: true });
   root?.addEventListener?.("keydown", onKeyDown, true);
   root?.addEventListener?.("pointerdown", onPointerDown, true);
-  root?.addEventListener?.("pointerup", onPointerUp, true);
-  root?.addEventListener?.("pointercancel", onPointerUp, true);
-  root?.addEventListener?.("touchstart", onTouchStart, {
-    capture: true,
-    passive: true,
-  });
   root?.addEventListener?.("touchmove", onTouchMove, {
     capture: true,
     passive: true,
   });
-  root?.addEventListener?.("touchend", onPointerUp, true);
-  root?.addEventListener?.("touchcancel", onPointerUp, true);
 
   const observer =
     Observer && observeRoot
-      ? new Observer(() => schedule())
+      ? new Observer(() => schedule("measure"))
       : null;
   observer?.observe(observeRoot, {
     childList: true,
@@ -138,16 +121,12 @@ export const createTranscriptScrollController = ({
     subtree: true,
   });
 
-  schedule();
+  schedule("jump");
 
   return {
-    follow: () => {
-      pointerActive = false;
-      setFollowing(true);
-      schedule();
-    },
-    isFollowing: () => following,
-    notifyContentChanged: schedule,
+    follow: () => schedule("jump"),
+    isFollowing: () => atLatest,
+    notifyContentChanged: () => schedule("measure"),
     destroy: () => {
       cancelPending();
       observer?.disconnect();
@@ -155,12 +134,7 @@ export const createTranscriptScrollController = ({
       root?.removeEventListener?.("wheel", onWheel, true);
       root?.removeEventListener?.("keydown", onKeyDown, true);
       root?.removeEventListener?.("pointerdown", onPointerDown, true);
-      root?.removeEventListener?.("pointerup", onPointerUp, true);
-      root?.removeEventListener?.("pointercancel", onPointerUp, true);
-      root?.removeEventListener?.("touchstart", onTouchStart, true);
       root?.removeEventListener?.("touchmove", onTouchMove, true);
-      root?.removeEventListener?.("touchend", onPointerUp, true);
-      root?.removeEventListener?.("touchcancel", onPointerUp, true);
     },
   };
 };

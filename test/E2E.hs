@@ -22,6 +22,7 @@ import Control.Concurrent.MVar (MVar, readMVar)
 import Control.Monad ((>=>))
 import Data.Aeson
 import qualified Data.Aeson.Key as Key
+import qualified Data.Aeson.KeyMap as KeyMap
 import Data.Aeson.Types (Parser, parseEither, parseMaybe)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
@@ -50,6 +51,7 @@ import Yuki.N.Agent
 import Yuki.N.Artifact (ArtifactStore)
 import Yuki.N.Background (newBackgroundRegistry)
 import Yuki.N.Config (Settings (..))
+import Yuki.N.Model
 import Yuki.N.Provider.OpenAI
 import Yuki.N.Server (application)
 import Yuki.N.ThreadConfig (globalThreadConfig, resolveRuntime)
@@ -64,6 +66,7 @@ e2eTests =
       testCase "forwards the usage frame as a usage event" usageFlow,
       testCase "fails the run with PROVIDER_ERROR on a constant 500" providerDown,
       testCase "falls back to a second provider on its own socket" fallbackAcrossProviders,
+      testCase "uses DeepSeek Responses events for text and tools" deepSeekResponses,
       testCase "lists models from the fake provider" modelsListing
     ]
 
@@ -71,6 +74,7 @@ e2eTests =
 
 data Reply
   = Sse [ByteString]
+  | ResponsesSse [ByteString]
   | Failure Status ByteString
 
 data FakeProvider = FakeProvider
@@ -86,6 +90,7 @@ fakeProvider :: FakeProvider -> Application
 fakeProvider provider request respond = route (requestMethod request) (pathInfo request)
   where
     route "POST" ["chat", "completions"] = completion >>= respond
+    route "POST" ["responses"] = completion >>= respond
     route "GET" ["models"] = respond (responseLBS status200 jsonHeaders modelsPayload)
     route _ _ = respond (responseLBS status404 [] "unknown route")
     completion = (strictRequestBody request >>= traverse_ record . decode) *> hold *> pop
@@ -106,6 +111,10 @@ replyResponse (Just (Sse payloads)) =
         *> write (Builder.byteString suffix <> Builder.byteString "\n\n") *> flush
       where
         (prefix, suffix) = ByteString.splitAt (ByteString.length payload `div` 2) payload
+replyResponse (Just (ResponsesSse payloads)) =
+  responseStream status200 sseHeaders $ \write flush -> traverse_ (frame write flush) payloads
+  where
+    frame write flush payload = write (Builder.byteString "data: " <> Builder.byteString payload <> Builder.byteString "\n\n") *> flush
 replyResponse _ = responseLBS status500 [] "fake provider script exhausted"
 
 jsonHeaders :: ResponseHeaders
@@ -177,6 +186,10 @@ toolCallArgs fragment =
 fakeConfig :: Int -> OpenAIConfig
 fakeConfig port =
   OpenAIConfig "e2e" "e2e-model" ("http://127.0.0.1:" <> Text.pack (show port)) "e2e-secret" OpenAICompatible ThinkingDisabled Nothing (Just 65536)
+
+deepSeekConfig :: Int -> OpenAIConfig
+deepSeekConfig port =
+  OpenAIConfig "deepseek" "deepseek-v4-flash" ("http://127.0.0.1:" <> Text.pack (show port)) "e2e-secret" DeepSeek (ThinkingEnabled High) Nothing (Just 1000000)
 
 e2eSettings :: Int -> FilePath -> Int -> Settings
 e2eSettings port workDir retries =
@@ -346,6 +359,45 @@ expectSubstring label _ other =
   assertFailure (label <> ": expected exactly one payload, got " <> show (length other))
 
 -- scenarios
+
+deepSeekResponses :: Assertion
+deepSeekResponses =
+  newFakeProvider script >>= \provider ->
+    testWithApplication (pure (fakeProvider provider)) $ \port ->
+      newManager defaultManagerSettings >>= \manager ->
+        newIORef [] >>= \textEvents ->
+          newIORef [] >>= \toolEvents ->
+            let model = openAIModel manager (deepSeekConfig port)
+                run events request = streamModel model request (\event -> modifyIORef' events (<> [event]))
+             in run textEvents (ModelRequest [ChatUser "hello"] []) >>= \textFinish ->
+                  run toolEvents (ModelRequest [ChatUser "use a tool"] []) >>= \toolFinish ->
+                    (,,) <$> readIORef textEvents <*> readIORef toolEvents <*> (reverse <$> readIORef (providerBodies provider))
+                      >>= \(textSeen, toolSeen, requests) ->
+                        sequence_
+                          [ textFinish @?= Stop,
+                            textSeen @?= [ModelReasoningDelta "thinking", ModelTextDelta "flash", ModelUsage (Usage (Just 11) (Just 7) (Just 2) (Just 9))],
+                            toolFinish @?= ToolUse,
+                            toolSeen @?= [ModelToolCallDelta 0 (Just "call-1") (Just "lookup") "", ModelToolCallDelta 0 Nothing Nothing "{\"query\":\"yuki\"}", ModelUsage (Usage (Just 8) (Just 4) (Just 0) (Just 8))],
+                            traverse responseShape requests @?= Just [True, True]
+                          ]
+  where
+    script =
+      [ ResponsesSse
+          [ "{\"event\":\"response.reasoning_text.delta\",\"sequence_number\":1,\"output_index\":0,\"delta\":\"thinking\"}",
+            "{\"event\":\"response.output_text.delta\",\"sequence_number\":2,\"output_index\":0,\"delta\":\"flash\"}",
+            "{\"event\":\"response.completed\",\"sequence_number\":3,\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"input_tokens_details\":{\"cached_tokens\":2}}}}"
+          ],
+        ResponsesSse
+          [ "{\"event\":\"response.output_item.added\",\"sequence_number\":1,\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"fc-1\",\"call_id\":\"call-1\",\"name\":\"lookup\",\"arguments\":\"\"}}",
+            "{\"event\":\"response.function_call_arguments.delta\",\"sequence_number\":2,\"output_index\":0,\"delta\":\"{\\\"query\\\":\\\"yuki\\\"}\"}",
+            "{\"event\":\"response.completed\",\"sequence_number\":3,\"response\":{\"usage\":{\"input_tokens\":8,\"output_tokens\":4,\"input_tokens_details\":{\"cached_tokens\":0}}}}"
+          ]
+      ]
+    responseShape =
+      parseMaybe
+        ( withObject "response request" $ \fields ->
+            (\model -> model == ("deepseek-v4-flash" :: Text) && KeyMap.member "input" fields && not (KeyMap.member "messages" fields)) <$> fields .: "model"
+        )
 
 plainText :: Assertion
 plainText =

@@ -933,6 +933,8 @@ cognitionTools cognition incarnation =
             (grepCallKinds call)
             (grepCallCaseSensitive call)
             (fromMaybe 20 (grepCallLimit call))
+            (fromMaybe 0 (grepCallOffset call))
+            (grepCallIncludeProcess call)
         )
     readMemory _ call =
       taskArchiveRead
@@ -1002,7 +1004,9 @@ data GrepCall = GrepCall
     grepCallTaskId :: Maybe Text,
     grepCallKinds :: [ArchiveKind],
     grepCallCaseSensitive :: Bool,
-    grepCallLimit :: Maybe Int
+    grepCallLimit :: Maybe Int,
+    grepCallOffset :: Maybe Int,
+    grepCallIncludeProcess :: Bool
   }
 
 instance FromJSON GrepCall where
@@ -1013,6 +1017,8 @@ instance FromJSON GrepCall where
       <*> fields .:? "kinds" .!= []
       <*> fields .:? "caseSensitive" .!= False
       <*> fields .:? "limit"
+      <*> fields .:? "offset"
+      <*> fields .:? "includeProcess" .!= False
 
 data ReadCall = ReadCall
   { readCallId :: Text,
@@ -1079,13 +1085,15 @@ grepSpec, readSpec, inspectSpec, updateSpec, sleepSpec :: AGUI.ToolSpec
 grepSpec =
   toolSpec
     "memory_grep"
-    "Deterministically scan this incarnation's immutable Task archive for a fixed string. Returns exact task/run/entry anchors and bounded matching lines; no embedding or semantic recall is used."
+    "Deterministically scan this incarnation's Task archive for a fixed string. Source evidence is ranked before derived assistant text; memory_grep/memory_read process records are excluded unless includeProcess is true. Pagination and source completeness are explicit. Follow source hits with bounded memory_read before relying on them."
     ( object
         [ "query" .= stringSchema,
           "taskId" .= stringSchema,
           "kinds" .= arraySchema (enumSchema ["instruction", "user", "reasoning", "assistant", "tool-call", "tool-result", "wake-packet"]),
           "caseSensitive" .= boolSchema,
-          "limit" .= integerSchema
+          "limit" .= integerSchema,
+          "offset" .= integerSchema,
+          "includeProcess" .= boolSchema
         ]
     )
     ["query"]
@@ -1918,6 +1926,7 @@ drainConsolidations cognition incarnation =
                   identity
                   (consolidationExperienceRef request)
                   (fmap archiveTaskId catalog)
+                  (consolidationExperienceRef request : consolidationEventIds request)
                   closure
                   >>= either
                     (\failure -> finish requested "ImpressionConsolidationFailed" (object ["error" .= failure]))

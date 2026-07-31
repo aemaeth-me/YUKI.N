@@ -131,7 +131,7 @@ providerPreset :: Text -> ProviderPreset
 providerPreset = \case
   "deepseek" ->
     ProviderPreset
-      { presetModel = Just "deepseek-v4-pro",
+      { presetModel = Just "deepseek-v4-flash",
         presetBaseUrl = Just "https://api.deepseek.com",
         presetKeyVariable = Just "DEEPSEEK_API_KEY",
         presetDialect = DeepSeek,

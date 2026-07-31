@@ -21,16 +21,18 @@ where
 
 import Control.Concurrent.MVar
 import Control.Exception (IOException, displayException, try)
+import Control.Applicative ((<|>))
 import Control.Monad ((>=>))
 import Data.Aeson
 import Data.Bool (bool)
 import qualified Data.ByteString.Lazy as LazyByteString
+import Data.Char (isAlphaNum)
 import Data.Foldable (traverse_)
 import Data.Functor (($>), (<&>))
 import Data.List (findIndex, sortOn)
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
-import Data.Maybe (mapMaybe)
+import Data.Maybe (listToMaybe, mapMaybe)
 import Data.Ord (Down (..))
 import qualified Data.Set as Set
 import Data.Set (Set)
@@ -252,7 +254,9 @@ data ArchiveGrepRequest = ArchiveGrepRequest
     archiveGrepTaskId :: Maybe Text,
     archiveGrepKinds :: [ArchiveKind],
     archiveGrepCaseSensitive :: Bool,
-    archiveGrepLimit :: Int
+    archiveGrepLimit :: Int,
+    archiveGrepOffset :: Int,
+    archiveGrepIncludeProcess :: Bool
   }
   deriving stock (Eq, Show)
 
@@ -264,7 +268,9 @@ instance ToJSON ArchiveGrepRequest where
         "taskId" .= archiveGrepTaskId request,
         "kinds" .= archiveGrepKinds request,
         "caseSensitive" .= archiveGrepCaseSensitive request,
-        "limit" .= archiveGrepLimit request
+        "limit" .= archiveGrepLimit request,
+        "offset" .= archiveGrepOffset request,
+        "includeProcess" .= archiveGrepIncludeProcess request
       ]
 
 instance FromJSON ArchiveGrepRequest where
@@ -276,6 +282,8 @@ instance FromJSON ArchiveGrepRequest where
       <*> fields .:? "kinds" .!= []
       <*> fields .:? "caseSensitive" .!= False
       <*> fields .:? "limit" .!= defaultGrepLimit
+      <*> fields .:? "offset" .!= 0
+      <*> fields .:? "includeProcess" .!= False
 
 data ArchiveHit = ArchiveHit
   { archiveHitEntryId :: Text,
@@ -286,8 +294,13 @@ data ArchiveHit = ArchiveHit
     archiveHitSourceId :: Text,
     archiveHitToolName :: Maybe Text,
     archiveHitCallId :: Maybe Text,
+    archiveHitEvidenceClass :: Text,
+    archiveHitSourceCompleteness :: Text,
+    archiveHitArtifactIds :: [Text],
     archiveHitLineNumber :: Int,
     archiveHitMatchOffset :: Int,
+    archiveHitEntryMatchIndex :: Int,
+    archiveHitEntryMatchCount :: Int,
     archiveHitExcerpt :: Text,
     archiveHitCreated :: Integer
   }
@@ -304,8 +317,13 @@ instance ToJSON ArchiveHit where
         "sourceId" .= archiveHitSourceId hit,
         "toolName" .= archiveHitToolName hit,
         "callId" .= archiveHitCallId hit,
+        "evidenceClass" .= archiveHitEvidenceClass hit,
+        "sourceCompleteness" .= archiveHitSourceCompleteness hit,
+        "artifactIds" .= archiveHitArtifactIds hit,
         "lineNumber" .= archiveHitLineNumber hit,
         "matchOffset" .= archiveHitMatchOffset hit,
+        "entryMatchIndex" .= archiveHitEntryMatchIndex hit,
+        "entryMatchCount" .= archiveHitEntryMatchCount hit,
         "excerpt" .= archiveHitExcerpt hit,
         "created" .= archiveHitCreated hit
       ]
@@ -316,6 +334,13 @@ data ArchiveGrepResult = ArchiveGrepResult
     archiveGrepResultCaseSensitive :: Bool,
     archiveGrepResultScannedTasks :: Int,
     archiveGrepResultScannedEntries :: Int,
+    archiveGrepResultMatchedEntries :: Int,
+    archiveGrepResultTotalHits :: Int,
+    archiveGrepResultReturnedHits :: Int,
+    archiveGrepResultOffset :: Int,
+    archiveGrepResultLimit :: Int,
+    archiveGrepResultNextOffset :: Maybe Int,
+    archiveGrepResultHasMore :: Bool,
     archiveGrepResultTruncated :: Bool,
     archiveGrepResultHits :: [ArchiveHit]
   }
@@ -329,6 +354,14 @@ instance ToJSON ArchiveGrepResult where
         "caseSensitive" .= archiveGrepResultCaseSensitive result,
         "scannedTasks" .= archiveGrepResultScannedTasks result,
         "scannedEntries" .= archiveGrepResultScannedEntries result,
+        "scannedCandidates" .= archiveGrepResultScannedEntries result,
+        "matchedEntries" .= archiveGrepResultMatchedEntries result,
+        "totalHits" .= archiveGrepResultTotalHits result,
+        "returnedHits" .= archiveGrepResultReturnedHits result,
+        "offset" .= archiveGrepResultOffset result,
+        "limit" .= archiveGrepResultLimit result,
+        "nextOffset" .= archiveGrepResultNextOffset result,
+        "hasMore" .= archiveGrepResultHasMore result,
         "truncated" .= archiveGrepResultTruncated result,
         "hits" .= archiveGrepResultHits result
       ]
@@ -373,6 +406,9 @@ data ArchiveEntrySlice = ArchiveEntrySlice
     archiveSliceSourceId :: Text,
     archiveSliceToolName :: Maybe Text,
     archiveSliceCallId :: Maybe Text,
+    archiveSliceEvidenceClass :: Text,
+    archiveSliceSourceCompleteness :: Text,
+    archiveSliceArtifactIds :: [Text],
     archiveSliceContent :: Text,
     archiveSliceContentOffset :: Int,
     archiveSliceContentTotal :: Int,
@@ -393,6 +429,9 @@ instance ToJSON ArchiveEntrySlice where
         "sourceId" .= archiveSliceSourceId slice,
         "toolName" .= archiveSliceToolName slice,
         "callId" .= archiveSliceCallId slice,
+        "evidenceClass" .= archiveSliceEvidenceClass slice,
+        "sourceCompleteness" .= archiveSliceSourceCompleteness slice,
+        "artifactIds" .= archiveSliceArtifactIds slice,
         "content" .= archiveSliceContent slice,
         "contentOffset" .= archiveSliceContentOffset slice,
         "contentTotal" .= archiveSliceContentTotal slice,
@@ -934,23 +973,33 @@ grepArchive blobs lock request =
     Right clean ->
       readMVar lock >>= \state ->
         let candidates =
-              sortOn (Down . entryOrder)
-                . filter (grepEntry clean)
+              sortOn (\entry -> (evidenceRank entry, Down (entryOrder entry)))
+                . filter (grepEntry state clean)
                 . Map.elems
                 $ stateEntries state
-         in scanEntries blobs clean candidates <&> fmap (result clean candidates)
+         in scanEntries blobs state clean candidates <&> fmap (result clean candidates)
   where
     result clean candidates hits =
-      ArchiveGrepResult
-        (archiveGrepQuery clean)
-        "fixed"
-        (archiveGrepCaseSensitive clean)
-        (Set.size (Set.fromList (fmap archiveEntryTaskId candidates)))
-        (length candidates)
-        (length hits > archiveGrepLimit clean)
-        selected
-      where
-        selected = take (archiveGrepLimit clean) hits
+      let offset = archiveGrepOffset clean
+          limit = archiveGrepLimit clean
+          selected = take limit (drop offset hits)
+          next = offset + length selected
+          more = next < length hits
+       in ArchiveGrepResult
+            (archiveGrepQuery clean)
+            "fixed"
+            (archiveGrepCaseSensitive clean)
+            (Set.size (Set.fromList (fmap archiveEntryTaskId candidates)))
+            (length candidates)
+            (Set.size (Set.fromList (fmap archiveHitEntryId hits)))
+            (length hits)
+            (length selected)
+            offset
+            limit
+            (bool Nothing (Just next) more)
+            more
+            more
+            selected
 
 cleanGrep :: ArchiveGrepRequest -> Either Text ArchiveGrepRequest
 cleanGrep request =
@@ -959,7 +1008,8 @@ cleanGrep request =
       nonEmpty "task archive grep query" query,
       require (not ("\n" `Text.isInfixOf` query)) "task archive grep query must be one line",
       require (archiveGrepLimit request > 0) "task archive grep limit must be positive",
-      require (archiveGrepLimit request <= maximumGrepLimit) ("task archive grep limit exceeds " <> shown maximumGrepLimit)
+      require (archiveGrepLimit request <= maximumGrepLimit) ("task archive grep limit exceeds " <> shown maximumGrepLimit),
+      require (archiveGrepOffset request >= 0) "task archive grep offset must not be negative"
     ]
     $> request
       { archiveGrepIncarnationId = incarnation,
@@ -971,56 +1021,135 @@ cleanGrep request =
     incarnation = Text.strip (archiveGrepIncarnationId request)
     query = Text.strip (archiveGrepQuery request)
 
-grepEntry :: ArchiveGrepRequest -> ArchiveEntry -> Bool
-grepEntry request entry =
+grepEntry :: ArchiveState -> ArchiveGrepRequest -> ArchiveEntry -> Bool
+grepEntry state request entry =
   archiveEntryIncarnationId entry == archiveGrepIncarnationId request
     && maybe True (== archiveEntryTaskId entry) (archiveGrepTaskId request)
     && archiveEntryKind entry `elem` kinds
+    && (archiveGrepIncludeProcess request || not (processEntry state entry))
   where
     kinds = bool (archiveGrepKinds request) defaultSearchKinds (null (archiveGrepKinds request))
 
 defaultSearchKinds :: [ArchiveKind]
 defaultSearchKinds = [ArchiveUser, ArchiveAssistant, ArchiveToolCall, ArchiveToolResult]
 
-scanEntries :: BlobStore -> ArchiveGrepRequest -> [ArchiveEntry] -> IO (Either Text [ArchiveHit])
-scanEntries blobs request = go []
+evidenceRank :: ArchiveEntry -> Int
+evidenceRank entry =
+  case archiveEntryKind entry of
+    ArchiveUser -> 0
+    ArchiveToolResult -> 0
+    ArchiveAssistant -> 1
+    ArchiveReasoning -> 1
+    ArchiveInstruction -> 1
+    ArchiveWakePacket -> 1
+    ArchiveToolCall -> 2
+
+evidenceClass :: ArchiveState -> ArchiveEntry -> Text
+evidenceClass state entry
+  | processEntry state entry = "process"
+  | archiveEntryKind entry `elem` [ArchiveUser, ArchiveToolResult] = "source"
+  | otherwise = "derived"
+
+processEntry :: ArchiveState -> ArchiveEntry -> Bool
+processEntry state entry =
+  archiveEntryKind entry == ArchiveToolCall
+    || maybe False (`Set.member` memoryProcessTools) (resolvedToolName state entry)
+    || (archiveEntryKind entry == ArchiveToolResult && looksMemoryProcess (archiveEntryPreview entry))
+
+memoryProcessTools :: Set Text
+memoryProcessTools = Set.fromList ["memory_grep", "memory_read", "self_inspect"]
+
+looksMemoryProcess :: Text -> Bool
+looksMemoryProcess content =
+  ("\"scannedEntries\":" `Text.isInfixOf` content && "\"hits\":" `Text.isInfixOf` content)
+    || ("\"anchorEntryId\":" `Text.isInfixOf` content && "\"entries\":" `Text.isInfixOf` content)
+    || ("\"activePrompt\":" `Text.isInfixOf` content && "\"workingMemory\":" `Text.isInfixOf` content)
+
+resolvedToolName :: ArchiveState -> ArchiveEntry -> Maybe Text
+resolvedToolName state entry =
+  archiveEntryToolName entry <|> (archiveEntryCallId entry >>= lookupCall)
+  where
+    lookupCall call =
+      listToMaybe
+        [ name
+          | candidate <- Map.elems (stateEntries state),
+            archiveEntryKind candidate == ArchiveToolCall,
+            archiveEntryCallId candidate == Just call,
+            name <- maybe [] pure (archiveEntryToolName candidate)
+        ]
+
+sourceCompleteness :: ArchiveState -> ArchiveEntry -> Text -> Text
+sourceCompleteness state entry content
+  | archiveEntryKind entry /= ArchiveToolResult = "complete-record"
+  | "[…truncated…]" `Text.isInfixOf` content = "truncated-record"
+  | "[artifact " `Text.isInfixOf` content = "artifact-backed"
+  | resolvedToolName state entry `elem` fmap Just ["shell", "shell_bg", "shell_output", "artifact_read", "fs_read"] = "unknown-source"
+  | otherwise = "complete-record"
+
+artifactIds :: Text -> [Text]
+artifactIds = Set.toAscList . Set.fromList . go
+  where
+    go text =
+      case Text.breakOn "art-" text of
+        (_, suffix)
+          | Text.null suffix -> []
+          | otherwise ->
+              let identifier = Text.takeWhile (\char -> isAlphaNum char || char == '-') suffix
+                  rest = Text.drop (max 1 (Text.length identifier)) suffix
+               in bool (go rest) (identifier : go rest) (Text.length identifier > 4)
+
+scanEntries :: BlobStore -> ArchiveState -> ArchiveGrepRequest -> [ArchiveEntry] -> IO (Either Text [ArchiveHit])
+scanEntries blobs state request = go []
   where
     go hits [] = pure (Right hits)
     go hits (entry : rest) =
       fetchContent blobs entry >>= \case
         Left failure -> pure (Left failure)
         Right content ->
-          let found = lineHits request entry content
+          let found = lineHits state request entry content
            in go (hits <> found) rest
 
-lineHits :: ArchiveGrepRequest -> ArchiveEntry -> Text -> [ArchiveHit]
-lineHits request entry =
-  mapMaybe hit . indexedLines
+lineHits :: ArchiveState -> ArchiveGrepRequest -> ArchiveEntry -> Text -> [ArchiveHit]
+lineHits state request entry content =
+  zipWith build [1 ..] matches
   where
+    matches = indexedLines content >>= lineMatches
+    count = length matches
     needle = normalized (archiveGrepQuery request)
     normalized = bool Text.toCaseFold id (archiveGrepCaseSensitive request)
-    hit (lineNumber, offset, line) =
-      let haystack = normalized line
-          (before, after) = Text.breakOn needle haystack
+    lineMatches (lineNumber, offset, line) =
+      fmap (\column -> (lineNumber, offset, line, column)) (occurrenceColumns needle (normalized line))
+    build index (lineNumber, offset, line, column) =
+      ArchiveHit
+        (archiveEntryId entry)
+        (archiveEntryTaskId entry)
+        (archiveEntryRunId entry)
+        (archiveEntrySeq entry)
+        (archiveEntryKind entry)
+        (archiveEntrySourceId entry)
+        (resolvedToolName state entry)
+        (archiveEntryCallId entry)
+        (evidenceClass state entry)
+        (sourceCompleteness state entry content)
+        (artifactIds content)
+        lineNumber
+        (offset + column)
+        index
+        count
+        (excerptAt column line)
+        (archiveEntryCreated entry)
+
+occurrenceColumns :: Text -> Text -> [Int]
+occurrenceColumns needle = go 0
+  where
+    width = Text.length needle
+    go offset text =
+      let (before, after) = Text.breakOn needle text
        in if Text.null after
-            then Nothing
+            then []
             else
-              let column = Text.length before
-               in Just
-                    ( ArchiveHit
-                        (archiveEntryId entry)
-                        (archiveEntryTaskId entry)
-                        (archiveEntryRunId entry)
-                        (archiveEntrySeq entry)
-                        (archiveEntryKind entry)
-                        (archiveEntrySourceId entry)
-                        (archiveEntryToolName entry)
-                        (archiveEntryCallId entry)
-                        lineNumber
-                        (offset + column)
-                        (excerptAt column line)
-                        (archiveEntryCreated entry)
-                    )
+              let column = offset + Text.length before
+               in column : go (column + width) (Text.drop width after)
 
 indexedLines :: Text -> [(Int, Int, Text)]
 indexedLines = snd . foldl' next (0, []) . zip [1 ..] . Text.splitOn "\n"
@@ -1059,7 +1188,7 @@ readArchive blobs lock request =
                         $ stateEntries state
                  in maybe
                       (pure (Left ("task archive anchor is missing from its task: " <> archiveReadEntryId clean)))
-                      (renderWindow blobs clean anchor entries)
+                      (renderWindow blobs state clean anchor entries)
                       (findIndex ((== archiveEntryId anchor) . archiveEntryId) entries)
 
 cleanRead :: ArchiveReadRequest -> Either Text ArchiveReadRequest
@@ -1082,12 +1211,13 @@ cleanRead request =
 
 renderWindow ::
   BlobStore ->
+  ArchiveState ->
   ArchiveReadRequest ->
   ArchiveEntry ->
   [ArchiveEntry] ->
   Int ->
   IO (Either Text ArchiveReadResult)
-renderWindow blobs request anchor entries index =
+renderWindow blobs state request anchor entries index =
   traverse load selected
     <&> ( fmap
             ( ArchiveReadResult
@@ -1106,6 +1236,7 @@ renderWindow blobs request anchor entries index =
       zipWith
         ( \(entry, content) budget ->
             sliceEntry
+              state
               budget
               (bool 0 (archiveReadOffset request) (archiveEntryId entry == archiveEntryId anchor))
               entry
@@ -1157,8 +1288,8 @@ readBudgets wanted anchor entries =
       | left > 0 = (left - 1, budgets <> [base + 1])
       | otherwise = (left, budgets <> [base])
 
-sliceEntry :: Int -> Int -> ArchiveEntry -> Text -> ArchiveEntrySlice
-sliceEntry wanted anchor entry content =
+sliceEntry :: ArchiveState -> Int -> Int -> ArchiveEntry -> Text -> ArchiveEntrySlice
+sliceEntry state wanted anchor entry content =
   ArchiveEntrySlice
     (archiveEntryId entry)
     (archiveEntryTaskId entry)
@@ -1166,8 +1297,11 @@ sliceEntry wanted anchor entry content =
     (archiveEntrySeq entry)
     (archiveEntryKind entry)
     (archiveEntrySourceId entry)
-    (archiveEntryToolName entry)
+    (resolvedToolName state entry)
     (archiveEntryCallId entry)
+    (evidenceClass state entry)
+    (sourceCompleteness state entry content)
+    (artifactIds content)
     visible
     start
     total

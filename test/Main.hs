@@ -158,6 +158,7 @@ providerTests =
       testCase "rejects provider error chunks" chunkError,
       testCase "requests usage on the wire" wireOptions,
       testCase "serializes provider-specific thinking controls" thinkingWire,
+      testCase "serializes DeepSeek Responses input and tools" responsesWire,
       testCase "attaches usage from the final frame" usageFrame
     ]
   where
@@ -212,19 +213,43 @@ providerTests =
           field name = parseMaybe (withObject "request" (maybe (fail "missing") pure . KeyMap.lookup name))
           thinkingType = (>>= parseMaybe (withObject "thinking" (.: "type"))) . field "thinking"
           effort = (>>= parseMaybe (withText "effort" pure)) . field "reasoning_effort"
+          responseEffort = (>>= parseMaybe (withObject "reasoning" (.: "effort"))) . field "reasoning"
           reasoning =
             field "messages" (requestValue kimi history)
               >>= parseMaybe parseJSON
               >>= listToMaybe
               >>= parseMaybe (withObject "message" (.: "reasoning_content"))
        in sequence_
-            [ thinkingType (requestValue deepseek (ModelRequest [] [])) @?= Just ("enabled" :: Text),
-              effort (requestValue deepseek (ModelRequest [] [])) @?= Just ("max" :: Text),
+            [ thinkingType (requestValue deepseek (ModelRequest [] [])) @?= Nothing,
+              responseEffort (requestValue deepseek (ModelRequest [] [])) @?= Just ("max" :: Text),
               thinkingType (requestValue zai (ModelRequest [] [])) @?= Just ("enabled" :: Text),
               field "reasoning_effort" (requestValue zai (ModelRequest [] [])) @?= Nothing,
               field "thinking" (requestValue kimi (ModelRequest [] [])) @?= Nothing,
               effort (requestValue kimi (ModelRequest [] [])) @?= Just ("low" :: Text),
               reasoning @?= Just ("kept" :: Text)
+            ]
+    responsesWire =
+      let provider = testProvider {openAIProvider = "deepseek", openAIModelName = "deepseek-v4-flash", openAIDialect = DeepSeek}
+          call = ModelToolCall "call-1" "lookup" "{\"query\":\"yuki\"}"
+          turn = AssistantTurn "assistant-1" (Just "answer") (Just "thought") [call]
+          tool = ToolSpec "lookup" "Find something" (object ["type" .= ("object" :: Text)])
+          rendered = requestValue provider (ModelRequest [ChatSystem "system", ChatUser "hello", ChatAssistant turn, ChatToolResult "call-1" "found"] [tool])
+          field name = parseMaybe (withObject "request" (maybe (fail "missing") pure . KeyMap.lookup name)) rendered
+          input = parseMaybe (withObject "request" (.: "input")) rendered :: Maybe [Value]
+          tools = parseMaybe (withObject "request" (.: "tools")) rendered :: Maybe [Value]
+          inputTypes :: Maybe [Text]
+          inputTypes = input >>= traverse (parseMaybe (withObject "item" (.: "type")))
+          toolNames :: Maybe [Text]
+          toolNames = tools >>= traverse (parseMaybe (withObject "tool" (.: "name")))
+          callIds :: Maybe [Maybe Text]
+          callIds = input >>= traverse (parseMaybe (withObject "item" (.:? "call_id")))
+       in sequence_
+            [ field "messages" @?= Nothing,
+              field "stream_options" @?= Nothing,
+              field "model" @?= Just (String "deepseek-v4-flash"),
+              inputTypes @?= Just ["message", "message", "reasoning", "message", "function_call", "function_call_output"],
+              toolNames @?= Just ["lookup"],
+              fmap (Just "call-1" `elem`) callIds @?= Just True
             ]
     usageFrame =
       either assertFailure assertEvents (eitherDecodeStrict' frame)
@@ -253,7 +278,7 @@ providersTests =
       let loaded = defaultProviders
        in sequence_
             [ (providerName <$> Map.lookup "deepseek" loaded) @?= Just "deepseek",
-              (providerDefaultModel <$> Map.lookup "deepseek" loaded) @?= Just "deepseek-v4-pro",
+              (providerDefaultModel <$> Map.lookup "deepseek" loaded) @?= Just "deepseek-v4-flash",
               (providerDialect <$> Map.lookup "deepseek" loaded) @?= Just DeepSeek,
               (providerContextTokens <$> Map.lookup "deepseek" loaded) @?= Just 1000000,
               (providerBaseUrl <$> Map.lookup "zai" loaded) @?= Just "https://open.bigmodel.cn/api/paas/v4",
@@ -314,9 +339,9 @@ providersTests =
                 [ parseMaybe (withObject "provider" (.: "name")) value @?= Just ("deepseek" :: Text),
                   parseMaybe (withObject "provider" (.: "baseUrl")) value @?= Just ("https://api.deepseek.com" :: Text),
                   parseMaybe (withObject "provider" (.: "dialect")) value @?= Just ("deepseek" :: Text),
-                  parseMaybe (withObject "provider" (.: "defaultModel")) value @?= Just ("deepseek-v4-pro" :: Text),
+                  parseMaybe (withObject "provider" (.: "defaultModel")) value @?= Just ("deepseek-v4-flash" :: Text),
                   parseMaybe (withObject "provider" (.: "keyReady")) value @?= Just False,
-                  parseMaybe (withObject "provider" (.: "models")) value @?= Just (["deepseek-v4-pro"] :: [Text])
+                  parseMaybe (withObject "provider" (.: "models")) value @?= Just (["deepseek-v4-flash"] :: [Text])
                 ]
     listingDoesNotProbe =
       newIORef (0 :: Int) >>= \requests ->
@@ -347,9 +372,9 @@ providersTests =
                       [ "name" .= ("deepseek" :: Text),
                         "baseUrl" .= ("https://api.deepseek.com" :: Text),
                         "dialect" .= ("deepseek" :: Text),
-                        "defaultModel" .= ("deepseek-v4-pro" :: Text),
+                        "defaultModel" .= ("deepseek-v4-flash" :: Text),
                         "keyReady" .= True,
-                        "models" .= (["deepseek-v4-pro", "deepseek-v4-flash"] :: [Text])
+                        "models" .= (["deepseek-v4-flash", "deepseek-v4-pro"] :: [Text])
                       ]
                   ]
               view = ConfigView (renderGlobalConfig testSettings (globalThreadConfig testSettings)) store (globalThreadConfig testSettings) (pure (Right [])) staticListing
@@ -1968,7 +1993,8 @@ auditTests =
       testCase "recovers and reports an incomplete final journal line" journalTailRecovery,
       testCase "rejects corruption in the middle of a journal" journalMiddleCorruption,
       testCase "atomic stores survive orphaned crash-temporary files" atomicStoreRecovery,
-      testCase "aggregates a mixed journal into a run summary" summaryAggregates
+      testCase "aggregates a mixed journal into a run summary" summaryAggregates,
+      testCase "reduces noisy journal events into one causal run trace" traceAggregates
     ]
   where
     cleanReplay =
@@ -2155,6 +2181,35 @@ summaryAggregates =
         8
         (Just 100)
         (Just 170)
+
+traceAggregates :: Assertion
+traceAggregates =
+  case runTrace "run-trace" entries of
+    Nothing -> assertFailure "trace was not built"
+    Just trace ->
+      let traceRows = traceSteps trace
+       in sequence_
+            [ traceStatus trace @?= "finished",
+              length (filter ((== "assistant") . traceStepKind) traceRows) @?= 1,
+              length (filter ((== "tool") . traceStepKind) traceRows) @?= 1,
+              length (filter ((== "terminal") . traceStepKind) traceRows) @?= 1,
+              fmap traceStepArtifactIds (listToMaybe (filter ((== "tool") . traceStepKind) traceRows))
+                @?= Just ["art-abc123"]
+            ]
+  where
+    input = (sampleInput []) {runId = "run-trace"}
+    settings = RunSettings 8 Parallel "" 1 Nothing Nothing Nothing
+    entries =
+      [ Entry 1 ["run-trace"] (Just 100) (RunBegin input settings),
+        Entry 2 ["run-trace"] (Just 101) (ModelRequestEntry (ModelRequest [] [])),
+        Entry 3 ["run-trace"] (Just 102) (AgentEventEntry (ReasoningStarted "reason-1")),
+        Entry 4 ["run-trace"] (Just 103) (AgentEventEntry (ReasoningEnded "reason-1")),
+        Entry 5 ["run-trace"] (Just 104) (AgentEventEntry (TextMessageContent "message-1" "answer")),
+        Entry 6 ["run-trace"] (Just 105) (AgentEventEntry (TextMessageContent "message-1" "answer")),
+        Entry 7 ["run-trace"] (Just 106) (ToolCallEntry "call-1" "inspect" "{\"path\":\"x\"}" (ToolOutcome "[artifact art-abc123]" False False)),
+        Entry 8 ["run-trace"] (Just 107) (AgentEventEntry (RunFinished "thread" "run-trace" Nothing)),
+        Entry 9 ["run-trace"] (Just 108) (AgentEventEntry (RunFinished "thread" "run-trace" Nothing))
+      ]
 
 journaledRun :: IO ([Event], [Entry])
 journaledRun =
@@ -2787,6 +2842,9 @@ cognitionTests =
       testCase "records impression activation failures with task scope" cognitionImpressionFailure,
       testCase "consolidates impressions from the actual experience payload closure" cognitionImpressionClosure,
       testCase "rejects ungrounded impression memory proposals" cognitionImpressionProposalGuard,
+      testCase "requires current evidence for new impressions" cognitionImpressionEvidenceGuard,
+      testCase "keeps tool diagnostics out of impressions" cognitionImpressionDiagnosticGuard,
+      testCase "migrates the known false grep impression with provenance" cognitionImpressionFalseMigration,
       testCase "archives and restores non-default incarnations safely" cognitionIncarnationLifecycle,
       testCase "seeds and activates auditable prompt revisions" cognitionPrompts,
       testCase "upgrades an automatic legacy Root to the Task Archive protocol" cognitionRootMigration,
@@ -2934,13 +2992,15 @@ cognitionTaskArchiveRetrieval =
         Nothing
         "completed"
         Nothing
-        [ entry "user-a" ArchiveUser "第一行\nAlpha NEEDLE beta\n第三行" Nothing Nothing Nothing,
+        [ entry "user-a" ArchiveUser "第一行\nAlpha NEEDLE beta\nrepeat repeat repeat\n第三行" Nothing Nothing Nothing,
           entry "reasoning-a" ArchiveReasoning (padded "secret-reasoning") (Just turn) Nothing Nothing,
           entry "assistant-a" ArchiveAssistant (padded "answer-without-query") (Just turn) Nothing Nothing,
-          entry "call-a/call" ArchiveToolCall (padded "call-a-input") (Just turn) (Just callA) (Just "first"),
+          entry "call-a/call" ArchiveToolCall (padded "call-a-input") (Just turn) (Just callA) (Just "shell"),
           entry "call-b/call" ArchiveToolCall (padded "call-b-input") (Just turn) (Just callB) (Just "second"),
-          entry "call-a/result" ArchiveToolResult (padded "tool-A-evidence") (Just callA) (Just callA) (Just "first"),
-          entry "call-b/result" ArchiveToolResult (padded "tool-B-evidence") (Just callB) (Just callB) (Just "second")
+          entry "call-memory/call" ArchiveToolCall "{\"query\":\"recursive-noise\"}" (Just turn) (Just "call-memory") (Just "memory_grep"),
+          entry "call-a/result" ArchiveToolResult (padded "tool-A-evidence" <> "\n[artifact art-source-a: full shell output]") (Just callA) (Just callA) (Just "shell"),
+          entry "call-b/result" ArchiveToolResult (padded "tool-B-evidence") (Just callB) (Just callB) (Just "second"),
+          entry "call-memory/result" ArchiveToolResult "{\"hits\":[{\"excerpt\":\"recursive-noise\"}],\"scannedEntries\":8}" (Just "call-memory") (Just "call-memory") (Just "memory_grep")
         ]
     secondary =
       ArchiveRunDraft "art" "task-b" "run-b" Nothing "completed" Nothing
@@ -2949,19 +3009,24 @@ cognitionTaskArchiveRetrieval =
       ArchiveRunDraft "other" "task-c" "run-c" Nothing "completed" Nothing
         [entry "user-c" ArchiveUser "NEEDLE must remain isolated." Nothing Nothing Nothing]
     verify store =
-      search store (ArchiveGrepRequest "art" "needle" (Just task) [] False 20) >>= \insensitive ->
-        search store (ArchiveGrepRequest "art" "needle" (Just task) [] True 20) >>= \sensitive ->
-          search store (ArchiveGrepRequest "art" "secret-reasoning" Nothing [] False 20) >>= \defaultReasoning ->
-            search store (ArchiveGrepRequest "art" "secret-reasoning" Nothing [ArchiveReasoning] False 20) >>= \explicitReasoning ->
-              search store (ArchiveGrepRequest "art" "needle" Nothing [] False 20) >>= \allOwn ->
-                search store (ArchiveGrepRequest "art" "tool-A-evidence" (Just task) [] False 20) >>= \anchorSearch ->
-                  taskArchiveTasks store "art" 20 >>= \catalog ->
-                    case archiveGrepResultHits anchorSearch of
-                      [anchor] ->
-                        taskArchiveRead store (ArchiveReadRequest "art" (archiveHitEntryId anchor) 0 0 (archiveHitMatchOffset anchor) 256)
-                          >>= withTextRight (verifyWindow store insensitive sensitive defaultReasoning explicitReasoning allOwn catalog anchor)
-                      hits -> assertFailure ("unexpected Task archive anchor hits: " <> show (length hits))
-    verifyWindow store insensitive sensitive defaultReasoning explicitReasoning allOwn catalog anchor window =
+      search store (ArchiveGrepRequest "art" "needle" (Just task) [] False 20 0 False) >>= \insensitive ->
+        search store (ArchiveGrepRequest "art" "needle" (Just task) [] True 20 0 False) >>= \sensitive ->
+          search store (ArchiveGrepRequest "art" "secret-reasoning" Nothing [] False 20 0 False) >>= \defaultReasoning ->
+            search store (ArchiveGrepRequest "art" "secret-reasoning" Nothing [ArchiveReasoning] False 20 0 False) >>= \explicitReasoning ->
+              search store (ArchiveGrepRequest "art" "needle" Nothing [] False 20 0 False) >>= \allOwn ->
+                search store (ArchiveGrepRequest "art" "tool-A-evidence" (Just task) [] False 20 0 False) >>= \anchorSearch ->
+                  search store (ArchiveGrepRequest "art" "repeat" (Just task) [] True 20 0 False) >>= \repeated ->
+                    search store (ArchiveGrepRequest "art" "needle" Nothing [] False 1 0 False) >>= \firstPage ->
+                      search store (ArchiveGrepRequest "art" "needle" Nothing [] False 1 1 False) >>= \secondPage ->
+                        search store (ArchiveGrepRequest "art" "recursive-noise" (Just task) [] True 20 0 False) >>= \processHidden ->
+                          search store (ArchiveGrepRequest "art" "recursive-noise" (Just task) [] True 20 0 True) >>= \processShown ->
+                            taskArchiveTasks store "art" 20 >>= \catalog ->
+                              case archiveGrepResultHits anchorSearch of
+                                [anchor] ->
+                                  taskArchiveRead store (ArchiveReadRequest "art" (archiveHitEntryId anchor) 0 0 (archiveHitMatchOffset anchor) 256)
+                                    >>= withTextRight (verifyWindow store insensitive sensitive defaultReasoning explicitReasoning allOwn repeated firstPage secondPage processHidden processShown catalog anchor)
+                                hits -> assertFailure ("unexpected Task archive anchor hits: " <> show (length hits))
+    verifyWindow store insensitive sensitive defaultReasoning explicitReasoning allOwn repeated firstPage secondPage processHidden processShown catalog anchor window =
       taskArchiveRead store (ArchiveReadRequest "art" (archiveHitEntryId anchor) 0 0 (archiveHitMatchOffset anchor) 1)
         >>= withTextRight
           ( \tiny ->
@@ -2975,25 +3040,39 @@ cognitionTaskArchiveRetrieval =
                         archiveGrepResultHits defaultReasoning @?= [],
                         fmap archiveHitKind (archiveGrepResultHits explicitReasoning) @?= [ArchiveReasoning],
                         sort (fmap archiveHitTaskId (archiveGrepResultHits allOwn)) @?= [task, "task-b"],
+                        fmap archiveHitEntryMatchIndex (archiveGrepResultHits repeated) @?= [1, 2, 3],
+                        fmap archiveHitEntryMatchCount (archiveGrepResultHits repeated) @?= [3, 3, 3],
+                        archiveGrepResultTotalHits firstPage @?= 2,
+                        archiveGrepResultReturnedHits firstPage @?= 1,
+                        archiveGrepResultNextOffset firstPage @?= Just 1,
+                        archiveGrepResultHasMore firstPage @?= True,
+                        archiveGrepResultNextOffset secondPage @?= Nothing,
+                        archiveGrepResultHasMore secondPage @?= False,
+                        archiveGrepResultHits processHidden @?= [],
+                        fmap archiveHitEvidenceClass (archiveGrepResultHits processShown) @?= ["process", "process"],
+                        archiveHitSourceCompleteness anchor @?= "artifact-backed",
+                        archiveHitArtifactIds anchor @?= ["art-source-a"],
                         sort (fmap archiveTaskId catalog) @?= [task, "task-b"],
                         fmap archiveSliceKind entries
                           @?= [ ArchiveReasoning,
                                 ArchiveAssistant,
                                 ArchiveToolCall,
                                 ArchiveToolCall,
+                                ArchiveToolCall,
+                                ArchiveToolResult,
                                 ArchiveToolResult,
                                 ArchiveToolResult
                               ],
                         assertBool "causal read exceeded its global character budget" (sum (fmap (Text.length . archiveSliceContent) entries) <= 256),
-                        assertBool "anchor text was not centered into the bounded read" ("tool-A-evidence" `Text.isInfixOf` archiveSliceContent (entries !! 4)),
+                        assertBool "anchor text was not centered into the bounded read" ("tool-A-evidence" `Text.isInfixOf` archiveSliceContent (entries !! 5)),
                         sum (fmap (Text.length . archiveSliceContent) tinyEntries) @?= 1,
-                        Text.length (archiveSliceContent (tinyEntries !! 4)) @?= 1,
+                        Text.length (archiveSliceContent (tinyEntries !! 5)) @?= 1,
                         assertLeft foreignRead
                       ]
           )
     search store grepRequest =
       taskArchiveGrep store grepRequest >>= either (throwIO . userError . Text.unpack) pure
-    padded label = label <> ":" <> Text.replicate 500 label
+    padded label = label <> ":" <> Text.replicate 500 "x"
     entry source kind content parent callId toolName =
       ArchiveEntryDraft source kind content parent callId toolName
 
@@ -3020,17 +3099,17 @@ cognitionTaskArchiveHooks =
               *> afterRunOutcome hooks input RunSucceeded finalMessages
               *> taskArchiveGrep
                 (cognitionArchive cognition)
-                (ArchiveGrepRequest "yuki" "complete-result-sentinel" (Just "raw-hook-task") [] True 20)
+                (ArchiveGrepRequest "yuki" "complete-result-sentinel" (Just "raw-hook-task") [] True 20 0 False)
               >>= withTextRight
                 ( \full ->
                     taskArchiveGrep
                       (cognitionArchive cognition)
-                      (ArchiveGrepRequest "yuki" "projected-result-stub" (Just "raw-hook-task") [] True 20)
+                      (ArchiveGrepRequest "yuki" "projected-result-stub" (Just "raw-hook-task") [] True 20 0 False)
                       >>= withTextRight
                         ( \stub ->
                             taskArchiveGrep
                               (cognitionArchive cognition)
-                              (ArchiveGrepRequest "yuki" accepted (Just "raw-hook-task") [] True 20)
+                              (ArchiveGrepRequest "yuki" accepted (Just "raw-hook-task") [] True 20 0 False)
                               >>= withTextRight
                                 ( \user ->
                                     taskArchiveRuns (cognitionArchive cognition) "yuki" (Just "raw-hook-task") >>= \runs ->
@@ -3318,8 +3397,93 @@ cognitionImpressionProposalGuard =
       "yuki"
       "experience-1"
       []
+      ["experience-1"]
       "{}"
       >>= assertLeft
+
+cognitionImpressionEvidenceGuard :: Assertion
+cognitionImpressionEvidenceGuard =
+  newMemoryImpressionStore >>= \impressions ->
+    consolidateImpression
+      [impressionDecisionModel "continuity" "This direction may continue." []]
+      Nothing
+      impressions
+      "yuki"
+      "experience-1"
+      []
+      ["experience-1"]
+      "{}"
+      >>= assertLeft
+
+cognitionImpressionDiagnosticGuard :: Assertion
+cognitionImpressionDiagnosticGuard =
+  newMemoryImpressionStore >>= \impressions ->
+    consolidateImpression
+      [impressionDecisionModel "grep lesson" "A truncated memory_grep result requires memory_read." ["experience-1"]]
+      Nothing
+      impressions
+      "yuki"
+      "experience-1"
+      []
+      ["experience-1"]
+      "{}"
+      >>= assertLeft
+
+cognitionImpressionFalseMigration :: Assertion
+cognitionImpressionFalseMigration =
+  withWorkDir $ \dir ->
+    encodeFile (dir ++ "/impressions.json") legacy
+      *> newImpressionStore dir
+      >>= withTextRight
+        ( \store ->
+            impressionRead store "yuki-8nckh0" >>= \state ->
+              impressionRevisions store "yuki-8nckh0" >>= \revisions ->
+                newImpressionStore dir >>= withTextRight
+                  ( \reopened ->
+                      impressionRead reopened "yuki-8nckh0" >>= \again ->
+                        sequence_
+                          [ impressionRevision state @?= 4,
+                            impressionItems state @?= [],
+                            impressionRevision again @?= 4,
+                            assertBool
+                              "migration records the voided impression"
+                              ( any
+                                  (elem "impression-q1r2s3" . impressionRevisionVoidProposals)
+                                  revisions
+                              )
+                          ]
+                  )
+        )
+  where
+    legacy =
+      object
+        [ "states"
+            .= ( Map.fromList
+                   [ ( "yuki-8nckh0" :: Text,
+                       object
+                         [ "incarnationId" .= ("yuki-8nckh0" :: Text),
+                           "revision" .= (3 :: Int),
+                           "items"
+                             .= [ object
+                                    [ "id" .= ("impression-q1r2s3" :: Text),
+                                      "label" .= ("GrepTruncationAwareness" :: Text),
+                                      "intuition" .= ("memory_grep scannedEntries hid 改天孙观为婺女观." :: Text),
+                                      "strength" .= (0.9 :: Double),
+                                      "sourceMemoryIds" .= ([] :: [Text]),
+                                      "sourceExperienceRefs" .= ["event-1" :: Text],
+                                      "updated" .= (1 :: Int)
+                                    ]
+                                ],
+                           "generatorRevision" .= ("impression-consolidation/v2" :: Text),
+                           "effectiveHash" .= ("old" :: Text),
+                           "updated" .= (1 :: Int)
+                         ]
+                     )
+                   ]
+               )
+        , "activations" .= ([] :: [Value])
+        , "revisions" .= ([] :: [Value])
+        ]
 
 cognitionIncarnationLifecycle :: Assertion
 cognitionIncarnationLifecycle =
@@ -3401,6 +3565,32 @@ ungroundedProposalModel =
       )
       $> Stop
 
+impressionDecisionModel :: Text -> Text -> [Text] -> Model
+impressionDecisionModel label intuition sources =
+  fakeModel $ \_ emit ->
+    emit
+      ( ModelTextDelta
+          ( jsonText
+              ( object
+                  [ "impressions"
+                      .= [ object
+                             [ "id" .= ("" :: Text),
+                               "label" .= label,
+                               "intuition" .= intuition,
+                               "strength" .= (0.7 :: Double),
+                               "sourceMemoryIds" .= ([] :: [Text]),
+                               "sourceExperienceRefs" .= sources
+                             ]
+                         ],
+                    "memoryProposals" .= ([] :: [Value]),
+                    "voidProposals" .= ([] :: [Text]),
+                    "reason" .= ("test" :: Text)
+                  ]
+              )
+          )
+      )
+      $> Stop
+
 impressionConsolidationModel :: IORef [ChatMessage] -> Model
 impressionConsolidationModel captured =
   fakeModel $ \request emit ->
@@ -3409,16 +3599,7 @@ impressionConsolidationModel captured =
         ( ModelTextDelta
             ( jsonText
                 ( object
-                    [ "impressions"
-                        .= [ object
-                               [ "id" .= ("" :: Text),
-                                 "label" .= ("continuity" :: Text),
-                                 "intuition" .= ("This direction often continues across tasks." :: Text),
-                                 "strength" .= (0.7 :: Double),
-                                 "sourceMemoryIds" .= ([] :: [Text]),
-                                 "sourceExperienceRefs" .= ([] :: [Text])
-                               ]
-                           ],
+                    [ "impressions" .= ([] :: [Value]),
                       "memoryProposals" .= ([] :: [Value]),
                       "voidProposals" .= ([] :: [Text]),
                       "reason" .= ("integrated the completed experience" :: Text)
@@ -4745,6 +4926,7 @@ serverTests =
       testCase "lists artifacts and serves raw content" artifactsOverHttp,
       testCase "lists journal runs and filters entries by run" journalOverHttp,
       testCase "serves a run summary and 404s unknown runs" summaryOverHttp,
+      testCase "serves an aggregated run trace" traceOverHttp,
       testCase "replays a journaled run over HTTP" replayOverHttp,
       testCase "degrades per capability" capabilityDegradation,
       testCase "inspection routes 404 without an Inspection" inspectionMissing
@@ -4890,6 +5072,23 @@ summaryOverHttp =
                 <*> fields .: "toolCalls"
           )
 
+traceOverHttp :: Assertion
+traceOverHttp =
+  inspectionFixture >>= \(app, _, _) ->
+    runSession (request (httpGet ["journal", "runs", "run-1", "trace"])) app >>= \found ->
+      runSession (request (httpGet ["journal", "runs", "missing", "trace"])) app >>= \unknown ->
+        sequence_
+          [ simpleStatus found @?= status200,
+            simpleStatus unknown @?= status404,
+            either assertFailure (assertBool "trace includes causal steps" . (> 2)) (decodeSteps (simpleBody found))
+          ]
+  where
+    decodeSteps :: LazyByteString.ByteString -> Either String Int
+    decodeSteps body =
+      eitherDecode body
+        >>= parseEither
+          (withObject "trace" (\fields -> length <$> (fields .: "steps" :: Parser [Value])))
+
 replayOverHttp :: Assertion
 replayOverHttp =
   inspectionFixture >>= \(app, _, eventCount) ->
@@ -4968,7 +5167,7 @@ configTests :: TestTree
 configTests =
   testGroup
     "configuration"
-    [ testCase "defaults to a proxy-safe local port and DeepSeek V4 Pro" deepSeekDefaults,
+    [ testCase "defaults to a proxy-safe local port and DeepSeek V4 Flash" deepSeekDefaults,
       testCase "requires model and URL for unknown providers" customRequiresConfiguration,
       testCase "sub-agent depth defaults to one, accepts zero, rejects bad values" subAgentDepthConfig,
       testCase "provider retries default to three, accept zero, reject bad values" providerRetriesConfig,
@@ -4987,7 +5186,7 @@ deepSeekDefaults =
        in sequence_
             [ openAIProvider provider @?= "deepseek",
               settingsPort settings @?= 18080,
-              openAIModelName provider @?= "deepseek-v4-pro",
+              openAIModelName provider @?= "deepseek-v4-flash",
               openAIBaseUrl provider @?= "https://api.deepseek.com",
               openAIDialect provider @?= DeepSeek,
               openAIThinking provider @?= ThinkingEnabled High,
@@ -7199,7 +7398,7 @@ configMasksKey =
             [ simpleStatus response @?= status200,
               assertBool "masks the API key" (Text.isInfixOf "＊＊＊" body),
               assertBool "never leaks the API key" (not (Text.isInfixOf "super-secret-key-123" body)),
-              assertBool "summarizes the provider" (Text.isInfixOf "deepseek-v4-pro" body)
+              assertBool "summarizes the provider" (Text.isInfixOf "deepseek-v4-flash" body)
             ]
 
 perThreadPrompts :: Assertion
