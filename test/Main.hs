@@ -1,5 +1,6 @@
 module Main (main) where
 
+import Control.Applicative ((<|>))
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar
 import Control.Exception (IOException, SomeException, throwIO, try)
@@ -7198,7 +7199,11 @@ reasoningEffortResolution =
           inherited = emptyThreadConfig {configReasoningEffort = Just Max}
           keys = Map.singleton "kimi-coding" "key"
           effort runtime =
-            parseMaybe (withObject "request" (.: "reasoning_effort"))
+            parseMaybe
+              ( withObject "request" $ \request ->
+                  (request .: "reasoning_effort")
+                    <|> (request .: "reasoning" >>= \reasoning -> reasoning .: "effort")
+              )
               (modelRender (runtimeModel runtime) (ModelRequest [] []))
        in (,)
             <$> resolveRuntime manager testProvider Nothing base selected defaultProviders keys
