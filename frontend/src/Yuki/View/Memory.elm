@@ -275,19 +275,25 @@ rememberForm model =
     details [ Attr.class "remember-form" ]
         [ summary [] [ text "写入一条明确记忆" ]
         , form [ Events.onSubmit RememberMemory ]
-            [ div [ Attr.class "remember-meta" ]
-                [ select [ Attr.value model.memoryKind, Events.onInput MemoryKindChanged ]
-                    [ option [ Attr.value "semantic" ] [ text "事实 / 判断" ]
-                    , option [ Attr.value "identity" ] [ text "自我认识" ]
-                    , option [ Attr.value "procedural" ] [ text "方法经验" ]
-                    , option [ Attr.value "relational" ] [ text "协作默契" ]
-                    , option [ Attr.value "observation" ] [ text "待验证观察" ]
-                    ]
-                , select [ Attr.value model.memoryVisibility, Events.onInput MemoryVisibilityChanged ]
-                    [ option [ Attr.value "private" ] [ text "当前 Yuki 私有" ]
-                    , option [ Attr.value "shared" ] [ text "共享候选" ]
-                    ]
-                ]
+             [ div [ Attr.class "remember-meta" ]
+                 [ div [ Attr.class "remember-field" ]
+                     [ label [ Attr.for "memory-kind" ] [ text "记忆类型" ]
+                     , select [ Attr.id "memory-kind", Attr.value model.memoryKind, Events.onInput MemoryKindChanged ]
+                         [ option [ Attr.value "semantic" ] [ text "事实 / 判断" ]
+                         , option [ Attr.value "identity" ] [ text "自我认识" ]
+                         , option [ Attr.value "procedural" ] [ text "方法经验" ]
+                         , option [ Attr.value "relational" ] [ text "协作默契" ]
+                         , option [ Attr.value "observation" ] [ text "待验证观察" ]
+                         ]
+                     ]
+                 , div [ Attr.class "remember-field" ]
+                     [ label [ Attr.for "memory-visibility" ] [ text "作用域" ]
+                     , select [ Attr.id "memory-visibility", Attr.value model.memoryVisibility, Events.onInput MemoryVisibilityChanged ]
+                         [ option [ Attr.value "private" ] [ text "当前 Yuki 私有" ]
+                         , option [ Attr.value "shared" ] [ text "共享候选" ]
+                         ]
+                     ]
+                 ]
             , input
                 [ Attr.placeholder "写下记忆正文；系统会为它建立独立版本与来源收据。"
                 , Attr.value model.memoryDraft
@@ -573,7 +579,7 @@ completenessLabel value =
             "记录完整"
 
         "artifact-backed" ->
-            "可追溯到完整工件"
+            "可追溯到完整结果"
 
         "truncated-record" ->
             "仅保存了截断内容"
@@ -591,7 +597,7 @@ artifactLabel identifiers =
         ""
 
     else
-        " · 工件 " ++ String.join "、" identifiers
+        " · 完整结果 " ++ String.join "、" identifiers
 
 
 rawHistory : String -> Remote (List Encode.Value) -> Html Msg

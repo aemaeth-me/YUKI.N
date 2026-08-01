@@ -15,6 +15,13 @@ rail model =
             [ Attr.class "identity-add"
             , Attr.type_ "button"
             , Attr.attribute "aria-label" "新建 Yuki"
+            , Attr.disabled
+                (State.isBusy model.phase
+                    || model.selfSaving
+                    || model.generatingPrompt
+                    || model.activatingPrompt /= Nothing
+                    || model.promptEditor /= Nothing
+                )
             , Events.onClick OpenYukiForm
             ]
             [ text "+" ]
@@ -40,7 +47,14 @@ identityButton model yuki =
         [ Attr.classList [ ( "identity-button", True ), ( "current", yuki.id == model.incarnationId ) ]
         , Attr.type_ "button"
         , Attr.title (yuki.name ++ " · " ++ yuki.direction)
-        , Attr.disabled (yuki.id == model.incarnationId || State.isBusy model.phase || model.selfSaving)
+        , Attr.disabled
+            (yuki.id == model.incarnationId
+                || State.isBusy model.phase
+                || model.selfSaving
+                || model.generatingPrompt
+                || model.activatingPrompt /= Nothing
+                || model.promptEditor /= Nothing
+            )
         , Events.onClick (SwitchYuki yuki.id)
         ]
         [ span [ Attr.class "identity-mark" ] [ text (initial yuki.name) ]

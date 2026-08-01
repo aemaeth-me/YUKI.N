@@ -63,7 +63,7 @@ view model =
                     , button
                         [ Attr.class "primary"
                         , Attr.type_ "submit"
-                        , Attr.disabled model.selfSaving
+                        , Attr.disabled (model.selfSaving || model.generatingPrompt || model.promptEditor /= Nothing)
                         ]
                         [ text (if model.selfSaving then "保存中…" else "保存并生成 Prompt 草案") ]
                     ]
@@ -104,7 +104,7 @@ promptWorkspace model =
                 [ button [ Attr.type_ "button", Events.onClick RefreshPrompts ] [ text "刷新" ]
                 , button
                     [ Attr.type_ "button"
-                    , Attr.disabled model.generatingPrompt
+                    , Attr.disabled (model.generatingPrompt || model.promptEditor /= Nothing)
                     , Events.onClick GeneratePrompt
                     ]
                     [ text (if model.generatingPrompt then "生成中…" else "生成 Charter 草案") ]
@@ -162,14 +162,27 @@ promptRevision model root revision =
                     )
                 ]
             , div [ Attr.class "prompt-entry-actions" ]
-                [ button [ Attr.type_ "button", Events.onClick (BeginPromptEdit root revision) ] [ text "基于此版本修改" ]
+                 [ button
+                     [ Attr.type_ "button"
+                     , Attr.disabled
+                         (model.promptEditor /= Nothing
+                             || model.generatingPrompt
+                             || model.activatingPrompt /= Nothing
+                         )
+                     , Events.onClick (BeginPromptEdit root revision)
+                     ]
+                     [ text "基于此版本修改" ]
                 , if revision.status == "active" then
                     text ""
 
                   else
                     button
                         [ Attr.type_ "button"
-                        , Attr.disabled (model.activatingPrompt /= Nothing)
+                         , Attr.disabled
+                             (model.activatingPrompt /= Nothing
+                                 || model.generatingPrompt
+                                 || model.promptEditor /= Nothing
+                             )
                         , Events.onClick
                             (if root then
                                 ActivateRootPrompt revision.id (activeRootOrdinal model.rootPrompts)
@@ -196,6 +209,8 @@ promptEditor model =
                     [ h2 [] [ text (if editor.root then "修改 Root Prompt" else "修改 Yuki Prompt") ]
                     , button [ Attr.type_ "button", Attr.disabled editor.saving, Events.onClick CancelPromptEdit ] [ text "关闭" ]
                     ]
+                , p [ Attr.class "prompt-editor-help" ]
+                    [ text "这里显示本次生成或修订后真正会进入模型的 Prompt。你可以直接改正文；保存会创建新的可追溯草案，不会覆盖历史版本。" ]
                 , label [ Attr.for "prompt-source" ] [ text "修改说明" ]
                 , input
                     [ Attr.id "prompt-source"

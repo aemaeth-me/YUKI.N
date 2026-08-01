@@ -2,6 +2,7 @@ module Yuki.N.ToolsTest
   ( workToolTests,
     sandboxEscape,
     writeEditRead,
+    readKeepsMediumContent,
     paginatedRead,
     editFailures,
     staleEdit,
@@ -91,6 +92,7 @@ workToolTests =
     "work tools"
     [ testCase "sandbox rejects dotdot and absolute escapes" sandboxEscape,
       testCase "write then edit then read with diff outcomes" writeEditRead,
+      testCase "fs_read keeps medium files in one result" readKeepsMediumContent,
       testCase "fs_read pages a window, clamps and rejects out-of-bounds offsets" paginatedRead,
       testCase "fs_edit fails on missing and ambiguous old text" editFailures,
       testCase "fs_edit demands a fresh read and fs_write records the stamp" staleEdit,
@@ -132,20 +134,30 @@ sandboxEscape = withWorkDir exercise
     toolOutcomeContent written @?= "path escapes the work directory"
 
 writeEditRead :: Assertion
-writeEditRead = withWorkDir exercise
+writeEditRead = withWorkDir $ \dir -> do
+  tools <- workTools Nothing dir
+  written <- callTool tools "fs_write" (object ["path" .= ("sub/notes.txt" :: Text), "content" .= ("alpha\nbeta\n" :: Text)])
+  edited <- callTool tools "fs_edit" (object ["path" .= ("sub/notes.txt" :: Text), "old" .= ("beta" :: Text), "new" .= ("gamma" :: Text)])
+  readBack <- callTool tools "fs_read" (object ["path" .= ("sub/notes.txt" :: Text)])
+  toolOutcomeError written @?= False
+  toolOutcomeContent written
+    @?= Text.unlines ["--- a/sub/notes.txt", "+++ b/sub/notes.txt", "@@ -1,0 +1,2 @@", "+alpha", "+beta"]
+  toolOutcomeContent edited
+    @?= Text.unlines ["--- a/sub/notes.txt", "+++ b/sub/notes.txt", "@@ -1,2 +1,2 @@", " alpha", "-beta", "+gamma"]
+  toolOutcomeError readBack @?= False
+  toolOutcomeContent readBack @?= "alpha\ngamma\n"
+
+readKeepsMediumContent :: Assertion
+readKeepsMediumContent = withWorkDir exercise
  where
   exercise dir = do
-    tools <- workTools Nothing dir
-    written <- callTool tools "fs_write" (object ["path" .= ("sub/notes.txt" :: Text), "content" .= ("alpha\nbeta\n" :: Text)])
-    edited <- callTool tools "fs_edit" (object ["path" .= ("sub/notes.txt" :: Text), "old" .= ("beta" :: Text), "new" .= ("gamma" :: Text)])
-    readBack <- callTool tools "fs_read" (object ["path" .= ("sub/notes.txt" :: Text)])
-    toolOutcomeError written @?= False
-    toolOutcomeContent written
-      @?= Text.unlines ["--- a/sub/notes.txt", "+++ b/sub/notes.txt", "@@ -1,0 +1,2 @@", "+alpha", "+beta"]
-    toolOutcomeContent edited
-      @?= Text.unlines ["--- a/sub/notes.txt", "+++ b/sub/notes.txt", "@@ -1,2 +1,2 @@", " alpha", "-beta", "+gamma"]
-    toolOutcomeError readBack @?= False
-    toolOutcomeContent readBack @?= "alpha\ngamma\n"
+    store <- newMemoryArtifactStore
+    tools <- workTools (Just store) dir
+    let content = Text.replicate 1000 "x"
+    TextIO.writeFile (dir ++ "/medium.txt") content
+    outcome <- callTool tools "fs_read" (object ["path" .= ("medium.txt" :: Text)])
+    toolOutcomeError outcome @?= False
+    toolOutcomeContent outcome @?= content
 
 paginatedRead :: Assertion
 paginatedRead = withWorkDir exercise

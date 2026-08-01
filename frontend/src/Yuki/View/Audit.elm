@@ -15,7 +15,7 @@ view model =
         [ div [ Attr.class "page-intro page-intro-actions" ]
             [ div []
                 [ h1 [] [ text "检查" ]
-                , p [] [ text "运行、事件、请求响应与工件的来源面；它服务于核查，不冒充日常工作入口。" ]
+                , p [] [ text "运行、事件、请求响应与完整结果的来源面；它服务于核查，不冒充日常工作入口。" ]
                 ]
             , button [ Attr.type_ "button", Events.onClick RefreshAudit ] [ text "刷新索引" ]
             ]
@@ -189,7 +189,7 @@ traceStep item =
                                 [ Attr.type_ "button"
                                 , Events.onClick (ToggleArtifact identifier)
                                 ]
-                                [ text ("工件 " ++ identifier) ]
+                                [ text ("完整结果 " ++ identifier) ]
                         )
                         item.artifactIds
                     )
@@ -348,19 +348,19 @@ artifacts model =
         [ div [ Attr.class "section-heading" ]
             [ div []
                 [ span [ Attr.class "eyebrow" ] [ text "来源材料" ]
-                , h2 [] [ text "工件" ]
+                , h2 [] [ text "完整结果" ]
                 ]
             ]
         , case model.artifacts of
             Loading ->
-                quiet "正在读取工件索引…"
+                quiet "正在读取完整结果索引…"
 
             Unavailable message ->
                 quiet message
 
             Ready values ->
                 if List.isEmpty values then
-                    quiet "尚无工件。"
+                     quiet "尚无保存的完整结果。"
 
                 else
                     div [ Attr.class "artifact-list" ] (List.map (artifact model) values)

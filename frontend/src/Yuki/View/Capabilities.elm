@@ -77,7 +77,7 @@ configForm model =
                 ]
             ]
         , form [ Attr.class "config-form", Events.onSubmit SaveConfig ]
-            [ label [] [ text "工作目录" ]
+            [ label [ Attr.for "config-cwd" ] [ text "工作目录" ]
             , div [ Attr.class "choice-row" ]
                 [ choice (draft.cwdMode == "inherit") (ConfigCwdModeChanged "inherit") "继承全局"
                 , choice (draft.cwdMode == "none") (ConfigCwdModeChanged "none") "不挂载目录"
@@ -85,21 +85,17 @@ configForm model =
                 ]
             , input
                 [ Attr.placeholder "/absolute/path"
+                , Attr.id "config-cwd"
                 , Attr.value draft.cwd
                 , Attr.disabled (draft.cwdMode /= "path")
                 , Events.onInput ConfigCwdChanged
                 ]
                 []
-            , label [] [ text "Provider / 模型 / 推理强度" ]
+            , label [ Attr.for "config-provider" ] [ text "Provider / 模型 / 推理强度" ]
             , div [ Attr.class "config-triple" ]
-                [ providerSelect model.providers draft.provider
-                , modelSelect model.providers draft.provider draft.model
-                , input
-                    [ Attr.placeholder "reasoning effort（留空继承）"
-                    , Attr.value draft.reasoningEffort
-                    , Events.onInput ConfigEffortChanged
-                    ]
-                    []
+                [ fieldControl "Provider" "config-provider" (providerSelect model.providers draft.provider)
+                , fieldControl "模型" "config-model" (modelSelect model.providers draft.provider draft.model)
+                , fieldControl "推理强度" "config-reasoning-effort" (reasoningSelect draft.reasoningEffort)
                 ]
             , label [] [ text "能力 gate" ]
             , div [ Attr.class "gate-grid" ]
@@ -109,9 +105,9 @@ configForm model =
                 ]
             , label [] [ text "上下文策略覆盖" ]
             , div [ Attr.class "config-triple" ]
-                [ numberField "预留 token" draft.contextReserveTokens ConfigReserveChanged
-                , numberField "保留轮组" draft.contextKeepUnits ConfigKeepChanged
-                , numberField "摘要上限" draft.contextSummaryTokens ConfigSummaryChanged
+                [ fieldControl "预留 token" "config-reserve" (numberField "config-reserve" "预留 token" draft.contextReserveTokens ConfigReserveChanged)
+                , fieldControl "保留轮组" "config-keep" (numberField "config-keep" "保留轮组" draft.contextKeepUnits ConfigKeepChanged)
+                , fieldControl "摘要上限" "config-summary" (numberField "config-summary" "摘要上限" draft.contextSummaryTokens ConfigSummaryChanged)
                 ]
             , label [ Attr.for "task-system-prompt" ] [ text "任务级 Prompt 覆盖（兼容入口）" ]
             , textarea
@@ -136,7 +132,7 @@ configForm model =
 
 providerSelect : Remote (List ProviderEntry) -> String -> Html Msg
 providerSelect remote current =
-    select [ Attr.value current, Events.onInput ConfigProviderChanged ] <|
+    select [ Attr.id "config-provider", Attr.value current, Events.onInput ConfigProviderChanged ] <|
         option [ Attr.value "" ] [ text "继承 provider" ]
             :: (case remote of
                     Ready entries ->
@@ -170,17 +166,36 @@ modelSelect remote provider current =
     in
     if List.isEmpty models then
         input
-            [ Attr.placeholder "模型（留空继承）"
+            [ Attr.id "config-model"
+            , Attr.placeholder "模型（留空继承）"
             , Attr.value current
             , Events.onInput ConfigModelChanged
             ]
             []
 
     else
-        select [ Attr.value current, Events.onInput ConfigModelChanged ]
+        select [ Attr.id "config-model", Attr.value current, Events.onInput ConfigModelChanged ]
             (option [ Attr.value "" ] [ text "继承默认模型" ]
                 :: List.map (\name -> option [ Attr.value name ] [ text name ]) models
             )
+
+
+reasoningSelect : String -> Html Msg
+reasoningSelect current =
+    select [ Attr.id "config-reasoning-effort", Attr.value current, Events.onInput ConfigEffortChanged ]
+        [ option [ Attr.value "" ] [ text "继承默认推理强度" ]
+        , option [ Attr.value "low" ] [ text "低 · low" ]
+        , option [ Attr.value "high" ] [ text "高 · high" ]
+        , option [ Attr.value "max" ] [ text "最高 · max" ]
+        ]
+
+
+fieldControl : String -> String -> Html Msg -> Html Msg
+fieldControl labelText identifier control =
+    div [ Attr.class "config-field" ]
+        [ label [ Attr.for identifier ] [ text labelText ]
+        , control
+        ]
 
 
 choice : Bool -> Msg -> String -> Html Msg
@@ -205,12 +220,14 @@ gate labelText key value =
         ]
 
 
-numberField : String -> String -> (String -> Msg) -> Html Msg
-numberField placeholder value onInput =
+numberField : String -> String -> String -> (String -> Msg) -> Html Msg
+numberField identifier placeholder value onInput =
     input
-        [ Attr.type_ "number"
+        [ Attr.id identifier
+        , Attr.type_ "number"
         , Attr.min "1"
         , Attr.placeholder placeholder
+        , Attr.attribute "aria-label" placeholder
         , Attr.value value
         , Events.onInput onInput
         ]

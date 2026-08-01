@@ -183,6 +183,20 @@ encodeMessage tools message =
                       )
                     ]
 
+        ToolCallMessage identifier ->
+            Dict.get identifier tools
+                |> Maybe.map
+                    (\tool ->
+                        Encode.object
+                            [ ( "id"
+                              , Encode.string ("tool-" ++ tool.id)
+                              )
+                            , ( "role", Encode.string "assistant" )
+                            , ( "content", Encode.null )
+                            , ( "toolCalls", Encode.list encodeToolCall [ tool ] )
+                            ]
+                    )
+
         ToolMessage result ->
             Just <|
                 Encode.object

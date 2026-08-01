@@ -74,11 +74,18 @@ const transport = (kind, extra = {}) =>
   app.ports.transportEvent.send({ kind, ...extra });
 
 const decodeEvent = (payload, context) => {
+  const event = JSON.parse(payload);
   try {
     app.ports.agentEvent.send(contextualizeAgentEvent(payload, context));
   } catch (error) {
     throw new Error(`invalid AG-UI event: ${error.message}`);
   }
+  return (
+    event.type === "RUN_FINISHED" ||
+    event.type === "RUN_ERROR" ||
+    event.type === "RUN_CANCELLED" ||
+    (event.type === "CUSTOM" && event.name === "run.cancelled")
+  );
 };
 
 const consumeSse = async (body, emit) => {
@@ -86,10 +93,11 @@ const consumeSse = async (body, emit) => {
   const decoder = new TextDecoder();
   let buffer = "";
   let data = [];
+  let terminal = false;
 
   const flush = () => {
     if (data.length > 0) {
-      emit(data.join("\n"));
+      terminal = emit(data.join("\n")) || terminal;
       data = [];
     }
   };
@@ -117,7 +125,7 @@ const consumeSse = async (body, emit) => {
     if (done) {
       if (buffer !== "") line(buffer);
       flush();
-      return;
+      return terminal;
     }
   }
 };
@@ -148,13 +156,23 @@ const run = async (command) => {
     if (!response.body) throw new Error("streaming response body unavailable");
 
     transport("open", { runId: command.runId });
-    await consumeSse(response.body, (payload) =>
-      decodeEvent(payload, {
+    const terminal = await consumeSse(response.body, (payload) => {
+      if (active?.token !== token) return false;
+      return decodeEvent(payload, {
         threadId: command.input.threadId,
         runId: command.runId,
-      }),
-    );
-    if (active?.token === token) transport("closed", { runId: command.runId });
+      });
+    });
+    if (active?.token === token) {
+      if (terminal) {
+        transport("closed", { runId: command.runId });
+      } else {
+        transport("error", {
+          runId: command.runId,
+          message: "流式连接提前结束，未收到运行完成事件。",
+        });
+      }
+    }
   } catch (error) {
     if (active?.token !== token) return;
     if (error.name === "AbortError") {
@@ -240,7 +258,17 @@ const inspectionBase = (endpoint) => {
 };
 
 const inspect = async (request) => {
-  const base = inspectionBase(request.endpoint);
+  let base;
+  try {
+    base = inspectionBase(request.endpoint);
+  } catch (error) {
+    app.ports.inspectionResult.send({
+      kind: request.kind,
+      status: 0,
+      body: error.message,
+    });
+    return;
+  }
   const url = new URL(String(request.path ?? "").replace(/^\/+/, ""), base);
   let status = 0;
   let body = null;

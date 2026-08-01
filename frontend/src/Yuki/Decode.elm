@@ -1,5 +1,6 @@
 module Yuki.Decode exposing
     ( agentEvent
+    , agentEventEnvelope
     , incarnation
     , inspectionResult
     , memorySearch
@@ -36,6 +37,22 @@ agentEvent raw =
             )
 
 
+agentEventEnvelope : Decode.Value -> Result String AgentEnvelope
+agentEventEnvelope raw =
+    Decode.decodeValue
+        (Decode.map2 Tuple.pair
+            (Decode.field "threadId" Decode.string)
+            (Decode.field "runId" Decode.string)
+        )
+        raw
+        |> Result.mapError Decode.errorToString
+        |> Result.andThen
+            (\( threadId, runIdentifier ) ->
+                agentEvent raw
+                    |> Result.map (\event -> { threadId = threadId, runId = runIdentifier, event = event })
+            )
+
+
 eventDecoder : String -> Decoder AgentEvent
 eventDecoder kind =
     case kind of
@@ -53,6 +70,9 @@ eventDecoder kind =
             Decode.map2 RunError
                 (Decode.field "message" Decode.string)
                 (Decode.maybe (Decode.field "code" Decode.string))
+
+        "RUN_CANCELLED" ->
+            Decode.map RunCancelled (Decode.field "runId" Decode.string)
 
         "STEP_STARTED" ->
             Decode.map StepStarted (Decode.field "stepName" Decode.string)

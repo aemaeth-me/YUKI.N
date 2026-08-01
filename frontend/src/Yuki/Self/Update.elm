@@ -22,7 +22,14 @@ import Yuki.Types exposing (..)
 
 switch : String -> Model -> ( Model, Effect )
 switch identifier model =
-    if identifier == model.incarnationId || State.isBusy model.phase || model.selfSaving then
+    if
+        identifier == model.incarnationId
+            || State.isBusy model.phase
+            || model.selfSaving
+            || model.generatingPrompt
+            || model.activatingPrompt /= Nothing
+            || model.promptEditor /= Nothing
+    then
         ( model, None )
 
     else
@@ -56,6 +63,7 @@ switch identifier model =
                     , selfNameDraft = incarnation.name
                     , selfDirectionDraft = incarnation.direction
                     , selfImpressionModelDraft = Maybe.withDefault "" incarnation.impressionModel
+                    , selfError = Nothing
                     , archiveYukiConfirm = False
                     , deleteYukiConfirm = Nothing
                     , sessions = Loading
@@ -76,6 +84,9 @@ switch identifier model =
                     , prompts = Loading
                     , rootPrompts = Loading
                     , promptEditor = Nothing
+                    , generatingPrompt = False
+                    , activatingPrompt = Nothing
+                    , promptMessage = Nothing
                     , capabilities = Loading
                     , taskConfig = Loading
                     , globalConfig = Loading
@@ -106,6 +117,9 @@ generatePrompt model =
     if model.generatingPrompt then
         ( model, None )
 
+    else if model.promptEditor /= Nothing then
+        ( { model | promptMessage = Just "请先保存或关闭当前 Prompt 草案，再生成新的版本。" }, None )
+
     else
         ( { model | generatingPrompt = True, promptMessage = Nothing }
         , Inspect <|
@@ -125,7 +139,7 @@ generatePrompt model =
 
 activatePrompt : Bool -> String -> Int -> Model -> ( Model, Effect )
 activatePrompt root identifier expected model =
-    if model.activatingPrompt /= Nothing then
+    if model.activatingPrompt /= Nothing || model.generatingPrompt || model.promptEditor /= Nothing then
         ( model, None )
 
     else
@@ -164,10 +178,19 @@ savePromptEdit model =
                 ( { model | promptMessage = Just "修改说明与 Prompt 正文都不能为空。" }, None )
 
             else
-                ( mapPromptEditor (\value -> { value | saving = True }) model
+                let
+                    edited =
+                        mapPromptEditor (\value -> { value | saving = True }) model
+                in
+                ( { edited | generatingPrompt = True }
                 , Inspect <|
                     Encoder.inspectionRequest model
-                        (if editor.root then "prompts/edit-root" else "prompts/edit/" ++ model.incarnationId)
+                        (if editor.root then
+                            "prompts/edit-root/" ++ model.incarnationId
+
+                         else
+                            "prompts/edit/" ++ model.incarnationId
+                        )
                         "POST"
                         (Just
                             (Encode.object
@@ -195,7 +218,10 @@ save model =
         direction =
             String.trim model.selfDirectionDraft
     in
-    if String.isEmpty name || String.isEmpty direction then
+    if model.promptEditor /= Nothing || model.generatingPrompt then
+        ( { model | promptMessage = Just "请先保存或关闭当前 Prompt 草案，再保存身份来源。" }, None )
+
+    else if String.isEmpty name || String.isEmpty direction then
         ( { model | selfError = Just "名称与方向都不能为空。" }, None )
 
     else

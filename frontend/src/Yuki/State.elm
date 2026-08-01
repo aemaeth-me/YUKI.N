@@ -1,5 +1,6 @@
 module Yuki.State exposing
     ( appendMessage
+    , appendToolCall
     , compact
     , completeStreaming
     , taskName
@@ -37,7 +38,13 @@ restoreMessage entry model =
 
         TranscriptReasoning identifier content ->
             appendMessage identifier
-                (ReasoningMessage { id = identifier, content = content, complete = True })
+                (ReasoningMessage
+                    { id = identifier
+                    , content = content
+                    , chunks = if String.isEmpty content then [] else [ content ]
+                    , complete = True
+                    }
+                )
                 model
 
         TranscriptAssistant identifier content calls ->
@@ -68,6 +75,7 @@ restoreMessage entry model =
                 (AssistantMessage
                     { id = identifier
                     , content = content
+                    , chunks = if String.isEmpty content then [] else [ content ]
                     , toolCalls = List.map .id calls
                     , complete = True
                     }
@@ -90,7 +98,14 @@ ensureAssistant identifier model =
 
     else
         appendMessage identifier
-            (AssistantMessage { id = identifier, content = "", toolCalls = [], complete = False })
+            (AssistantMessage
+                { id = identifier
+                , content = ""
+                , chunks = []
+                , toolCalls = []
+                , complete = False
+                }
+            )
             model
 
 
@@ -101,7 +116,7 @@ ensureReasoning identifier model =
 
     else
         appendMessage identifier
-            (ReasoningMessage { id = identifier, content = "", complete = False })
+            (ReasoningMessage { id = identifier, content = "", chunks = [], complete = False })
             model
 
 
@@ -206,6 +221,11 @@ appendMessage identifier message model =
             | messages = Dict.insert identifier message model.messages
             , messageOrder = model.messageOrder ++ [ identifier ]
         }
+
+
+appendToolCall : String -> Model -> Model
+appendToolCall identifier model =
+    appendMessage identifier (ToolCallMessage identifier) model
 
 
 completeStreaming : Model -> Model

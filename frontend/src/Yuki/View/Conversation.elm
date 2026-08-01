@@ -36,6 +36,7 @@ viewTranscript model =
             ordered =
                 model.messageOrder
                     |> List.filterMap (\identifier -> Dict.get identifier model.messages)
+                    |> List.filter (isVisibleMessage model)
 
             count =
                 List.length ordered
@@ -45,15 +46,89 @@ viewTranscript model =
                     [ viewEmpty model ]
 
                 else
-                    List.indexedMap (\index message -> viewMessage model (depthClass count index) message) ordered
+                    viewTimeline model count ordered
         in
         content
-            ++ viewDetachedTools model
             ++ viewRunStatus model
             ++ (model.error
                     |> Maybe.map (\message -> [ viewError message ])
                     |> Maybe.withDefault []
                )
+
+
+viewTimeline : Model -> Int -> List Message -> List (Html Msg)
+viewTimeline model count messages =
+    viewTimelineFrom model count 0 messages
+
+
+viewTimelineFrom : Model -> Int -> Int -> List Message -> List (Html Msg)
+viewTimelineFrom model count index messages =
+    case messages of
+        [] ->
+            []
+
+        ToolCallMessage identifier :: rest ->
+            let
+                ( identifiers, remaining ) =
+                    collectToolCalls [ identifier ] rest
+            in
+            viewToolBatch model (depthClass count index) identifiers
+                :: viewTimelineFrom model count (index + 1) remaining
+
+        AssistantMessage assistant :: rest ->
+            if isToolOnlyAssistant assistant then
+                let
+                    ( identifiers, remaining ) =
+                        collectToolCalls assistant.toolCalls rest
+                in
+                viewToolBatch model (depthClass count index) identifiers
+                    :: viewTimelineFrom model count (index + 1) remaining
+
+            else
+                viewMessage model (depthClass count index) (AssistantMessage assistant)
+                    :: viewTimelineFrom model count (index + 1) rest
+
+        message :: rest ->
+            viewMessage model (depthClass count index) message
+                :: viewTimelineFrom model count (index + 1) rest
+
+
+collectToolCalls : List String -> List Message -> ( List String, List Message )
+collectToolCalls initial messages =
+    collectToolCallsReversed (List.reverse initial) messages
+        |> Tuple.mapFirst List.reverse
+
+
+collectToolCallsReversed : List String -> List Message -> ( List String, List Message )
+collectToolCallsReversed identifiers messages =
+    case messages of
+        ToolCallMessage identifier :: rest ->
+            collectToolCallsReversed (identifier :: identifiers) rest
+
+        AssistantMessage assistant :: rest ->
+            if isToolOnlyAssistant assistant then
+                collectToolCallsReversed (List.reverse assistant.toolCalls ++ identifiers) rest
+
+            else
+                ( identifiers, messages )
+
+        _ ->
+            ( identifiers, messages )
+
+
+isToolOnlyAssistant : Assistant -> Bool
+isToolOnlyAssistant assistant =
+    String.isEmpty (String.trim assistant.content) && not (List.isEmpty assistant.toolCalls)
+
+
+isVisibleMessage : Model -> Message -> Bool
+isVisibleMessage model message =
+    case message of
+        ToolMessage result ->
+            not (Dict.member result.callId model.tools)
+
+        _ ->
+            True
 
 
 depthClass : Int -> Int -> String
@@ -119,11 +194,21 @@ viewMessage model depth message =
                 ]
 
         ReasoningMessage reasoning ->
-            if String.isEmpty reasoning.content then
+            if String.isEmpty reasoning.content && reasoning.complete then
                 text ""
 
             else
-                details [ Attr.class ("aside-block reasoning " ++ depth) ]
+                details
+                    (Attr.class ("aside-block reasoning " ++ depth)
+                        :: (if reasoning.complete then
+                                []
+
+                            else
+                                [ Attr.attribute "open" ""
+                                , Attr.attribute "data-streaming" "true"
+                                ]
+                           )
+                    )
                     [ summary []
                         [ text <|
                             if reasoning.complete then
@@ -132,7 +217,13 @@ viewMessage model depth message =
                             else
                                 "正在推理…"
                         ]
-                    , pre [] [ text reasoning.content ]
+                    , pre [ Attr.class "reasoning-copy" ]
+                        (if reasoning.complete then
+                            [ text reasoning.content ]
+
+                         else
+                            viewStreamChunks reasoning.chunks
+                        )
                     ]
 
         AssistantMessage assistant ->
@@ -148,8 +239,10 @@ viewMessage model depth message =
                         [ div [ Attr.class "markdown" ] [ renderMarkdown assistant.content ] ]
 
                     else
-                        [ p [ Attr.class "streaming-copy" ] [ text assistant.content ]
-                        , span [ Attr.class "breath", Attr.attribute "aria-label" "仍在书写" ] []
+                        [ p [ Attr.class "streaming-copy" ]
+                            (viewStreamChunks assistant.chunks
+                                ++ [ span [ Attr.class "breath", Attr.attribute "aria-label" "仍在书写" ] [] ]
+                            )
                         ]
             in
             div
@@ -163,8 +256,16 @@ viewMessage model depth message =
                     , text "YUKI"
                     ]
                 , div [ Attr.class "answer" ] copy
-                , viewToolCollection calls
+                , viewToolCollection (String.isEmpty assistant.content) calls
                 ]
+
+        ToolCallMessage identifier ->
+            case Dict.get identifier model.tools of
+                Just tool ->
+                    div [ Attr.class ("tool-event " ++ depth) ] [ viewTool tool ]
+
+                Nothing ->
+                    text ""
 
         ToolMessage result ->
             if Dict.member result.callId model.tools then
@@ -181,6 +282,11 @@ viewMessage model depth message =
 
         NoticeMessage _ content ->
             p [ Attr.class ("aside-line " ++ depth) ] [ text content ]
+
+
+viewStreamChunks : List String -> List (Html Msg)
+viewStreamChunks chunks =
+    List.map (\chunk -> span [ Attr.class "stream-chunk" ] [ text chunk ]) chunks
 
 
 viewSubAgent : String -> SubAgent -> Html Msg
@@ -321,8 +427,70 @@ viewTool tool =
         ]
 
 
-viewToolCollection : List ToolCall -> Html Msg
-viewToolCollection tools =
+viewToolBatch : Model -> String -> List String -> Html Msg
+viewToolBatch model depth identifiers =
+    let
+        calls =
+            List.filterMap (\identifier -> Dict.get identifier model.tools) identifiers
+
+        activeCount =
+            List.length (List.filter isToolActive calls)
+
+        stateLabel =
+            if activeCount > 0 then
+                "进行中 " ++ String.fromInt activeCount
+
+            else
+                "已完成 " ++ String.fromInt (List.length calls)
+    in
+    case calls of
+        [] ->
+            text ""
+
+        _ ->
+            div
+                [ Attr.classList
+                    [ ( "turn yuki tool-turn " ++ depth, True )
+                    , ( "in-flight", activeCount > 0 )
+                    ]
+                ]
+                [ p [ Attr.class "who" ]
+                    [ span [ Attr.class "mark", Attr.attribute "aria-hidden" "true" ] []
+                    , text "YUKI"
+                    ]
+                , div [ Attr.class "answer tool-answer" ]
+                    [ case calls of
+                        [ tool ] ->
+                            div [ Attr.class "tool-event" ] [ viewTool tool ]
+
+                        _ ->
+                            details
+                                (Attr.classList [ ( "tool-batch", True ) ]
+                                    :: (if activeCount > 0 then
+                                            [ Attr.attribute "open" "" ]
+
+                                        else
+                                            []
+                                       )
+                                )
+                                [ summary []
+                                    [ span [ Attr.class "tool-batch-title" ]
+                                        [ text
+                                            ("并行工具调用 · "
+                                                ++ String.fromInt (List.length calls)
+                                                ++ " 项"
+                                            )
+                                        ]
+                                    , span [ Attr.class "tool-batch-state" ] [ text stateLabel ]
+                                    ]
+                                , div [ Attr.class "tool-batch-body" ] (List.map viewTool calls)
+                                ]
+                    ]
+                ]
+
+
+viewToolCollection : Bool -> List ToolCall -> Html Msg
+viewToolCollection noAssistantText tools =
     let
         active =
             List.filter isToolActive tools
@@ -338,7 +506,7 @@ viewToolCollection tools =
                 div [ Attr.class "tool-stack" ] (List.map viewTool completed)
 
             else
-                viewToolHistory "已完成" completed
+                viewToolHistory noAssistantText "已完成" completed
     in
     if List.isEmpty tools then
         text ""
@@ -354,9 +522,17 @@ viewToolCollection tools =
             ]
 
 
-viewToolHistory : String -> List ToolCall -> Html Msg
-viewToolHistory label tools =
-    details [ Attr.class "tool-history" ]
+viewToolHistory : Bool -> String -> List ToolCall -> Html Msg
+viewToolHistory open label tools =
+    details
+        (Attr.class "tool-history"
+            :: (if open then
+                    [ Attr.attribute "open" "" ]
+
+                else
+                    []
+               )
+        )
         [ summary []
             [ span [] [ text (label ++ " " ++ String.fromInt (List.length tools) ++ " 次工具调用") ]
             , span [ Attr.class "tool-history-action" ] [ text "展开" ]
@@ -382,41 +558,6 @@ isToolActive tool =
 
         ToolResolved _ ->
             False
-
-
-viewDetachedTools : Model -> List (Html Msg)
-viewDetachedTools model =
-    let
-        referenced =
-            model.messages
-                |> Dict.values
-                |> List.concatMap
-                    (\message ->
-                        case message of
-                            AssistantMessage assistant ->
-                                assistant.toolCalls
-
-                            _ ->
-                                []
-                    )
-        detached =
-            model.tools
-                |> Dict.values
-                |> List.filter (\tool -> not (List.member tool.id referenced))
-    in
-    if List.isEmpty detached then
-        []
-
-    else
-        [ details [ Attr.class "tool-history detached-tools" ]
-            [ summary []
-                [ span [] [ text ("已恢复 " ++ String.fromInt (List.length detached) ++ " 条工具记录") ]
-                , span [ Attr.class "tool-history-action" ] [ text "展开" ]
-                ]
-            , p [ Attr.class "tool-history-note" ] [ text "这些记录无法关联到原消息。" ]
-            , div [ Attr.class "tool-stack" ] (List.map viewTool detached)
-            ]
-        ]
 
 
 toolVerb : String -> String
@@ -453,7 +594,7 @@ toolVerb name =
             "读取记忆"
 
         "artifact_read" ->
-            "读取工件"
+            "读取完整结果"
 
         "fs_glob" ->
             "匹配文件"
@@ -620,25 +761,29 @@ viewComposer model =
 
         blocked =
             model.transcriptLoading || not model.taskReady || hasPendingTool model
+
+        placeholder =
+            if model.transcriptLoading then
+                "正在载入任务记录…"
+
+            else if hasPendingTool model then
+                "请先处理上方等待确认的请求…"
+
+            else if not model.taskReady then
+                "建立任务后再开始…"
+
+            else if busy then
+                "补充当前请求，或加入下一轮…"
+
+            else
+                "写下要交给 YUKI 的事情…"
     in
     section [ Attr.class "write" ]
         [ form [ Attr.class "write-inner", Events.onSubmit Submit ]
             [ textarea
-                [ Attr.class "write-line"
-                , Attr.attribute "aria-label" "对 YUKI 说"
-                , Attr.placeholder
-                    (if blocked then
-                        "请先处理上方等待确认的请求…"
-
-                     else if not model.taskReady then
-                        "建立任务后再开始…"
-
-                     else if busy then
-                        "补充当前请求，或加入下一轮…"
-
-                     else
-                        "…"
-                    )
+                 [ Attr.class "write-line"
+                 , Attr.attribute "aria-label" "对 YUKI 说"
+                 , Attr.placeholder placeholder
                 , Attr.value model.draft
                 , Attr.rows 1
                 , Attr.disabled blocked

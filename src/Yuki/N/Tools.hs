@@ -339,7 +339,7 @@ runRead store ledger root (FsRead path offset limit) =
       Left err -> pure (Left (describe err))
       Right content ->
         remember ledger target
-          *> either (pure . Left) (fmap Right . present store "fs_read" (Text.take 200)) (selected content)
+          *> either (pure . Left) (fmap Right . presentRead store (Text.take 200)) (selected content)
   selected content
     | isJust offset || isJust limit = paginate path offset limit content
     | otherwise = Right content
@@ -799,6 +799,14 @@ present store name clip content
       <> " chars; call artifact_read with id \""
       <> identifier
       <> "\" for the complete text]"
+
+presentRead :: Maybe ArtifactStore -> (Text -> Text) -> Text -> IO Text
+presentRead store clip content
+  | Text.length content <= readResultThreshold = pure content
+  | otherwise = present store "fs_read" clip content
+
+readResultThreshold :: Int
+readResultThreshold = 16 * 1024
 
 int :: Int -> Text
 int = Text.pack . show

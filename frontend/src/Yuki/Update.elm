@@ -199,19 +199,23 @@ update msg model =
             SelfUpdate.save model
 
         OpenYukiForm ->
-            ( { model
-                | yukiForm =
-                    Just
-                        { identifier = "yuki-" ++ String.right 6 model.runStamp
-                        , name = ""
-                        , direction = ""
-                        , impressionModel = ""
-                        , saving = False
-                        , error = Nothing
-                        }
-              }
-            , None
-            )
+            if model.selfSaving || model.generatingPrompt || model.activatingPrompt /= Nothing || model.promptEditor /= Nothing then
+                ( model, None )
+
+            else
+                ( { model
+                    | yukiForm =
+                        Just
+                            { identifier = "yuki-" ++ String.right 6 model.runStamp
+                            , name = ""
+                            , direction = ""
+                            , impressionModel = ""
+                            , saving = False
+                            , error = Nothing
+                            }
+                  }
+                , None
+                )
 
         CloseYukiForm ->
             ( { model | yukiForm = Nothing }, None )
@@ -604,15 +608,24 @@ update msg model =
             ( { model | following = True }, FollowTranscript )
 
         AgentEventReceived raw ->
-            Decoder.agentEvent raw
-                |> Result.map (\event -> Event.applyAgent event model)
-                |> Result.withDefault
-                    ( { model | error = Just "收到了一段无法辨认的运行事件。" }, None )
+            case Decoder.agentEventEnvelope raw of
+                Ok envelope ->
+                    if relevantAgentEvent envelope model then
+                        Event.applyAgent envelope.event model
+
+                    else
+                        ( model, None )
+
+                Err _ ->
+                    failActiveRun "收到了一段无法辨认的运行事件。" model
 
         TransportEventReceived raw ->
-            Decoder.transportSignal raw
-                |> Result.map (\signal -> Event.applyTransport signal model)
-                |> Result.withDefault ( model, None )
+            case Decoder.transportSignal raw of
+                Ok signal ->
+                    Event.applyTransport signal model
+
+                Err _ ->
+                    failActiveRun "运行连接返回了无法辨认的状态。" model
 
         InspectionReceived raw ->
             Decoder.inspectionResult raw
@@ -630,6 +643,37 @@ update msg model =
 
         NoOp ->
             ( model, None )
+
+
+relevantAgentEvent : AgentEnvelope -> Model -> Bool
+relevantAgentEvent envelope model =
+    envelope.threadId == model.threadId
+        && (case envelope.event of
+                RunStarted _ runId ->
+                    model.activeRun == Just envelope.runId && runId == envelope.runId
+
+                _ ->
+                    model.activeRun == Just envelope.runId
+           )
+
+
+failActiveRun : String -> Model -> ( Model, Effect )
+failActiveRun message model =
+    let
+        next =
+            State.completeStreaming
+                { model
+                    | phase = Failed
+                    , activeRun = Nothing
+                    , activeStep = Nothing
+                    , error = Just message
+                }
+    in
+    ( next
+    , model.activeRun
+        |> Maybe.map (\runId -> CancelAgent (Encoder.cancelCommand runId model))
+        |> Maybe.withDefault None
+    )
 
 
 selectPage : Page -> Model -> ( Model, Effect )

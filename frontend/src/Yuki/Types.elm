@@ -138,6 +138,7 @@ type Message
     | SummaryMessage String String
     | ReasoningMessage Reasoning
     | AssistantMessage Assistant
+    | ToolCallMessage String
     | ToolMessage ToolResult
     | SubAgentMessage SubAgent
     | NoticeMessage String String
@@ -146,6 +147,7 @@ type Message
 type alias Reasoning =
     { id : String
     , content : String
+    , chunks : List String
     , complete : Bool
     }
 
@@ -153,6 +155,7 @@ type alias Reasoning =
 type alias Assistant =
     { id : String
     , content : String
+    , chunks : List String
     , toolCalls : List String
     , complete : Bool
     }
@@ -540,6 +543,13 @@ type AgentEvent
     | SubAgentObserved String Decode.Value
     | CustomObserved String
     | IgnoredEvent
+
+
+type alias AgentEnvelope =
+    { threadId : String
+    , runId : String
+    , event : AgentEvent
+    }
 
 
 type TransportSignal

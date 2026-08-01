@@ -42,7 +42,7 @@ apply path result model =
                 (Decode.list Decoder.artifact)
                 (\values -> { model | artifacts = Ready values })
                 (\message -> { model | artifacts = Unavailable message })
-                "工件索引无法辨认。"
+                "完整结果索引无法辨认。"
                 result
 
         [ "artifact", identifier ] ->
@@ -50,7 +50,7 @@ apply path result model =
                 Decode.string
                 (\body -> { model | artifactBodies = Dict.insert identifier (Ready body) model.artifactBodies })
                 (\message -> { model | artifactBodies = Dict.insert identifier (Unavailable message) model.artifactBodies })
-                "工件正文无法辨认。"
+                "完整结果正文无法辨认。"
                 result
 
         [ "replay", runId ] ->

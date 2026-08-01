@@ -49,7 +49,17 @@ applyAgent event model =
 
         TextContent identifier delta ->
             ( State.mapAssistant identifier
-                (\assistant -> { assistant | content = assistant.content ++ delta })
+                (\assistant ->
+                    { assistant
+                        | content = assistant.content ++ delta
+                        , chunks =
+                            if String.isEmpty delta then
+                                assistant.chunks
+
+                            else
+                                assistant.chunks ++ [ delta ]
+                    }
+                )
                 (State.ensureAssistant identifier model)
             , None
             )
@@ -62,7 +72,17 @@ applyAgent event model =
 
         ReasoningContent identifier delta ->
             ( State.mapReasoning identifier
-                (\reasoning -> { reasoning | content = reasoning.content ++ delta })
+                (\reasoning ->
+                    { reasoning
+                        | content = reasoning.content ++ delta
+                        , chunks =
+                            if String.isEmpty delta then
+                                reasoning.chunks
+
+                            else
+                                reasoning.chunks ++ [ delta ]
+                    }
+                )
                 (State.ensureReasoning identifier model)
             , None
             )
@@ -81,23 +101,31 @@ applyAgent event model =
                     , output = ""
                     , result = Nothing
                     }
-            in
-            ( parentId
-                |> Maybe.map
-                    (\messageId ->
-                        State.mapAssistant messageId
-                            (\assistant ->
-                                if List.member identifier assistant.toolCalls then
-                                    assistant
 
-                                else
-                                    { assistant | toolCalls = assistant.toolCalls ++ [ identifier ] }
+                withTool =
+                    { model | tools = Dict.insert identifier tool model.tools }
+            in
+            case parentId of
+                Just messageId ->
+                    case Dict.get messageId withTool.messages of
+                        Just (AssistantMessage _) ->
+                            ( State.mapAssistant messageId
+                                (\assistant ->
+                                    if List.member identifier assistant.toolCalls then
+                                        assistant
+
+                                    else
+                                        { assistant | toolCalls = assistant.toolCalls ++ [ identifier ] }
+                                )
+                                withTool
+                            , None
                             )
-                            { model | tools = Dict.insert identifier tool model.tools }
-                    )
-                |> Maybe.withDefault { model | tools = Dict.insert identifier tool model.tools }
-            , None
-            )
+
+                        _ ->
+                            ( State.appendToolCall identifier withTool, None )
+
+                Nothing ->
+                    ( State.appendToolCall identifier withTool, None )
 
         ToolArguments identifier delta ->
             ( State.mapTool identifier
@@ -123,9 +151,12 @@ applyAgent event model =
             let
                 ensured =
                     ensureTool callId model
+
+                resultIdentifier =
+                    "tool-result-" ++ messageId ++ "-" ++ callId
             in
-            ( State.appendMessage messageId
-                (ToolMessage { id = messageId, callId = callId, content = content })
+            ( State.appendMessage resultIdentifier
+                (ToolMessage { id = resultIdentifier, callId = callId, content = content })
                 (State.mapTool callId
                     (\tool -> { tool | stage = ToolResolved ToolReturned, result = Just content })
                     { ensured | phase = Streaming }

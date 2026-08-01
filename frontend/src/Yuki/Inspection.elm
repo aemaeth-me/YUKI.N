@@ -53,14 +53,14 @@ apply result model =
         [ "prompts", "edit", identifier ] ->
             promptMutation identifier "Prompt 修订已保存为草案。" result model
 
-        [ "prompts", "edit-root" ] ->
-            promptMutation model.incarnationId "Root Prompt 修订已保存为草案。" result model
+        [ "prompts", "edit-root", identifier ] ->
+            promptMutation identifier "Root Prompt 修订已保存为草案。" result model
 
-        [ "prompts", "activate", _ ] ->
-            promptActivation False result model
+        [ "prompts", "activate", identifier ] ->
+            promptActivation False identifier result model
 
-        [ "prompts", "activate-root", _ ] ->
-            promptActivation True result model
+        [ "prompts", "activate-root", identifier ] ->
+            promptActivation True identifier result model
 
         [ "tasks", "create", identifier ] ->
             if successful result then
@@ -230,37 +230,47 @@ incarnationList result model =
 
 receiveYuki : String -> Bool -> InspectionResult -> Model -> ( Model, Effect )
 receiveYuki identifier created result model =
-    if successful result then
-        case
-            Decode.decodeValue
-                (Decode.oneOf
-                    [ Decode.field "incarnation" Decoder.incarnation
-                    , Decoder.incarnation
-                    ]
-                )
-                result.body
-        of
-            Ok incarnationValue ->
+    if not created && identifier /= model.incarnationId then
+        ( model, None )
+
+    else if successful result then
+        case Decode.decodeValue yukiResponse result.body of
+            Ok response ->
+                let
+                    incarnationValue =
+                        response.incarnation
+
+                    nextBase =
+                        { model
+                            | incarnation = incarnationValue
+                            , selfNameDraft = incarnationValue.name
+                            , selfDirectionDraft = incarnationValue.direction
+                            , selfImpressionModelDraft = Maybe.withDefault "" incarnationValue.impressionModel
+                            , selfSaving = False
+                            , selfError = Nothing
+                            , archiveYukiConfirm = False
+                            , promptEditor = promptEditorFor False response.prompt
+                            , promptMessage = promptResponseMessage response.prompt response.promptError
+                            , notice =
+                                if created then
+                                    Just "新的 Yuki 已建立。"
+
+                                else
+                                    Just "自我来源已更新。"
+                        }
+                in
                 if created then
                     switchYukiFromInspection incarnationValue
-                        { model
-                            | yukiForm = Nothing
-                            , selfSaving = False
-                            , notice = Just "新的 Yuki 已建立，并生成了初始 Prompt。"
-                        }
+                        { nextBase | yukiForm = Nothing }
+                        |> withGeneratedPrompt response.prompt response.promptError
 
                 else
-                    ( { model
-                        | incarnation = incarnationValue
-                        , selfNameDraft = incarnationValue.name
-                        , selfDirectionDraft = incarnationValue.direction
-                        , selfImpressionModelDraft = Maybe.withDefault "" incarnationValue.impressionModel
-                        , selfSaving = False
-                        , selfError = Nothing
-                        , archiveYukiConfirm = False
-                        , notice = Just "自我来源已更新；新 Prompt 草案可在版本区核查。"
-                      }
-                    , Request.incarnations model
+                    ( nextBase
+                    , Batch
+                        [ Request.incarnations model
+                        , Request.prompts model
+                        , Request.rootPrompts model
+                        ]
                     )
 
             Err _ ->
@@ -279,6 +289,62 @@ receiveYuki identifier created result model =
           }
         , None
         )
+
+
+type alias YukiResponse =
+    { incarnation : Incarnation
+    , prompt : Maybe PromptRevision
+    , promptError : Maybe String
+    }
+
+
+yukiResponse : Decode.Decoder YukiResponse
+yukiResponse =
+    Decode.map3 YukiResponse
+        (Decode.oneOf
+            [ Decode.field "incarnation" Decoder.incarnation
+            , Decoder.incarnation
+            ]
+        )
+        (Decode.maybe (Decode.field "prompt" Decoder.promptRevision))
+        (Decode.maybe (Decode.field "promptError" Decode.string))
+
+
+promptEditorFor : Bool -> Maybe PromptRevision -> Maybe PromptEditor
+promptEditorFor root maybeRevision =
+    maybeRevision
+        |> Maybe.map
+            (\revision ->
+                { root = root
+                , baseId = revision.id
+                , sourceIntent = revision.sourceIntent
+                , content = revision.content
+                , saving = False
+                }
+            )
+
+
+promptResponseMessage : Maybe PromptRevision -> Maybe String -> Maybe String
+promptResponseMessage maybePrompt maybeError =
+    case ( maybePrompt, maybeError ) of
+        ( Just _, _ ) ->
+            Just "Prompt 草案已生成，正文已在下方展开；你可以直接修改后保存。"
+
+        ( Nothing, Just message ) ->
+            Just ("Yuki 已保存，但 Prompt 草案生成失败：" ++ message)
+
+        ( Nothing, Nothing ) ->
+            Just "自我来源已保存，但服务器没有返回可编辑的 Prompt 草案；请刷新版本区。"
+
+
+withGeneratedPrompt : Maybe PromptRevision -> Maybe String -> ( Model, Effect ) -> ( Model, Effect )
+withGeneratedPrompt maybePrompt maybeError ( model, effect ) =
+    ( { model
+        | promptEditor = promptEditorFor False maybePrompt
+        , promptMessage = promptResponseMessage maybePrompt maybeError
+      }
+    , effect
+    )
 
 
 switchYukiFromInspection : Incarnation -> Model -> ( Model, Effect )
@@ -304,6 +370,10 @@ switchYukiFromInspection incarnationValue model =
                 , workingMemory = Loading
                 , sleepCycles = Loading
                 , globalConfig = Loading
+                , generatingPrompt = False
+                , activatingPrompt = Nothing
+                , promptMessage = Nothing
+                , promptEditor = Nothing
                 , page = Conversation
             }
     in
@@ -378,10 +448,38 @@ promptMutation identifier successMessage result model =
         ( model, None )
 
     else if successful result then
+        let
+            root =
+                model.promptEditor
+                    |> Maybe.map .root
+                    |> Maybe.withDefault False
+
+            generated =
+                Decode.decodeValue
+                    (Decode.oneOf
+                        [ Decode.field "prompt" Decoder.promptRevision
+                        , Decoder.promptRevision
+                        ]
+                    )
+                    result.body
+                    |> Result.toMaybe
+        in
         ( { model
             | generatingPrompt = False
-            , promptEditor = Nothing
-            , promptMessage = Just successMessage
+            , promptEditor =
+                case generated of
+                    Just _ ->
+                        promptEditorFor root generated
+
+                    Nothing ->
+                        Maybe.map (\editor -> { editor | saving = False }) model.promptEditor
+            , promptMessage =
+                Just
+                    (Maybe.map
+                        (\_ -> successMessage ++ "正文已在下方展开；你可以继续修改后保存。")
+                        generated
+                        |> Maybe.withDefault "Prompt 响应无法辨认，原有正文已保留；请刷新版本区后再试。"
+                    )
           }
         , Batch [ Request.prompts model, Request.rootPrompts model ]
         )
@@ -396,9 +494,12 @@ promptMutation identifier successMessage result model =
         )
 
 
-promptActivation : Bool -> InspectionResult -> Model -> ( Model, Effect )
-promptActivation root result model =
-    if successful result then
+promptActivation : Bool -> String -> InspectionResult -> Model -> ( Model, Effect )
+promptActivation _ identifier result model =
+    if model.activatingPrompt /= Just identifier then
+        ( model, None )
+
+    else if successful result then
         ( { model | activatingPrompt = Nothing, promptMessage = Just "Prompt 版本已激活。" }
         , Batch
             [ Request.prompts model

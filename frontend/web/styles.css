@@ -1,20 +1,21 @@
 :root {
   color-scheme: light;
-  --paper: #d0dac6;
-  --paper-deep: #bfc9ad;
-  --surface: color-mix(in srgb, #1e211c 7%, #d0dac6);
-  --surface-strong: color-mix(in srgb, #1e211c 12%, #d0dac6);
-  --ink: #1e211c;
-  --ink-soft: #3a3e36;
-  --quiet: #4c5043;
-  --green: #3c4a37;
-  --alert: #823a26;
-  --working: #3a5c68;
-  --success: #425c3a;
-  --warning: #6f501b;
-  --voice: "Iowan Old Style", "Source Serif Pro", Charter, "Noto Serif SC",
-    "Songti SC", serif;
-  --whisper: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Noto Sans SC",
+  --paper: #e5ebe0;
+  --paper-deep: #c8d4c5;
+  --surface: color-mix(in srgb, #21332b 8%, #e5ebe0);
+  --surface-strong: color-mix(in srgb, #21332b 14%, #e5ebe0);
+  --ink: #1d2922;
+  --ink-soft: #35463b;
+  --quiet: #526258;
+  --green: #245b4c;
+  --alert: #8a3e32;
+  --working: #286276;
+  --success: #2d6b49;
+  --warning: #855d1e;
+  --voice: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC",
+    "Source Han Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  --whisper: "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC",
+    "Source Han Sans SC", "Microsoft YaHei", ui-sans-serif, system-ui,
     sans-serif;
   --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   --measure: 38rem;
@@ -48,8 +49,8 @@ body {
   color: var(--ink);
   background: var(--paper);
   font-family: var(--voice);
-  font-size: 18px;
-  line-height: 1.75;
+  font-size: 17px;
+  line-height: 1.8;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -69,7 +70,9 @@ body::before {
 
 button,
 input,
-textarea {
+textarea,
+select,
+option {
   color: inherit;
   font: inherit;
 }
@@ -87,7 +90,7 @@ button:disabled {
 }
 
 :focus-visible {
-  border-radius: 1px;
+  border-radius: 0;
   outline: 2px solid var(--green);
   outline-offset: 3px;
 }
@@ -110,7 +113,7 @@ button:disabled {
   width: 0.42em;
   height: 0.42em;
   margin-right: 0.55em;
-  border-radius: 1px;
+  border-radius: 0;
   background: var(--green);
   vertical-align: 0.14em;
 }
@@ -247,14 +250,15 @@ button:disabled {
 .who {
   color: var(--quiet);
   font-family: var(--whisper);
-  font-size: 11px;
-  letter-spacing: 0.24em;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
 .quiet {
   color: var(--quiet);
-  font-style: italic;
+  font-style: normal;
 }
 
 /* Top edge: the hit area is present, the navigation is not. */
@@ -333,8 +337,9 @@ button:disabled {
 .field {
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 7.8rem 2rem 8.5rem;
-  scroll-behavior: smooth;
+  overflow-anchor: none;
+  padding: 7.8rem 2rem 13.5rem;
+  scroll-behavior: auto;
 }
 
 .field:focus-visible {
@@ -348,7 +353,11 @@ button:disabled {
 }
 
 .turn {
-  margin: 0 0 2.75rem;
+  margin: 0 0 1.8rem;
+  padding: 1.25rem 1.4rem 1.35rem;
+  border: 0;
+  border-radius: 0;
+  background: color-mix(in srgb, white 18%, var(--paper));
   transition: color 0.5s ease;
 }
 
@@ -361,8 +370,9 @@ button:disabled {
 }
 
 .turn.you {
-  padding-left: 22%;
-  text-align: right;
+  margin-left: 13%;
+  background: color-mix(in srgb, var(--working) 9%, var(--paper));
+  text-align: left;
 }
 
 .turn.you .user-copy {
@@ -371,7 +381,8 @@ button:disabled {
 }
 
 .turn.yuki {
-  padding-right: 2%;
+  margin-right: 4%;
+  background: color-mix(in srgb, white 42%, var(--paper));
 }
 
 .turn.yuki .answer {
@@ -383,6 +394,20 @@ button:disabled {
   transition: color 0.5s ease;
 }
 
+.stream-chunk {
+  animation: stream-chunk-in 0.22s ease-out both;
+}
+
+@keyframes stream-chunk-in {
+  from {
+    opacity: 0.35;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
 .depth-mid,
 .depth-mid p {
   color: var(--ink-soft);
@@ -390,7 +415,7 @@ button:disabled {
 
 .depth-far,
 .depth-far p {
-  color: var(--quiet);
+  color: var(--ink-soft);
 }
 
 .depth-near,
@@ -401,11 +426,14 @@ button:disabled {
 .aside-line,
 .aside-block {
   display: block;
-  margin: 0.2rem 0 1.5rem 1.1rem;
+  margin: 0.9rem 0 1.5rem;
+  padding: 0.9rem 1.1rem;
+  border: 0;
   color: var(--quiet);
   font-family: var(--whisper);
-  font-size: 13px;
-  line-height: 1.7;
+  font-size: 14px;
+  line-height: 1.75;
+  background: color-mix(in srgb, var(--ink) 4%, var(--paper));
 }
 
 .aside-block summary {
@@ -421,6 +449,7 @@ button:disabled {
 .streaming-copy {
   display: inline;
   color: var(--ink-soft);
+  text-rendering: optimizeLegibility;
   white-space: pre-wrap;
 }
 
@@ -429,7 +458,7 @@ button:disabled {
   width: 0.38rem;
   height: 0.38rem;
   margin-left: 0.6rem;
-  border-radius: 1px;
+  border-radius: 0;
   background: var(--green);
   animation: breathe 2.4s ease-in-out infinite;
   vertical-align: 0.12em;
@@ -529,7 +558,7 @@ button:disabled {
 
 .markdown code {
   padding: 0.08em 0.28em;
-  border-radius: 2px;
+  border-radius: 0;
   background: var(--surface);
   font-family: var(--mono);
   font-size: 0.82em;
@@ -539,7 +568,7 @@ button:disabled {
   overflow: auto;
   margin: 1.35rem 0;
   padding: 1rem 1.1rem;
-  border-radius: 3px;
+  border-radius: 0;
   background: var(--surface);
   font-family: var(--mono);
   font-size: 13px;
@@ -612,7 +641,7 @@ button:disabled {
   width: 0.42rem;
   height: 0.42rem;
   border: 1px solid currentColor;
-  border-radius: 50%;
+  border-radius: 0;
   opacity: 0.72;
   content: "";
 }
@@ -632,17 +661,14 @@ button:disabled {
 }
 
 .tool-history > .tool-stack {
+  max-height: min(30rem, 52vh);
+  overflow-y: auto;
   margin: 0.32rem 0 0;
+  scrollbar-width: thin;
 }
 
 .tool-history .tool {
   margin-left: 1rem;
-}
-
-.tool-history-note {
-  margin: 0.42rem 0 0.28rem 1rem;
-  color: var(--quiet);
-  font-size: 11px;
 }
 
 .tool {
@@ -673,7 +699,7 @@ button:disabled {
   flex: 0 0 auto;
   width: 0.42rem;
   height: 0.42rem;
-  border-radius: 50%;
+  border-radius: 0;
   background: var(--quiet);
   content: "";
 }
@@ -790,7 +816,7 @@ button:disabled {
   overflow: auto;
   margin: 0.45rem 0 0;
   padding: 0.8rem 0.9rem;
-  border-radius: 3px;
+  border-radius: 0;
   background: var(--surface);
   font-family: var(--mono);
   font-size: 12px;
@@ -814,8 +840,77 @@ button:disabled {
   color: var(--green);
 }
 
-.detached-tools {
-  margin: 1rem 0 1.6rem 1.1rem;
+.tool-event {
+  margin: 0.9rem 0 1.3rem;
+}
+
+.tool-turn .tool-event {
+  margin: 0;
+}
+
+.tool-batch {
+  margin: 0.9rem 0 1.5rem 1.1rem;
+  color: var(--quiet);
+  font-family: var(--whisper);
+  font-size: 12px;
+}
+
+.tool-turn .tool-batch {
+  margin: 0;
+}
+
+.tool-batch > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  max-width: min(100%, 94ch);
+  padding: 0.55rem 0.75rem;
+  background: color-mix(in srgb, var(--working) 9%, var(--paper));
+  cursor: pointer;
+  list-style: none;
+}
+
+.tool-batch > summary::before {
+  flex: 0 0 auto;
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-right: 0.65rem;
+  background: var(--working);
+  content: "";
+}
+
+.tool-batch > summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-batch-title {
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+
+.tool-batch-state {
+  color: var(--working);
+  white-space: nowrap;
+}
+
+.tool-batch-body {
+  max-height: min(30rem, 52vh);
+  overflow-y: auto;
+  margin: 0.35rem 0 0;
+  padding: 0.35rem 0.65rem;
+  background: color-mix(in srgb, var(--working) 3%, transparent);
+  scrollbar-width: thin;
+}
+
+.tool-batch-body .tool {
+  margin-left: 0.35rem;
+}
+
+.active-tools {
+  max-height: min(30rem, 52vh);
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 /* Writing surface */
@@ -832,7 +927,7 @@ button:disabled {
 .run-progress-dot {
   width: 0.45rem;
   height: 0.45rem;
-  border-radius: 50%;
+  border-radius: 0;
   background: currentColor;
   animation: toolPulse 1.6s ease-in-out infinite;
 }
@@ -863,9 +958,11 @@ button:disabled {
   display: block;
   width: 100%;
   max-height: 9rem;
+  min-height: 3.05rem;
+  field-sizing: content;
   resize: none;
   overflow-y: auto;
-  padding: 0.8rem 0 0.65rem;
+  padding: 0.72rem 0.1rem 0.7rem;
   border: 0;
   border-bottom: 1px solid transparent;
   outline: none;
@@ -1139,7 +1236,7 @@ button:disabled {
   width: 0.36rem;
   height: 0.36rem;
   margin: 0.72rem 0.2rem 0 0;
-  border-radius: 1px;
+  border-radius: 0;
   background: var(--green);
   content: "";
 }
@@ -1159,6 +1256,11 @@ button:disabled {
   padding: 7rem 0 5rem;
 }
 
+.paper-page > .page-intro {
+  padding-bottom: 1.35rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 18%, transparent);
+}
+
 .tasks-page,
 .capabilities-page {
   --measure: 46rem;
@@ -1175,7 +1277,7 @@ button:disabled {
 .page-intro h1 {
   margin: 0;
   font-size: 1.65rem;
-  font-weight: 400;
+  font-weight: 650;
   letter-spacing: 0.06em;
 }
 
@@ -1989,6 +2091,13 @@ button.primary {
   background: var(--surface);
 }
 
+.prompt-editor-help {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.92rem;
+  line-height: 1.75;
+}
+
 .prompt-editor label {
   color: var(--quiet);
   font-family: var(--whisper);
@@ -2273,7 +2382,7 @@ button.primary {
   width: 0.55rem;
   height: 0.55rem;
   margin-top: 0.28rem;
-  border-radius: 50%;
+  border-radius: 0;
   background: var(--quiet);
   box-shadow: 0 0 0 3px var(--paper);
 }
@@ -2635,7 +2744,6 @@ button.primary {
 .tool-state,
 .tool-history,
 .tool-history-action,
-.tool-history-note,
 .tool-material summary,
 .tool-target,
 .tool-verb,
@@ -2731,7 +2839,7 @@ button.primary {
 .paper-page::-webkit-scrollbar-thumb,
 .memory-margin::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
-  border-radius: 4px;
+  border-radius: 0;
   background: color-mix(in srgb, var(--quiet) 45%, transparent);
   background-clip: content-box;
 }
@@ -2740,4 +2848,280 @@ button.primary {
 .paper-page::-webkit-scrollbar-track,
 .memory-margin::-webkit-scrollbar-track {
   background: transparent;
+}
+
+/* Form fields use one consistent, readable surface across every workspace. */
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+textarea,
+select {
+  min-height: 2.65rem;
+  padding: 0.58rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--ink) 24%, transparent);
+  border-radius: 0;
+  outline: none;
+  background: color-mix(in srgb, white 34%, var(--paper));
+  font-family: var(--voice);
+  font-size: 16px;
+  line-height: 1.55;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):focus,
+textarea:focus,
+select:focus {
+  border-color: var(--green);
+  background: color-mix(in srgb, white 52%, var(--paper));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 13%, transparent);
+}
+
+input:not([type="checkbox"]):not([type="radio"]):disabled,
+textarea:disabled,
+select:disabled {
+  color: var(--quiet);
+  background: color-mix(in srgb, var(--ink) 5%, var(--paper));
+  cursor: not-allowed;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: color-mix(in srgb, var(--quiet) 88%, transparent);
+  opacity: 1;
+}
+
+.write-line {
+  min-height: 3.05rem;
+  padding: 0.72rem 0.1rem 0.7rem;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 42%, transparent);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font-family: var(--voice);
+  font-size: 18px;
+}
+
+.turn.you .user-copy,
+.page-intro p,
+.empty-title,
+.margin-note,
+.context-head p {
+  font-style: normal;
+}
+
+.write-line:focus {
+  border-color: var(--green);
+  background: transparent;
+  box-shadow: none;
+}
+
+.prompt-editor textarea,
+.config-form textarea {
+  min-height: 8rem;
+  line-height: 1.75;
+}
+
+.prompt-editor textarea {
+  font-size: 16px;
+}
+
+.config-form > label,
+.self-editor label,
+.paper-dialog label,
+.rename-task label {
+  margin-bottom: 0.1rem;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.5;
+  text-transform: none;
+}
+
+.config-form > label:not(:first-child),
+.self-editor label:not(:first-child) {
+  margin-top: 1.25rem;
+}
+
+.choice-row {
+  gap: 0.55rem;
+  padding: 0.15rem 0;
+}
+
+.choice-row button {
+  min-height: 2.35rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--ink) 20%, transparent);
+  border-radius: 0;
+  background: color-mix(in srgb, white 22%, var(--paper));
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+.choice-row button.selected {
+  border-color: var(--green);
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 11%, var(--paper));
+  text-decoration: none;
+}
+
+.config-field {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.remember-field {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.config-field label,
+.remember-field label {
+  color: var(--quiet);
+  font-family: var(--whisper);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.section-heading {
+  padding-bottom: 0.75rem;
+  border-bottom: 0;
+}
+
+.capability-summary > div,
+.self-manifest > div {
+  min-height: 7rem;
+  padding: 1rem;
+  border: 0;
+  border-radius: 0;
+  background: color-mix(in srgb, white 25%, var(--paper));
+}
+
+.capability-summary,
+.self-manifest {
+  gap: 1rem;
+}
+
+.prompt-list {
+  padding: 1rem 1.15rem;
+  border: 0;
+  border-radius: 0;
+  background: color-mix(in srgb, white 22%, var(--paper));
+}
+
+.prompt-entry {
+  margin-bottom: 0.55rem;
+  padding: 0.55rem 0.65rem;
+  background: color-mix(in srgb, white 12%, var(--paper));
+}
+
+.prompt-entry:last-child {
+  margin-bottom: 0;
+}
+
+.prompt-entry pre,
+.tool-material pre,
+.markdown pre,
+.tree-material,
+.global-config-source pre {
+  border: 0;
+  background: color-mix(in srgb, var(--ink) 6%, var(--paper));
+}
+
+.task-row,
+.impression-list li,
+.memory-snippet,
+.run-card {
+  padding: 0.75rem 0.85rem;
+  border: 0;
+  border-radius: 0;
+  background: color-mix(in srgb, white 20%, var(--paper));
+}
+
+.task-list,
+.impression-list,
+.memory-results,
+.run-list {
+  gap: 0.65rem;
+}
+
+.task-select {
+  padding: 0.1rem 0;
+}
+
+.task-row.current,
+.run-card.selected,
+.prompt-entry.active {
+  background: color-mix(in srgb, var(--green) 8%, var(--paper));
+}
+
+.task-row.current .task-row-title,
+.run-card.selected {
+  font-weight: 600;
+}
+
+.memory-tabs button,
+.page-actions button,
+.page-intro-actions > button,
+.section-heading button,
+.prompt-buttons button,
+.prompt-entry-actions button,
+.self-actions button,
+.config-actions button,
+.task-footer-actions button,
+.memory-snippet-actions button,
+.remember-form button {
+  min-height: 2.35rem;
+  padding: 0.35rem 0.75rem;
+  border-radius: 0;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+
+.memory-tabs button.active {
+  padding-bottom: 0.45rem;
+  border-bottom: 2px solid var(--green);
+  text-decoration: none;
+}
+
+.paper-dialog {
+  border: 0;
+  border-radius: 0;
+  box-shadow: 0 1.5rem 4rem color-mix(in srgb, var(--ink) 18%, transparent);
+}
+
+.paper-notice {
+  border: 0;
+  border-radius: 0;
+  box-shadow: 0 0.5rem 1.5rem color-mix(in srgb, var(--ink) 10%, transparent);
+  font-size: 13px;
+}
+
+@media (max-width: 700px) {
+  body {
+    font-size: 16px;
+  }
+
+  .field {
+    padding: 6rem 1.1rem 12rem;
+  }
+
+  .turn {
+    padding: 1rem;
+  }
+
+  .turn.you {
+    margin-left: 4%;
+    padding-left: 1rem;
+  }
+
+  .turn.yuki {
+    margin-right: 0;
+  }
+
+  .write-line {
+    font-size: 17px;
+  }
 }

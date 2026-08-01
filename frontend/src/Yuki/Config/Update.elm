@@ -61,6 +61,12 @@ save model =
     if model.configSaving then
         ( model, None )
 
+    else if invalidContextValue 1 model.configDraft.contextReserveTokens
+        || invalidContextValue 1 model.configDraft.contextKeepUnits
+        || invalidContextValue 96 model.configDraft.contextSummaryTokens
+    then
+        ( { model | configError = Just "上下文策略必须填写有效的正整数；摘要上限不能低于 96。" }, None )
+
     else
         ( { model | configSaving = True, configError = Nothing }
         , Inspect <|
@@ -69,7 +75,21 @@ save model =
                 "PUT"
                 (Just (encode model.incarnationId model.configDraft))
                 ("config/threads/" ++ model.threadId)
-        )
+            )
+
+
+invalidContextValue : Int -> String -> Bool
+invalidContextValue minimum value =
+    if String.isEmpty (String.trim value) then
+        False
+
+    else
+        case String.toInt (String.trim value) of
+            Just number ->
+                number < minimum
+
+            Nothing ->
+                True
 
 
 encode : String -> ConfigDraft -> Encode.Value

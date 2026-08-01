@@ -28,10 +28,26 @@ const harness = () => {
   const frames = new Map();
   let nextFrame = 0;
   let scrollTop = 0;
+  let reasoningScrollTop = 0;
   let writes = 0;
+  const reasoning = {
+    clientHeight: 100,
+    scrollHeight: 500,
+    get scrollTop() {
+      return reasoningScrollTop;
+    },
+    set scrollTop(value) {
+      reasoningScrollTop = Math.max(
+        0,
+        Math.min(value, reasoning.scrollHeight - reasoning.clientHeight),
+      );
+    },
+  };
   const transcript = {
     clientHeight: 300,
     scrollHeight: 1000,
+    querySelectorAll: (selector) =>
+      selector === '[data-streaming="true"] pre' ? [reasoning] : [],
     contains: (target) => target === transcript,
     get scrollTop() {
       return scrollTop;
@@ -73,6 +89,7 @@ const harness = () => {
     following,
     flush,
     pending: () => frames.size,
+    reasoning,
     writes: () => writes,
     setScrollTop: (value) => {
       scrollTop = value;
@@ -91,7 +108,7 @@ test("initial mount jumps to the latest content once", () => {
   assert.equal(state.controller.isFollowing(), true);
 });
 
-test("content growth is measured without forcing scrollTop", () => {
+test("content growth follows the bottom while the user is following", () => {
   const state = harness();
   state.flush();
   state.transcript.scrollHeight = 1400;
@@ -102,13 +119,40 @@ test("content growth is measured without forcing scrollTop", () => {
 
   assert.equal(state.pending(), 1);
   state.flush();
-  assert.equal(state.writes(), 1);
-  assert.equal(state.transcript.scrollTop, 700);
-  assert.equal(state.controller.isFollowing(), false);
-  assert.deepEqual(state.following, [false]);
+  assert.equal(state.writes(), 2);
+  assert.equal(state.transcript.scrollTop, 1100);
+  assert.equal(state.controller.isFollowing(), true);
+  assert.deepEqual(state.following, []);
 });
 
-test("reaching the bottom never enables sticky following", () => {
+test("streaming reasoning follows its own latest content", () => {
+  const state = harness();
+  state.flush();
+  assert.equal(state.reasoning.scrollTop, 400);
+
+  state.reasoning.scrollHeight = 900;
+  state.controller.notifyContentChanged();
+  state.flush();
+
+  assert.equal(state.reasoning.scrollTop, 800);
+});
+
+test("streaming reasoning stops following when history browsing begins", () => {
+  const state = harness();
+  state.flush();
+  state.root.dispatch("wheel", {
+    target: state.transcript,
+    deltaY: -20,
+  });
+  state.reasoning.scrollHeight = 900;
+
+  state.controller.notifyContentChanged();
+  state.flush();
+
+  assert.equal(state.reasoning.scrollTop, 400);
+});
+
+test("reaching the bottom restores sticky following", () => {
   const state = harness();
   state.flush();
   state.root.dispatch("wheel", {
@@ -123,13 +167,31 @@ test("reaching the bottom never enables sticky following", () => {
   state.controller.notifyContentChanged();
   state.flush();
 
-  assert.equal(state.writes(), 1);
-  assert.equal(state.transcript.scrollTop, 700);
-  assert.equal(state.controller.isFollowing(), false);
-  assert.deepEqual(state.following, [false, true, false]);
+  assert.equal(state.writes(), 2);
+  assert.equal(state.transcript.scrollTop, 1100);
+  assert.equal(state.controller.isFollowing(), true);
+  assert.deepEqual(state.following, [false, true]);
 });
 
-test("explicit follow is a one-time jump", () => {
+test("scrolling upward keeps the visible history while content grows", () => {
+  const state = harness();
+  state.flush();
+  state.root.dispatch("wheel", {
+    target: state.transcript,
+    deltaY: -20,
+  });
+  state.setScrollTop(350);
+  state.transcript.scrollHeight = 1400;
+
+  state.controller.notifyContentChanged();
+  state.flush();
+
+  assert.equal(state.writes(), 1);
+  assert.equal(state.transcript.scrollTop, 350);
+  assert.equal(state.controller.isFollowing(), false);
+});
+
+test("explicit follow resumes following new content", () => {
   const state = harness();
   state.flush();
   state.root.dispatch("wheel", {
@@ -148,8 +210,9 @@ test("explicit follow is a one-time jump", () => {
   state.transcript.scrollHeight = 1900;
   state.controller.notifyContentChanged();
   state.flush();
-  assert.equal(state.writes(), 2);
-  assert.equal(state.controller.isFollowing(), false);
+  assert.equal(state.writes(), 3);
+  assert.equal(state.transcript.scrollTop, 1600);
+  assert.equal(state.controller.isFollowing(), true);
 });
 
 test("upward wheel cancels a pending jump", () => {
