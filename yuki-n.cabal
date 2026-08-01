@@ -97,9 +97,40 @@ test-suite yuki-n-test
     import:         options
     type:           exitcode-stdio-1.0
     main-is:        Main.hs
-    other-modules:  E2E, Golden
+    other-modules:  E2E,
+        Golden,
+        Yuki.N.AGUITest,
+        Yuki.N.AdversarialTest,
+        Yuki.N.AgentTest,
+        Yuki.N.AgentsMdTest,
+        Yuki.N.AnatomyTest,
+        Yuki.N.ArtifactTest,
+        Yuki.N.Cognition.ArchiveTest,
+        Yuki.N.Cognition.LifecycleTest,
+        Yuki.N.Cognition.MemoryTest,
+        Yuki.N.Cognition.SleepTest,
+        Yuki.N.CognitionTest,
+        Yuki.N.ConfigTest,
+        Yuki.N.ContextTest,
+        Yuki.N.DiffTest,
+        Yuki.N.FactsTest,
+        Yuki.N.GrowthTest,
+        Yuki.N.InvocationTest,
+        Yuki.N.JournalTest,
+        Yuki.N.MemoryTest,
+        Yuki.N.Provider.OpenAITest,
+        Yuki.N.ProvidersTest,
+        Yuki.N.RunsTest,
+        Yuki.N.ServerTest,
+        Yuki.N.ServerCognitionTest,
+        Yuki.N.SessionTest,
+        Yuki.N.SubAgentTest,
+        Yuki.N.TestSupport,
+        Yuki.N.ThreadConfigTest,
+        Yuki.N.ToolsTest,
+        Yuki.N.TranscriptTest
     hs-source-dirs: test
-    ghc-options:    -threaded
+    ghc-options:    -threaded -Werror
     build-depends:
         aeson >=2.2 && <2.3,
         bytestring >=0.12 && <0.13,
@@ -110,8 +141,10 @@ test-suite yuki-n-test
         http-client-tls >=0.3 && <0.4,
         http-types >=0.12 && <0.13,
         process >=1.6 && <1.7,
+        QuickCheck >=2.14 && <3,
         tasty >=1.5 && <1.6,
         tasty-hunit >=0.10 && <0.11,
+        tasty-quickcheck >=0.10 && <0.11,
         text >=2.1 && <2.2,
         wai >=3.2 && <3.3,
         wai-extra >=3.1 && <3.2,

@@ -1,3 +1,10 @@
+-- | 端到端测试：真实 socket 上的 HTTP provider 与完整 agent 服务。
+--
+-- 覆盖：SSE 流式解码、工具往返、重试/回退、DeepSeek Responses 方言、用量流与模型列表，
+-- 全部经由 warp 回环 socket 的真实网络栈。
+-- 边界：不覆盖内存假模型（见各单元测试模块）；FakeProvider 脚本为手写桩，不经过生产代码。
+-- 变更记录：
+--   - 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 module E2E
   ( e2eTests,
     Reply (..),
@@ -17,7 +24,6 @@ module E2E
     toolCallArgs,
   )
 where
-
 import Control.Concurrent.MVar (MVar, readMVar)
 import Control.Monad ((>=>))
 import Data.Aeson
@@ -56,6 +62,7 @@ import Yuki.N.Provider.OpenAI
 import Yuki.N.Server (application)
 import Yuki.N.ThreadConfig (globalThreadConfig, resolveRuntime)
 
+
 e2eTests :: TestTree
 e2eTests =
   testGroup
@@ -87,13 +94,13 @@ newFakeProvider :: [Reply] -> IO FakeProvider
 newFakeProvider script = FakeProvider <$> newIORef script <*> newIORef [] <*> pure Nothing
 
 fakeProvider :: FakeProvider -> Application
-fakeProvider provider request respond = route (requestMethod request) (pathInfo request)
+fakeProvider provider req respond = route (requestMethod req) (pathInfo req)
   where
     route "POST" ["chat", "completions"] = completion >>= respond
     route "POST" ["responses"] = completion >>= respond
     route "GET" ["models"] = respond (responseLBS status200 jsonHeaders modelsPayload)
     route _ _ = respond (responseLBS status404 [] "unknown route")
-    completion = (strictRequestBody request >>= traverse_ record . decode) *> hold *> pop
+    completion = (strictRequestBody req >>= traverse_ record . decode) *> hold *> pop
     record body = modifyIORef' (providerBodies provider) (body :)
     hold = traverse_ readMVar (providerGate provider)
     pop = atomicModifyIORef' (providerScript provider) next <&> replyResponse
@@ -303,12 +310,7 @@ withSandbox action =
 
 -- assertions on the request bodies the provider recorded
 
-data WireMessage = WireMessage
-  { wireRole :: Text,
-    wireContent :: Maybe Text,
-    wireCallId :: Maybe Text,
-    wireToolCalls :: [Value]
-  }
+data WireMessage = WireMessage Text (Maybe Text) (Maybe Text) [Value]
 
 wireMessagesOf :: Value -> Either String [WireMessage]
 wireMessagesOf = parseEither (withObject "request" ((.: "messages") >=> traverse message))
@@ -360,6 +362,10 @@ expectSubstring label _ other =
 
 -- scenarios
 
+-- | 规格：DeepSeek Responses 事件流解码为推理/文本/工具增量并携带用量。
+-- 背景：Responses 是 DeepSeek 的生产协议；解码错误会让该供应商整体不可用，
+-- 而单元级 chunk 测试无法覆盖真实帧形状。该用例失败代表 Responses 方言断线。
+-- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 deepSeekResponses :: Assertion
 deepSeekResponses =
   newFakeProvider script >>= \provider ->
@@ -368,7 +374,7 @@ deepSeekResponses =
         newIORef [] >>= \textEvents ->
           newIORef [] >>= \toolEvents ->
             let model = openAIModel manager (deepSeekConfig port)
-                run events request = streamModel model request (\event -> modifyIORef' events (<> [event]))
+                run events req = streamModel model req (\event -> modifyIORef' events (<> [event]))
              in run textEvents (ModelRequest [ChatUser "hello"] []) >>= \textFinish ->
                   run toolEvents (ModelRequest [ChatUser "use a tool"] []) >>= \toolFinish ->
                     (,,) <$> readIORef textEvents <*> readIORef toolEvents <*> (reverse <$> readIORef (providerBodies provider))
@@ -399,6 +405,10 @@ deepSeekResponses =
             (\model -> model == ("deepseek-v4-flash" :: Text) && KeyMap.member "input" fields && not (KeyMap.member "messages" fields)) <$> fields .: "model"
         )
 
+-- | 规格：真实 socket 上端到端流式返回普通文本答案，wire 请求形状正确。
+-- 背景：这是全链路（HTTP→运行时→真实 HTTP provider 流）的最小冒烟测试；
+-- 任何一层断裂都会在此暴露。该用例失败代表基础链路不可用。
+-- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 plainText :: Assertion
 plainText =
   withSandbox $ \workDir ->
@@ -417,6 +427,10 @@ plainText =
     script = [Sse [roleChunk, textChunk "你好，", emptyChoicesChunk, textChunk "world", finishChunk "stop"]]
     wireStream = parseMaybe (withObject "request" (.: "stream"))
 
+-- | 规格：端到端完成工具往返：调用、参数拼接、结果回喂 provider。
+-- 背景：工具闭环是 agent 能力的核心路径；回喂错误会让模型看不到结果，
+-- 且真实 socket 往返暴露帧边界问题。该用例失败代表工具链路断裂。
+-- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 toolRound :: Assertion
 toolRound =
   withSandbox $ \workDir ->
@@ -440,6 +454,10 @@ toolRound =
         Sse [roleChunk, textChunk "listed", finishChunk "stop"]
       ]
 
+-- | 规格：真实 socket 上 429 重试两次后成功，事件携带 attempt 序列。
+-- 背景：重试是应对上游限流的生存能力；事件缺失会让运维无法观测重试，
+-- 且真实 HTTP 状态码路径与单元假模型不同。该用例失败代表重试链路失效。
+-- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 retryThenSuccess :: Assertion
 retryThenSuccess =
   withSandbox $ \workDir ->
@@ -463,6 +481,10 @@ retryThenSuccess =
     isRetry (Custom "provider.retry" _) = True
     isRetry _ = False
 
+-- | 规格：真实 socket 上最终 usage 帧转成 usage 事件。
+-- 背景：计费闭环依赖端到端用量流；仅在单元层覆盖会漏掉真实帧时序问题。
+-- 该用例失败代表用量链路丢失。
+-- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 usageFlow :: Assertion
 usageFlow =
   withSandbox $ \workDir ->
@@ -480,6 +502,10 @@ usageFlow =
     usageNumber :: Text -> Value -> Maybe Int
     usageNumber key = parseMaybe (withObject "usage" (.: Key.fromText key))
 
+-- | 规格：恒定 500 时运行以 PROVIDER_ERROR 失败且错误包含状态与响应体。
+-- 背景：provider 故障必须可诊断；错误信息缺失会让排障无从下手，
+-- 真实错误响应体路径与单元假模型不同。该用例失败代表错误透传失效。
+-- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 providerDown :: Assertion
 providerDown =
   withSandbox $ \workDir ->
@@ -496,6 +522,10 @@ providerDown =
   where
     script = [Failure status500 "{\"error\":{\"message\":\"boom\"}}"]
 
+-- | 规格：主 provider 失败时经真实 socket 回退到备用 provider。
+-- 背景：跨 socket 回退验证 fallback 链的端到端完整性；单边故障会断服务，
+-- 且两个 provider 的 socket 时序是单元层覆盖不到的。该用例失败代表回退链路失效。
+-- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 fallbackAcrossProviders :: Assertion
 fallbackAcrossProviders =
   withSandbox $ \workDir ->
@@ -522,6 +552,10 @@ fallbackAcrossProviders =
       application Nothing Nothing Nothing Nothing
         (const (pure runtime {runtimeFallbacks = [openAIModel manager (fakeConfig backupPort)]}))
 
+-- | 规格：真实 socket 上从假 provider 拉取模型列表。
+-- 背景：模型列表是前端选择的依据；请求形状错误会被 provider 拒绝，
+-- 该端点是 provider 接入的最小可验证路径。
+-- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 modelsListing :: Assertion
 modelsListing =
   newFakeProvider [] >>= \provider ->

@@ -94,3 +94,36 @@ DeepSeek V4 Flash 与 GLM-5.2 为 `1000000`、Kimi K3 为 `1048576`；改模型�
 ```console
 cabal build all && cabal test all
 ```
+
+### 测试体系
+
+测试按领域拆分为 `test/Yuki/N/*Test.hs`（+ `test/E2E.hs`、`test/Golden.hs`），
+`test/Main.hs` 只负责注册各组；测试模块之间不互相 import（Golden 与 E2E 为历史例外）。
+
+```console
+cabal test yuki-n-test --test-show-details=direct   # 全量单元/属性/E2E/golden
+cabal test yuki-n-test --enable-coverage --coverage-for=lib:yuki-n   # 仅统计库模块覆盖率
+```
+
+属性测试使用 tasty-quickcheck（默认 100 次/条，新增属性均控制在 200 次内、整套 <2 秒）。
+
+#### 文档即测试门禁
+
+每条 `testCase`/`testProperty` 必须引用本模块具名顶层实现，且紧邻声明前有 `-- |` 文档块，
+包含行为规格、`背景：` 与 `变更记录：`（带 `- YYYY-MM-DD:` 日期条目）。静态检查器：
+
+```console
+python3 scripts/check-test-docs.py
+```
+
+检查器覆盖 `test/**/*.hs`：拒绝匿名 body、要求注册实现有相邻文档块、文档块必须含
+`背景：`/`变更记录：`/日期条目；`testGroup` 与辅助函数豁免；Golden 的
+`replayOf scenario`/`deterministicOf scenario` 分派会递归校验其 case 分支目标。
+注册必须单行书写（`testCase "标题" body`），任何拆行注册都会报违规，防止静默漏检；
+注释、字符串字面量与 import 行中的同名符号不会被误判。检查器自测：
+
+```console
+python3 -m unittest scripts/test_check_test_docs.py
+```
+
+CI 依次运行文档门禁、检查器自测与覆盖测试，任一步失败即红灯。

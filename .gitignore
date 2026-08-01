@@ -13,3 +13,5 @@
 /cognition-v2/
 /journal.jsonl
 /providers.json
+__pycache__/
+*.py[cod]
