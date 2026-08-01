@@ -8,6 +8,31 @@ permissions:
   contents: read
 
 jobs:
+  haskell-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Fourmolu formatting
+        uses: haskell-actions/run-fourmolu@v13
+        with:
+          version: "0.20.0.0"
+          pattern: |
+            src/**/*.hs
+            app/**/*.hs
+            test/**/*.hs
+
+      - name: Set up HLint
+        uses: haskell-actions/hlint-setup@v2
+        with:
+          version: "3.10"
+
+      - name: Run HLint
+        uses: haskell-actions/hlint-run@v2
+        with:
+          path: '["src/", "app/", "test/"]'
+          fail-on: error
+
   build-test:
     runs-on: ubuntu-latest
     steps:
@@ -28,8 +53,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cabal-
 
-      - name: Build all components
-        run: cabal build all
+      - name: Build production components once with coverage
+        run: cabal build all --enable-coverage --coverage-for=lib:yuki-n
 
       - name: Run the test documentation gate
         run: python3 scripts/check-test-docs.py
@@ -55,7 +80,7 @@ jobs:
             echo "missing hpc mix directory: $MIX" >&2
             exit 1
           fi
-          MODS="Yuki.N.AGUI.Event Yuki.N.AGUI.Types Yuki.N.Agent Yuki.N.AgentsMd Yuki.N.Anatomy Yuki.N.Artifact Yuki.N.AtomicFile Yuki.N.Background Yuki.N.Blob Yuki.N.Cognition Yuki.N.Config Yuki.N.Context Yuki.N.ContextEpoch Yuki.N.Diff Yuki.N.Experience Yuki.N.Facts Yuki.N.Incarnation Yuki.N.Inspect Yuki.N.Invocation Yuki.N.Journal Yuki.N.Memory Yuki.N.Memory.Archive Yuki.N.Memory.Impression Yuki.N.Memory.LongTerm Yuki.N.Memory.Working Yuki.N.Model Yuki.N.Provider.OpenAI Yuki.N.Providers Yuki.N.Replay Yuki.N.Runs Yuki.N.Server Yuki.N.Sessions Yuki.N.SubAgent Yuki.N.ThreadConfig Yuki.N.Tools Yuki.N.Transcript"
+          MODS="Yuki.N.AGUI.Event Yuki.N.AGUI.Types Yuki.N.Agent Yuki.N.AgentsMd Yuki.N.Anatomy Yuki.N.Artifact Yuki.N.AtomicFile Yuki.N.Background Yuki.N.Blob Yuki.N.Cognition Yuki.N.Config Yuki.N.Context Yuki.N.ContextEpoch Yuki.N.Diff Yuki.N.Domain.Diff Yuki.N.Experience Yuki.N.Facts Yuki.N.Incarnation Yuki.N.Inspect Yuki.N.Invocation Yuki.N.Journal Yuki.N.Memory Yuki.N.Memory.Archive Yuki.N.Memory.Impression Yuki.N.Memory.LongTerm Yuki.N.Memory.Working Yuki.N.Model Yuki.N.Provider.OpenAI Yuki.N.Providers Yuki.N.Replay Yuki.N.Runs Yuki.N.Server Yuki.N.Sessions Yuki.N.SubAgent Yuki.N.ThreadConfig Yuki.N.Tools Yuki.N.Transcript"
           hpc report --hpcdir="$MIX" "$TIX" $MODS
 
       - name: Upload coverage report

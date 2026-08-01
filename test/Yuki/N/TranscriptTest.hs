@@ -11,18 +11,20 @@ module Yuki.N.TranscriptTest
     wakePacketRoundTrip,
     threadIdPhysicalIsolation,
     transcriptOverHttp,
-    rootOnlyWrites
+    rootOnlyWrites,
   )
 where
+
 import Control.Applicative ()
 import Control.Concurrent ()
 import Control.Concurrent.MVar ()
 import Control.Exception ()
 import Control.Monad ()
 import Data.Aeson
+import Data.Aeson.Types (parseEither)
 import Data.Bool ()
 import Data.ByteString ()
-import qualified Data.ByteString.Lazy as LazyByteString
+import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Foldable ()
 import Data.Functor ()
 import Data.IORef ()
@@ -36,28 +38,26 @@ import Network.Wai ()
 import Network.Wai.Handler.Warp ()
 import Network.Wai.Internal ()
 import Network.Wai.Test
+import System.Directory (doesFileExist)
 import System.Exit ()
 import System.FilePath ()
 import System.Process ()
 import System.Timeout ()
 import Test.Tasty
 import Test.Tasty.HUnit
-import Yuki.N.Transcript
-import Yuki.N.Agent
-import Yuki.N.Model
-import Yuki.N.ThreadConfig
-import Yuki.N.Memory
-import Yuki.N.Server
-import Yuki.N.Inspect
-import Yuki.N.AGUI.Types
 import Yuki.N.AGUI.Event ()
+import Yuki.N.AGUI.Types
+import Yuki.N.Agent
 import Yuki.N.Background ()
 import Yuki.N.Context ()
+import Yuki.N.Inspect
+import Yuki.N.Memory
 import Yuki.N.Memory.Working
+import Yuki.N.Model
+import Yuki.N.Server
 import Yuki.N.TestSupport
-import System.Directory (doesFileExist)
-import Data.Aeson.Types (parseEither)
-
+import Yuki.N.ThreadConfig
+import Yuki.N.Transcript
 
 transcriptTests :: TestTree
 transcriptTests =
@@ -70,6 +70,7 @@ transcriptTests =
       testCase "serves the transcript as AG-UI messages, 404 when unknown" transcriptOverHttp,
       testCase "root runs persist the transcript, sub runs do not overwrite it" rootOnlyWrites
     ]
+
 -- | 规格：chat 消息与 AG-UI 消息互转无损，system 消息被过滤。
 -- 背景：互转是前端显示与内部历史的桥；丢失内容会让会话记录不完整。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
@@ -80,14 +81,15 @@ aguiRoundTrip =
       toChatMessages (toAguiMessages transcriptHistory) @?= Right transcriptHistory,
       toAguiMessages (ChatSystem "injected" : transcriptHistory) @?= agui
     ]
-  where
-    agui =
-      [ User (UserMessage "tr-0" (UserText "hi") Nothing),
-        Reasoning (ReasoningMessage "tr-1-reasoning" "thinking" Nothing),
-        Assistant (AssistantMessage "m-1" (Just "working") Nothing [ToolCall "c-1" (FunctionCall "echo" "{\"x\":1}") Nothing]),
-        Tool (ToolMessage "tr-2" "echoed" "c-1" Nothing Nothing),
-        Assistant (AssistantMessage "m-2" (Just "done") Nothing [])
-      ]
+ where
+  agui =
+    [ User (UserMessage "tr-0" (UserText "hi") Nothing),
+      Reasoning (ReasoningMessage "tr-1-reasoning" "thinking" Nothing),
+      Assistant (AssistantMessage "m-1" (Just "working") Nothing [ToolCall "c-1" (FunctionCall "echo" "{\"x\":1}") Nothing]),
+      Tool (ToolMessage "tr-2" "echoed" "c-1" Nothing Nothing),
+      Assistant (AssistantMessage "m-2" (Just "done") Nothing [])
+    ]
+
 -- | 规格：transcript 文件存储过滤 system、净化文件名并跨重启读回。
 -- 背景：transcript 是会话持久化基础；过滤与净化错误会污染记录。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
@@ -100,6 +102,7 @@ storeRoundTrip =
         *> (doesFileExist (dir ++ "/transcripts/th-read-me.json") >>= assertBool "transcript file uses the sanitized name")
         *> (newTranscriptStore dir >>= \reopened -> transcriptLoad reopened "th/read:me" >>= (@?= Just transcriptHistory))
         *> (transcriptLoad store "absent" >>= (@?= Nothing))
+
 -- | 规格：Wake Packet 以 developer 消息保存并在重启后恢复为 packet。
 -- 背景：唤醒包是睡眠记忆的载体；丢失会让唤醒后的上下文断裂。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
@@ -122,6 +125,7 @@ wakePacketRoundTrip =
                           Assistant (AssistantMessage "awake" (Just "continued") Nothing [])
                         ]
                   ]
+
 -- | 规格：a.b 与 a-b 在 transcript/config/thread 三存储中物理隔离。
 -- 背景：线程名混淆是数据串扰源头；物理隔离失败会串会话。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
@@ -143,7 +147,8 @@ threadIdPhysicalIsolation =
                 *> threadConfigWrite configs "a-b" dashConfig
                 *> threadSaveEpisode briefs "a.b" dotBrief
                 *> threadSaveEpisode briefs "a-b" dashBrief
-                *> traverse doesFileExist
+                *> traverse
+                  doesFileExist
                   [ dir ++ "/transcripts/a.b.json",
                     dir ++ "/transcripts/a-b.json",
                     dir ++ "/threads-config/a.b.json",
@@ -172,6 +177,7 @@ threadIdPhysicalIsolation =
                                 fmap briefRollingSummary storedDotBrief @?= Just "dot brief",
                                 fmap briefRollingSummary storedDashBrief @?= Just "dash brief"
                               ]
+
 -- | 规格：GET /threads/:id/transcript 返回 AG-UI 消息，未知线程 404。
 -- 背景：transcript 端点是历史回看的数据源；404 错误会误导前端。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
@@ -189,11 +195,12 @@ transcriptOverHttp =
                     simpleStatus unknown @?= status404,
                     either assertFailure (@?= ("thread", toAguiMessages transcriptHistory)) (decodeDocument (simpleBody found))
                   ]
-  where
-    decodeDocument :: LazyByteString.ByteString -> Either String (Text, [Message])
-    decodeDocument body =
-      eitherDecode body
-        >>= parseEither (withObject "transcript" (\fields -> (,) <$> fields .: "threadId" <*> fields .: "messages"))
+ where
+  decodeDocument :: LazyByteString.ByteString -> Either String (Text, [Message])
+  decodeDocument body =
+    eitherDecode body
+      >>= parseEither (withObject "transcript" (\fields -> (,) <$> fields .: "threadId" <*> fields .: "messages"))
+
 -- | 规格：根运行写 transcript，子运行不覆盖。
 -- 背景：子代理运行写入根 transcript 会撕裂历史；根只写是因果边界。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
@@ -206,5 +213,5 @@ rootOnlyWrites =
          in collectEvents wired (sampleInput [])
               *> collectEvents wired ((sampleInput []) {runId = "run-sub", runParentId = Just "run"})
               *> (transcriptLoad store "thread" >>= (@?= Just root))
-  where
-    root = [ChatUser "hello", ChatAssistant (AssistantTurn "id-1" (Just "ok") Nothing [])]
+ where
+  root = [ChatUser "hello", ChatAssistant (AssistantTurn "id-1" (Just "ok") Nothing [])]

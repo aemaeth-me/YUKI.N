@@ -16,17 +16,17 @@ where
 import Control.Applicative ((<|>))
 import Control.Concurrent.MVar (newMVar, withMVar)
 import Control.Exception (IOException, try)
+import Control.Monad (when)
 import Data.Aeson
-import qualified Data.Aeson.KeyMap as KeyMap
+import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Bool (bool)
 import Data.Functor ((<&>))
 import Data.IORef (modifyIORef', newIORef, readIORef)
-import qualified Data.Map.Strict as Map
+import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import qualified Data.Text as Text
+import Data.Text qualified as Text
 import Network.HTTP.Client (Manager)
-import Control.Monad (when)
 import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
 import Yuki.N.AGUI.Types (toolName)
 import Yuki.N.Agent
@@ -85,12 +85,12 @@ instance Semigroup ThreadConfig where
       (pick configContextReserveTokens)
       (pick configContextKeepUnits)
       (pick configContextSummaryTokens)
-    where
-      cwd = case configCwd session of
-        CwdInherit -> configCwd fallback
-        explicit -> explicit
-      pick :: (ThreadConfig -> Maybe field) -> Maybe field
-      pick field = field session <|> field fallback
+   where
+    cwd = case configCwd session of
+      CwdInherit -> configCwd fallback
+      explicit -> explicit
+    pick :: (ThreadConfig -> Maybe field) -> Maybe field
+    pick field = field session <|> field fallback
 
 instance Monoid ThreadConfig where
   mempty = emptyThreadConfig
@@ -116,14 +116,14 @@ instance ToJSON ThreadConfig where
                "contextSummaryTokens" .= configContextSummaryTokens config
              ]
       )
-    where
-      cwd = configCwd config
-      cwdPairs CwdInherit = []
-      cwdPairs CwdNone = ["cwd" .= Null]
-      cwdPairs (CwdPath path) = ["cwd" .= path]
-      cwdMode CwdInherit = "inherit" :: Text
-      cwdMode CwdNone = "none"
-      cwdMode CwdPath {} = "path"
+   where
+    cwd = configCwd config
+    cwdPairs CwdInherit = []
+    cwdPairs CwdNone = ["cwd" .= Null]
+    cwdPairs (CwdPath path) = ["cwd" .= path]
+    cwdMode CwdInherit = "inherit" :: Text
+    cwdMode CwdNone = "none"
+    cwdMode CwdPath {} = "path"
 
 instance FromJSON ThreadConfig where
   parseJSON = withObject "ThreadConfig" $ \fields ->
@@ -140,18 +140,18 @@ instance FromJSON ThreadConfig where
       <*> fields .:? "contextReserveTokens"
       <*> fields .:? "contextKeepUnits"
       <*> fields .:? "contextSummaryTokens"
-    where
-      parseCwd fields =
-        fields .:? "cwdMode" >>= maybe (legacy fields) (explicit fields)
-      legacy fields =
-        case KeyMap.lookup "cwd" fields of
-          Nothing -> pure CwdInherit
-          Just Null -> pure CwdNone
-          Just value -> CwdPath <$> parseJSON value
-      explicit _ "inherit" = pure CwdInherit
-      explicit _ "none" = pure CwdNone
-      explicit fields "path" = CwdPath <$> fields .: "cwd"
-      explicit _ mode = fail ("unknown cwdMode: " <> Text.unpack mode)
+   where
+    parseCwd fields =
+      fields .:? "cwdMode" >>= maybe (legacy fields) (explicit fields)
+    legacy fields =
+      case KeyMap.lookup "cwd" fields of
+        Nothing -> pure CwdInherit
+        Just Null -> pure CwdNone
+        Just value -> CwdPath <$> parseJSON value
+    explicit _ "inherit" = pure CwdInherit
+    explicit _ "none" = pure CwdNone
+    explicit fields "path" = CwdPath <$> fields .: "cwd"
+    explicit _ mode = fail ("unknown cwdMode: " <> Text.unpack mode)
 
 data ThreadConfigStore = ThreadConfigStore
   { threadConfigRead :: Text -> IO ThreadConfig,
@@ -164,14 +164,14 @@ newThreadConfigStore dir =
   createDirectoryIfMissing True (configsPath dir)
     *> newMVar ()
     <&> \lock -> ThreadConfigStore (load dir) (save lock) (delete lock)
-  where
-    save lock threadId config =
-      withMVar lock (const (atomicEncodeFile (configPath dir threadId) config))
-    delete lock threadId =
-      withMVar lock $ \_ ->
-        doesFileExist target >>= flip when (removeFile target)
-      where
-        target = configPath dir threadId
+ where
+  save lock threadId config =
+    withMVar lock (const (atomicEncodeFile (configPath dir threadId) config))
+  delete lock threadId =
+    withMVar lock $ \_ ->
+      doesFileExist target >>= flip when (removeFile target)
+   where
+    target = configPath dir threadId
 
 load :: FilePath -> Text -> IO ThreadConfig
 load dir threadId =
@@ -198,35 +198,35 @@ resolveRuntime manager provider artifacts base config registry keyMap =
   workToolSet <&> \tools ->
     registerSubAgent
       base
-      { runtimeModel = maybe (fallbackModel base) (openAIModel manager) chosenConfig,
-        runtimeTools = artifactTools <> gated tools,
-        runtimeSystemPrompt = fromMaybe (runtimeSystemPrompt base) (configSystemPrompt config),
-        runtimeHooks = bool defaultHooks (runtimeHooks base) (configMemory config /= Just False),
-        runtimeContext = applyContext <$> runtimeContext base
-      }
-  where
-    chosenConfig =
-      configProvider config >>= \name ->
-        Map.lookup name registry >>= \entry ->
-          Map.lookup (Text.unpack name) keyMap <&> \key ->
-            applyEffort (providerConfig entry key (configModel config <|> Just (providerDefaultModel entry)))
-    fallbackModel source
-      | configModel config == Nothing && configReasoningEffort config == Nothing = runtimeModel source
-      | otherwise = openAIModel manager (applyEffort provider) {openAIModelName = fromMaybe (openAIModelName provider) (configModel config)}
-    applyEffort cfg = maybe cfg (\effort -> cfg {openAIThinking = ThinkingEnabled effort}) (configReasoningEffort config)
-    artifactTools = maybe Map.empty (Map.singleton artifactReadToolName . artifactReadTool) artifacts
-    workToolSet = maybe (pure Map.empty) (fmap byName . withBackground) (cwdPath (configCwd config))
-    withBackground cwd = (<> backgroundTools (runtimeBackground base) cwd) <$> workTools artifacts cwd
-    byName = Map.fromList . fmap (\tool -> (toolName (backendToolSpec tool), tool))
-    gated = fsGate . shellGate
-    fsGate = bool (Map.filterWithKey (\name _ -> not ("fs_" `Text.isPrefixOf` name))) id (configFs config /= Just False)
-    shellGate = bool (Map.filterWithKey (\name _ -> not ("shell" `Text.isPrefixOf` name))) id (configShell config /= Just False)
-    applyContext context =
-      context
-        { contextReserveTokens = fromMaybe (contextReserveTokens context) (configContextReserveTokens config),
-          contextKeepUnits = fromMaybe (contextKeepUnits context) (configContextKeepUnits config),
-          contextSummaryTokens = fromMaybe (contextSummaryTokens context) (configContextSummaryTokens config)
+        { runtimeModel = maybe (fallbackModel base) (openAIModel manager) chosenConfig,
+          runtimeTools = artifactTools <> gated tools,
+          runtimeSystemPrompt = fromMaybe (runtimeSystemPrompt base) (configSystemPrompt config),
+          runtimeHooks = bool defaultHooks (runtimeHooks base) (configMemory config /= Just False),
+          runtimeContext = applyContext <$> runtimeContext base
         }
+ where
+  chosenConfig =
+    configProvider config >>= \name ->
+      Map.lookup name registry >>= \entry ->
+        Map.lookup (Text.unpack name) keyMap <&> \key ->
+          applyEffort (providerConfig entry key (configModel config <|> Just (providerDefaultModel entry)))
+  fallbackModel source
+    | configModel config == Nothing && configReasoningEffort config == Nothing = runtimeModel source
+    | otherwise = openAIModel manager (applyEffort provider) {openAIModelName = fromMaybe (openAIModelName provider) (configModel config)}
+  applyEffort cfg = maybe cfg (\effort -> cfg {openAIThinking = ThinkingEnabled effort}) (configReasoningEffort config)
+  artifactTools = maybe Map.empty (Map.singleton artifactReadToolName . artifactReadTool) artifacts
+  workToolSet = maybe (pure Map.empty) (fmap byName . withBackground) (cwdPath (configCwd config))
+  withBackground cwd = (<> backgroundTools (runtimeBackground base) cwd) <$> workTools artifacts cwd
+  byName = Map.fromList . fmap (\tool -> (toolName (backendToolSpec tool), tool))
+  gated = fsGate . shellGate
+  fsGate = bool (Map.filterWithKey (\name _ -> not ("fs_" `Text.isPrefixOf` name))) id (configFs config /= Just False)
+  shellGate = bool (Map.filterWithKey (\name _ -> not ("shell" `Text.isPrefixOf` name))) id (configShell config /= Just False)
+  applyContext context =
+    context
+      { contextReserveTokens = fromMaybe (contextReserveTokens context) (configContextReserveTokens config),
+        contextKeepUnits = fromMaybe (contextKeepUnits context) (configContextKeepUnits config),
+        contextSummaryTokens = fromMaybe (contextSummaryTokens context) (configContextSummaryTokens config)
+      }
 
 globalThreadConfig :: Settings -> ThreadConfig
 globalThreadConfig settings =
@@ -244,8 +244,8 @@ globalThreadConfig settings =
       configContextKeepUnits = Just (settingsContextKeepUnits settings),
       configContextSummaryTokens = Just (settingsContextSummaryTokens settings)
     }
-  where
-    prompt = settingsSystemPrompt settings
+ where
+  prompt = settingsSystemPrompt settings
 
 renderGlobalConfig :: Settings -> ThreadConfig -> Value
 renderGlobalConfig settings defaults =
@@ -285,8 +285,8 @@ renderGlobalConfig settings defaults =
           ],
       "defaults" .= defaults
     ]
-  where
-    provider = settingsProvider settings
+ where
+  provider = settingsProvider settings
 
 dialectName :: ApiDialect -> Text
 dialectName DeepSeek = "deepseek"

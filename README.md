@@ -127,3 +127,30 @@ python3 -m unittest scripts/test_check_test_docs.py
 ```
 
 CI 依次运行文档门禁、检查器自测与覆盖测试，任一步失败即红灯。
+
+#### Haskell 架构边界
+
+源码分层、Domain 纯度和 effect 所有权见
+[`docs/haskell-architecture.md`](docs/haskell-architecture.md)。仓库级 `AGENTS.md` 规定 Domain
+禁止 `IO`、`ST`、并发、系统资源、FFI 和 unsafe escape，并要求在代码审查中逐项检查边界。
+
+#### Haskell 开发工具
+
+项目使用显式 `hie.yaml` 将 `src/`、`app/`、`test/` 分别映射到 Cabal 的
+library、executable、test-suite component。编辑器只需启动一个 HLS client。
+
+Haskell 源码统一使用 Fourmolu `0.20.0.0`，配置见 `fourmolu.yaml`：
+
+```console
+fourmolu --mode inplace $(git ls-files '*.hs')
+fourmolu --mode check $(git ls-files '*.hs')
+```
+
+HLint `3.10` 用于语义与惯用法检查，不承担格式化：
+
+```console
+hlint src app test
+```
+
+CI 会拒绝未格式化代码和 HLint error；HLint warning 暂作为代码审查提示，待现有
+warning 基线逐步清理后再提升为强制门禁。

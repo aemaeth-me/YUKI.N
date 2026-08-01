@@ -14,9 +14,9 @@ module Yuki.N.Model
 where
 
 import Control.Exception (Exception)
+import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:?), (.=))
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:?), (.=))
 import Yuki.N.AGUI.Types (ToolSpec)
 
 data Model = Model
@@ -32,7 +32,7 @@ data ModelRequest = ModelRequest
     requestTools :: [ToolSpec]
   }
   deriving stock (Eq, Show)
-  deriving (Generic)
+  deriving Generic
 
 instance ToJSON ModelRequest
 
@@ -44,7 +44,7 @@ data ChatMessage
   | ChatAssistant AssistantTurn
   | ChatToolResult Text Text
   deriving stock (Eq, Show)
-  deriving (Generic)
+  deriving Generic
 
 instance ToJSON ChatMessage
 
@@ -57,7 +57,7 @@ data AssistantTurn = AssistantTurn
     turnToolCalls :: [ModelToolCall]
   }
   deriving stock (Eq, Show)
-  deriving (Generic)
+  deriving Generic
 
 instance ToJSON AssistantTurn
 
@@ -69,7 +69,7 @@ data ModelToolCall = ModelToolCall
     modelToolArguments :: Text
   }
   deriving stock (Eq, Show)
-  deriving (Generic)
+  deriving Generic
 
 instance ToJSON ModelToolCall
 
@@ -86,7 +86,7 @@ data ModelEvent
       }
   | ModelUsage Usage
   deriving stock (Eq, Show)
-  deriving (Generic)
+  deriving Generic
 
 instance ToJSON ModelEvent
 
@@ -97,7 +97,7 @@ data FinishReason
   | ToolUse
   | Length
   deriving stock (Eq, Show)
-  deriving (Generic)
+  deriving Generic
 
 instance ToJSON FinishReason
 
@@ -107,7 +107,7 @@ data ToolExecution
   = Sequential
   | Parallel
   deriving stock (Eq, Show)
-  deriving (Generic)
+  deriving Generic
 
 instance ToJSON ToolExecution
 
@@ -119,7 +119,7 @@ data ToolOutcome = ToolOutcome
     toolOutcomeTerminate :: Bool
   }
   deriving stock (Eq, Show)
-  deriving (Generic)
+  deriving Generic
 
 instance ToJSON ToolOutcome
 

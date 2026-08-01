@@ -24,25 +24,26 @@ module E2E
     toolCallArgs,
   )
 where
+
 import Control.Concurrent.MVar (MVar, readMVar)
 import Control.Monad ((>=>))
 import Data.Aeson
-import qualified Data.Aeson.Key as Key
-import qualified Data.Aeson.KeyMap as KeyMap
+import Data.Aeson.Key qualified as Key
+import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.Types (Parser, parseEither, parseMaybe)
 import Data.ByteString (ByteString)
-import qualified Data.ByteString as ByteString
-import qualified Data.ByteString.Builder as Builder
-import qualified Data.ByteString.Char8 as Char8
-import qualified Data.ByteString.Lazy as LazyByteString
+import Data.ByteString qualified as ByteString
+import Data.ByteString.Builder qualified as Builder
+import Data.ByteString.Char8 qualified as Char8
+import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Foldable (traverse_)
 import Data.Functor ((<&>))
 import Data.IORef
-import qualified Data.Map.Strict as Map
+import Data.Map.Strict qualified as Map
 import Data.Maybe (mapMaybe)
 import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Text.Encoding as TextEncoding
+import Data.Text qualified as Text
+import Data.Text.Encoding qualified as TextEncoding
 import Network.HTTP.Client (Manager, defaultManagerSettings, newManager)
 import Network.HTTP.Types
 import Network.Wai
@@ -61,7 +62,6 @@ import Yuki.N.Model
 import Yuki.N.Provider.OpenAI
 import Yuki.N.Server (application)
 import Yuki.N.ThreadConfig (globalThreadConfig, resolveRuntime)
-
 
 e2eTests :: TestTree
 e2eTests =
@@ -95,33 +95,35 @@ newFakeProvider script = FakeProvider <$> newIORef script <*> newIORef [] <*> pu
 
 fakeProvider :: FakeProvider -> Application
 fakeProvider provider req respond = route (requestMethod req) (pathInfo req)
-  where
-    route "POST" ["chat", "completions"] = completion >>= respond
-    route "POST" ["responses"] = completion >>= respond
-    route "GET" ["models"] = respond (responseLBS status200 jsonHeaders modelsPayload)
-    route _ _ = respond (responseLBS status404 [] "unknown route")
-    completion = (strictRequestBody req >>= traverse_ record . decode) *> hold *> pop
-    record body = modifyIORef' (providerBodies provider) (body :)
-    hold = traverse_ readMVar (providerGate provider)
-    pop = atomicModifyIORef' (providerScript provider) next <&> replyResponse
-    next (reply : rest) = (rest, Just reply)
-    next [] = ([], Nothing)
+ where
+  route "POST" ["chat", "completions"] = completion >>= respond
+  route "POST" ["responses"] = completion >>= respond
+  route "GET" ["models"] = respond (responseLBS status200 jsonHeaders modelsPayload)
+  route _ _ = respond (responseLBS status404 [] "unknown route")
+  completion = (strictRequestBody req >>= traverse_ record . decode) *> hold *> pop
+  record body = modifyIORef' (providerBodies provider) (body :)
+  hold = traverse_ readMVar (providerGate provider)
+  pop = atomicModifyIORef' (providerScript provider) next <&> replyResponse
+  next (reply : rest) = (rest, Just reply)
+  next [] = ([], Nothing)
 
 replyResponse :: Maybe Reply -> Response
 replyResponse (Just (Failure status body)) = responseLBS status jsonHeaders (LazyByteString.fromStrict body)
 replyResponse (Just (Sse payloads)) =
   responseStream status200 sseHeaders $ \write flush ->
     traverse_ (frame write flush) payloads *> write "data: [DONE]\n\n" *> flush
-  where
-    frame write flush payload =
-      write (Builder.byteString "data: " <> Builder.byteString prefix) *> flush
-        *> write (Builder.byteString suffix <> Builder.byteString "\n\n") *> flush
-      where
-        (prefix, suffix) = ByteString.splitAt (ByteString.length payload `div` 2) payload
+ where
+  frame write flush payload =
+    write (Builder.byteString "data: " <> Builder.byteString prefix)
+      *> flush
+      *> write (Builder.byteString suffix <> Builder.byteString "\n\n")
+      *> flush
+   where
+    (prefix, suffix) = ByteString.splitAt (ByteString.length payload `div` 2) payload
 replyResponse (Just (ResponsesSse payloads)) =
   responseStream status200 sseHeaders $ \write flush -> traverse_ (frame write flush) payloads
-  where
-    frame write flush payload = write (Builder.byteString "data: " <> Builder.byteString payload <> Builder.byteString "\n\n") *> flush
+ where
+  frame write flush payload = write (Builder.byteString "data: " <> Builder.byteString payload <> Builder.byteString "\n\n") *> flush
 replyResponse _ = responseLBS status500 [] "fake provider script exhausted"
 
 jsonHeaders :: ResponseHeaders
@@ -147,10 +149,10 @@ jsonChunk delta finish =
 
 escape :: Text -> Text
 escape = Text.concatMap escapeChar
-  where
-    escapeChar '"' = "\\\""
-    escapeChar '\\' = "\\\\"
-    escapeChar char = Text.singleton char
+ where
+  escapeChar '"' = "\\\""
+  escapeChar '\\' = "\\\\"
+  escapeChar char = Text.singleton char
 
 roleChunk :: ByteString
 roleChunk = jsonChunk "{\"role\":\"assistant\"}" "null"
@@ -230,31 +232,31 @@ wiredRuntime manager artifacts settings =
   newIORef (0 :: Int) >>= \counter ->
     newBackgroundRegistry >>= \background ->
       resolveRuntime manager provider artifacts (base counter background) (globalThreadConfig settings) Map.empty Map.empty
-  where
-    provider = settingsProvider settings
-    base counter background =
-      Runtime
-        { runtimeModel = openAIModel manager provider,
-          runtimeTools = Map.empty,
-          runtimeToolExecution = settingsToolExecution settings,
-          runtimeMaxTurns = settingsMaxTurns settings,
-          runtimeSystemPrompt = settingsSystemPrompt settings,
-          runtimeHooks = defaultHooks,
-          runtimeNewId =
-            atomicModifyIORef' counter (\value -> (value + 1, value + 1))
-              <&> \next -> "msg-" <> Text.pack (show next),
-          runtimeJournal = Nothing,
-          runtimeArtifactStore = Nothing,
-          runtimeBackground = background,
-          runtimeDepth = settingsSubAgentDepth settings,
-          runtimeProviderRetries = settingsProviderRetries settings,
-          runtimeFallbacks = [],
-          runtimeSplice = Nothing,
-          runtimeContext = Nothing,
-          runtimeRuns = Nothing,
-          runtimeSteer = const (pure []),
-          runtimeFollowUp = const (pure [])
-        }
+ where
+  provider = settingsProvider settings
+  base counter background =
+    Runtime
+      { runtimeModel = openAIModel manager provider,
+        runtimeTools = Map.empty,
+        runtimeToolExecution = settingsToolExecution settings,
+        runtimeMaxTurns = settingsMaxTurns settings,
+        runtimeSystemPrompt = settingsSystemPrompt settings,
+        runtimeHooks = defaultHooks,
+        runtimeNewId =
+          atomicModifyIORef' counter (\value -> (value + 1, value + 1))
+            <&> \next -> "msg-" <> Text.pack (show next),
+        runtimeJournal = Nothing,
+        runtimeArtifactStore = Nothing,
+        runtimeBackground = background,
+        runtimeDepth = settingsSubAgentDepth settings,
+        runtimeProviderRetries = settingsProviderRetries settings,
+        runtimeFallbacks = [],
+        runtimeSplice = Nothing,
+        runtimeContext = Nothing,
+        runtimeRuns = Nothing,
+        runtimeSteer = const (pure []),
+        runtimeFollowUp = const (pure [])
+      }
 
 -- AG-UI client side: POST /agent through the real server, decode the SSE stream
 
@@ -280,8 +282,8 @@ decodeEvents response =
   (simpleStatus response @?= status200)
     *> (lookup hContentType (simpleHeaders response) @?= Just "text/event-stream; charset=utf-8")
     *> traverse decodeOne (payloadsOf (simpleBody response))
-  where
-    decodeOne = either (assertFailure . ("invalid AG-UI event: " <>)) pure . eitherDecodeStrict'
+ where
+  decodeOne = either (assertFailure . ("invalid AG-UI event: " <>)) pure . eitherDecodeStrict'
 
 payloadsOf :: LazyByteString.ByteString -> [ByteString]
 payloadsOf = mapMaybe (ByteString.stripPrefix "data: ") . Char8.lines . LazyByteString.toStrict
@@ -290,14 +292,14 @@ drive :: FilePath -> Int -> [Reply] -> ([Event] -> [Value] -> Assertion) -> Asse
 drive workDir retries script assertions =
   newFakeProvider script >>= \provider ->
     testWithApplication (pure (fakeProvider provider)) (run provider)
-  where
-    run provider port =
-      newManager defaultManagerSettings >>= \manager ->
-        wiredRuntime manager Nothing (e2eSettings port workDir retries) >>= \runtime ->
-          runSession postAgent (application Nothing Nothing Nothing Nothing (const (pure runtime)))
-            >>= decodeEvents
-            >>= \events -> recorded provider >>= assertions events
-    recorded provider = reverse <$> readIORef (providerBodies provider)
+ where
+  run provider port =
+    newManager defaultManagerSettings >>= \manager ->
+      wiredRuntime manager Nothing (e2eSettings port workDir retries) >>= \runtime ->
+        runSession postAgent (application Nothing Nothing Nothing Nothing (const (pure runtime)))
+          >>= decodeEvents
+          >>= \events -> recorded provider >>= assertions events
+  recorded provider = reverse <$> readIORef (providerBodies provider)
 
 withSandbox :: (FilePath -> IO a) -> IO a
 withSandbox action =
@@ -314,14 +316,14 @@ data WireMessage = WireMessage Text (Maybe Text) (Maybe Text) [Value]
 
 wireMessagesOf :: Value -> Either String [WireMessage]
 wireMessagesOf = parseEither (withObject "request" ((.: "messages") >=> traverse message))
-  where
-    message =
-      withObject "message" $ \fields ->
-        WireMessage
-          <$> fields .: "role"
-          <*> fields .:? "content"
-          <*> fields .:? "tool_call_id"
-          <*> fields .:? "tool_calls" .!= []
+ where
+  message =
+    withObject "message" $ \fields ->
+      WireMessage
+        <$> fields .: "role"
+        <*> fields .:? "content"
+        <*> fields .:? "tool_call_id"
+        <*> fields .:? "tool_calls" .!= []
 
 wireContents :: Value -> Maybe [Text]
 wireContents = parseMaybe (withObject "request" ((.: "messages") >=> traverse (withObject "message" (.: "content"))))
@@ -386,24 +388,24 @@ deepSeekResponses =
                             toolSeen @?= [ModelToolCallDelta 0 (Just "call-1") (Just "lookup") "", ModelToolCallDelta 0 Nothing Nothing "{\"query\":\"yuki\"}", ModelUsage (Usage (Just 8) (Just 4) (Just 0) (Just 8))],
                             traverse responseShape requests @?= Just [True, True]
                           ]
-  where
-    script =
-      [ ResponsesSse
-          [ "{\"event\":\"response.reasoning_text.delta\",\"sequence_number\":1,\"output_index\":0,\"delta\":\"thinking\"}",
-            "{\"event\":\"response.output_text.delta\",\"sequence_number\":2,\"output_index\":0,\"delta\":\"flash\"}",
-            "{\"event\":\"response.completed\",\"sequence_number\":3,\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"input_tokens_details\":{\"cached_tokens\":2}}}}"
-          ],
-        ResponsesSse
-          [ "{\"event\":\"response.output_item.added\",\"sequence_number\":1,\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"fc-1\",\"call_id\":\"call-1\",\"name\":\"lookup\",\"arguments\":\"\"}}",
-            "{\"event\":\"response.function_call_arguments.delta\",\"sequence_number\":2,\"output_index\":0,\"delta\":\"{\\\"query\\\":\\\"yuki\\\"}\"}",
-            "{\"event\":\"response.completed\",\"sequence_number\":3,\"response\":{\"usage\":{\"input_tokens\":8,\"output_tokens\":4,\"input_tokens_details\":{\"cached_tokens\":0}}}}"
-          ]
-      ]
-    responseShape =
-      parseMaybe
-        ( withObject "response request" $ \fields ->
-            (\model -> model == ("deepseek-v4-flash" :: Text) && KeyMap.member "input" fields && not (KeyMap.member "messages" fields)) <$> fields .: "model"
-        )
+ where
+  script =
+    [ ResponsesSse
+        [ "{\"event\":\"response.reasoning_text.delta\",\"sequence_number\":1,\"output_index\":0,\"delta\":\"thinking\"}",
+          "{\"event\":\"response.output_text.delta\",\"sequence_number\":2,\"output_index\":0,\"delta\":\"flash\"}",
+          "{\"event\":\"response.completed\",\"sequence_number\":3,\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"input_tokens_details\":{\"cached_tokens\":2}}}}"
+        ],
+      ResponsesSse
+        [ "{\"event\":\"response.output_item.added\",\"sequence_number\":1,\"output_index\":0,\"item\":{\"type\":\"function_call\",\"id\":\"fc-1\",\"call_id\":\"call-1\",\"name\":\"lookup\",\"arguments\":\"\"}}",
+          "{\"event\":\"response.function_call_arguments.delta\",\"sequence_number\":2,\"output_index\":0,\"delta\":\"{\\\"query\\\":\\\"yuki\\\"}\"}",
+          "{\"event\":\"response.completed\",\"sequence_number\":3,\"response\":{\"usage\":{\"input_tokens\":8,\"output_tokens\":4,\"input_tokens_details\":{\"cached_tokens\":0}}}}"
+        ]
+    ]
+  responseShape =
+    parseMaybe
+      ( withObject "response request" $ \fields ->
+          (\model -> model == ("deepseek-v4-flash" :: Text) && KeyMap.member "input" fields && not (KeyMap.member "messages" fields)) <$> fields .: "model"
+      )
 
 -- | 规格：真实 socket 上端到端流式返回普通文本答案，wire 请求形状正确。
 -- 背景：这是全链路（HTTP→运行时→真实 HTTP provider 流）的最小冒烟测试；
@@ -423,9 +425,9 @@ plainText =
             wireContents body @?= Just ["hello"],
             fmap ("fs_list" `elem`) (wireToolNames body) @?= Just True
           ]
-  where
-    script = [Sse [roleChunk, textChunk "你好，", emptyChoicesChunk, textChunk "world", finishChunk "stop"]]
-    wireStream = parseMaybe (withObject "request" (.: "stream"))
+ where
+  script = [Sse [roleChunk, textChunk "你好，", emptyChoicesChunk, textChunk "world", finishChunk "stop"]]
+  wireStream = parseMaybe (withObject "request" (.: "stream"))
 
 -- | 规格：端到端完成工具往返：调用、参数拼接、结果回喂 provider。
 -- 背景：工具闭环是 agent 能力的核心路径；回喂错误会让模型看不到结果，
@@ -448,11 +450,11 @@ toolRound =
               [name | WireMessage "assistant" _ _ calls <- fedBack, name <- mapMaybe (parseMaybe toolNameOf) calls] @?= ["fs_list"],
               expectSubstring "tool result reaches the provider" "marker.txt" [content | WireMessage "tool" (Just content) (Just "call-fs") _ <- fedBack]
             ]
-  where
-    script =
-      [ Sse [roleChunk, toolCallHead, toolCallArgs "{\"path\":", toolCallArgs "\".\"}", finishChunk "tool_calls"],
-        Sse [roleChunk, textChunk "listed", finishChunk "stop"]
-      ]
+ where
+  script =
+    [ Sse [roleChunk, toolCallHead, toolCallArgs "{\"path\":", toolCallArgs "\".\"}", finishChunk "tool_calls"],
+      Sse [roleChunk, textChunk "listed", finishChunk "stop"]
+    ]
 
 -- | 规格：真实 socket 上 429 重试两次后成功，事件携带 attempt 序列。
 -- 背景：重试是应对上游限流的生存能力；事件缺失会让运维无法观测重试，
@@ -469,17 +471,17 @@ retryThenSuccess =
           isRunFinished (last events) @?= True,
           length requests @?= 3
         ]
-  where
-    script =
-      [ Failure status429 "{\"error\":{\"message\":\"slow down\"}}",
-        Failure status429 "{\"error\":{\"message\":\"slow down\"}}",
-        Sse [roleChunk, textChunk "recovered", finishChunk "stop"]
-      ]
-    retryAttempt :: Value -> Maybe Int
-    retryAttempt = parseMaybe (withObject "retry" (.: "attempt"))
-    retriesBeforeText = length . filter isRetry . takeWhile (not . isTextStart)
-    isRetry (Custom "provider.retry" _) = True
-    isRetry _ = False
+ where
+  script =
+    [ Failure status429 "{\"error\":{\"message\":\"slow down\"}}",
+      Failure status429 "{\"error\":{\"message\":\"slow down\"}}",
+      Sse [roleChunk, textChunk "recovered", finishChunk "stop"]
+    ]
+  retryAttempt :: Value -> Maybe Int
+  retryAttempt = parseMaybe (withObject "retry" (.: "attempt"))
+  retriesBeforeText = length . filter isRetry . takeWhile (not . isTextStart)
+  isRetry (Custom "provider.retry" _) = True
+  isRetry _ = False
 
 -- | 规格：真实 socket 上最终 usage 帧转成 usage 事件。
 -- 背景：计费闭环依赖端到端用量流；仅在单元层覆盖会漏掉真实帧时序问题。
@@ -497,10 +499,10 @@ usageFlow =
             usageNumber "cacheMissTokens" value @?= Just 9,
             isRunFinished (last events) @?= True
           ]
-  where
-    script = [Sse [roleChunk, textChunk "metered", finishChunk "stop", usageChunk]]
-    usageNumber :: Text -> Value -> Maybe Int
-    usageNumber key = parseMaybe (withObject "usage" (.: Key.fromText key))
+ where
+  script = [Sse [roleChunk, textChunk "metered", finishChunk "stop", usageChunk]]
+  usageNumber :: Text -> Value -> Maybe Int
+  usageNumber key = parseMaybe (withObject "usage" (.: Key.fromText key))
 
 -- | 规格：恒定 500 时运行以 PROVIDER_ERROR 失败且错误包含状态与响应体。
 -- 背景：provider 故障必须可诊断；错误信息缺失会让排障无从下手，
@@ -519,8 +521,8 @@ providerDown =
             length [() | RunFinished {} <- events] @?= 0,
             length requests @?= 1
           ]
-  where
-    script = [Failure status500 "{\"error\":{\"message\":\"boom\"}}"]
+ where
+  script = [Failure status500 "{\"error\":{\"message\":\"boom\"}}"]
 
 -- | 规格：主 provider 失败时经真实 socket 回退到备用 provider。
 -- 背景：跨 socket 回退验证 fallback 链的端到端完整性；单边故障会断服务，
@@ -547,10 +549,14 @@ fallbackAcrossProviders =
                             length primaryRequests @?= 1,
                             length backupRequests @?= 1
                           ]
-  where
-    serving runtime backupPort manager =
-      application Nothing Nothing Nothing Nothing
-        (const (pure runtime {runtimeFallbacks = [openAIModel manager (fakeConfig backupPort)]}))
+ where
+  serving runtime backupPort manager =
+    application
+      Nothing
+      Nothing
+      Nothing
+      Nothing
+      (const (pure runtime {runtimeFallbacks = [openAIModel manager (fakeConfig backupPort)]}))
 
 -- | 规格：真实 socket 上从假 provider 拉取模型列表。
 -- 背景：模型列表是前端选择的依据；请求形状错误会被 provider 拒绝，

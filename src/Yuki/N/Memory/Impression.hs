@@ -23,16 +23,16 @@ import Control.Concurrent.MVar
 import Control.Exception (IOException, displayException, try)
 import Data.Aeson
 import Data.Bool (bool)
-import qualified Data.ByteString.Lazy as LazyByteString
+import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Functor ((<&>))
-import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
-import qualified Data.Set as Set
 import Data.Set (Set)
+import Data.Set qualified as Set
 import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Text.Encoding as TextEncoding
+import Data.Text qualified as Text
+import Data.Text.Encoding qualified as TextEncoding
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
@@ -359,29 +359,29 @@ mkStore persist lock =
                   }
            in changed <$ persist changed
     }
-  where
-    commit incarnation expected state revision =
-      modifyMVar lock $ \stored ->
-        let current =
-              Map.findWithDefault (emptyImpressionState incarnation) incarnation (storeStates stored)
-         in if impressionRevision current /= expected
-              then
-                pure
-                  ( stored,
-                    Left
-                      ( "stale impression revision: expected "
-                          <> Text.pack (show expected)
-                          <> ", actual "
-                          <> Text.pack (show (impressionRevision current))
-                      )
-                  )
-              else
-                let changed =
-                      stored
-                        { storeStates = Map.insert incarnation state (storeStates stored),
-                          storeRevisions = takeEnd 256 (storeRevisions stored <> [revision])
-                        }
-                 in persist changed *> pure (changed, Right state)
+ where
+  commit incarnation expected state revision =
+    modifyMVar lock $ \stored ->
+      let current =
+            Map.findWithDefault (emptyImpressionState incarnation) incarnation (storeStates stored)
+       in if impressionRevision current /= expected
+            then
+              pure
+                ( stored,
+                  Left
+                    ( "stale impression revision: expected "
+                        <> Text.pack (show expected)
+                        <> ", actual "
+                        <> Text.pack (show (impressionRevision current))
+                    )
+                )
+            else
+              let changed =
+                    stored
+                      { storeStates = Map.insert incarnation state (storeStates stored),
+                        storeRevisions = takeEnd 256 (storeRevisions stored <> [revision])
+                      }
+               in persist changed *> pure (changed, Right state)
 
 activationPromptRevision, consolidationPromptRevision :: Text
 activationPromptRevision = "impression-activation/v2"
@@ -416,57 +416,57 @@ activateImpression models journal store incarnation scope intent allowedArchiveR
             >>= either
               (failed state (round now) invocationId' Nothing)
               (finish state (round now) invocationId')
-  where
-    taskId = impressionScopeTaskId scope
-    runId = impressionScopeRunId scope
-    intentId = impressionScopeIntentId scope
-    finish state now invocationId' result =
-      case parseActivation (Set.fromList allowedArchiveRefs) (invocationResultText result) of
-        Left failure -> failed state now invocationId' (Just result) failure
-        Right cues ->
-          let injected = renderImpressionCues cues
-              activation =
-                activationRecord
-                  state
-                  now
-                  invocationId'
-                  cues
-                  injected
-                  (invocationResultProvider result <> "/" <> invocationResultModel result)
-                  Nothing
-           in Right activation <$ impressionActivationAppend store activation
-    failed state now invocationId' result failure =
-      let activation =
-            activationRecord
-              state
-              now
-              invocationId'
-              []
-              ""
-              (maybe "—" (\value -> invocationResultProvider value <> "/" <> invocationResultModel value) result)
-              (Just failure)
-       in Left failure <$ impressionActivationAppend store activation
-    activationRecord state now invocationId' cues injected model failure =
-      ImpressionActivation
-        { impressionActivationId =
-            "activation-"
-              <> Text.take
-                24
-                (sha256 (TextEncoding.encodeUtf8 (Text.intercalate "\NUL" [incarnation, taskId, runId, intentId, Text.pack (show now), injected, fromMaybe "" failure]))),
-          impressionActivationIncarnationId = incarnation,
-          impressionActivationTaskId = taskId,
-          impressionActivationRunId = runId,
-          impressionActivationIntentId = intentId,
-          impressionActivationIntent = intent,
-          impressionActivationStateRevision = impressionRevision state,
-          impressionActivationCues = cues,
-          impressionActivationInjectedText = injected,
-          impressionActivationGeneratorRevision = activationPromptRevision,
-          impressionActivationInvocationId = invocationId',
-          impressionActivationModel = model,
-          impressionActivationError = failure,
-          impressionActivationCreated = now
-        }
+ where
+  taskId = impressionScopeTaskId scope
+  runId = impressionScopeRunId scope
+  intentId = impressionScopeIntentId scope
+  finish state now invocationId' result =
+    case parseActivation (Set.fromList allowedArchiveRefs) (invocationResultText result) of
+      Left failure -> failed state now invocationId' (Just result) failure
+      Right cues ->
+        let injected = renderImpressionCues cues
+            activation =
+              activationRecord
+                state
+                now
+                invocationId'
+                cues
+                injected
+                (invocationResultProvider result <> "/" <> invocationResultModel result)
+                Nothing
+         in Right activation <$ impressionActivationAppend store activation
+  failed state now invocationId' result failure =
+    let activation =
+          activationRecord
+            state
+            now
+            invocationId'
+            []
+            ""
+            (maybe "—" (\value -> invocationResultProvider value <> "/" <> invocationResultModel value) result)
+            (Just failure)
+     in Left failure <$ impressionActivationAppend store activation
+  activationRecord state now invocationId' cues injected model failure =
+    ImpressionActivation
+      { impressionActivationId =
+          "activation-"
+            <> Text.take
+              24
+              (sha256 (TextEncoding.encodeUtf8 (Text.intercalate "\NUL" [incarnation, taskId, runId, intentId, Text.pack (show now), injected, fromMaybe "" failure]))),
+        impressionActivationIncarnationId = incarnation,
+        impressionActivationTaskId = taskId,
+        impressionActivationRunId = runId,
+        impressionActivationIntentId = intentId,
+        impressionActivationIntent = intent,
+        impressionActivationStateRevision = impressionRevision state,
+        impressionActivationCues = cues,
+        impressionActivationInjectedText = injected,
+        impressionActivationGeneratorRevision = activationPromptRevision,
+        impressionActivationInvocationId = invocationId',
+        impressionActivationModel = model,
+        impressionActivationError = failure,
+        impressionActivationCreated = now
+      }
 
 consolidateImpression ::
   [Model] ->
@@ -494,46 +494,44 @@ consolidateImpression models journal store incarnation experienceRef allowedArch
               60000
               journal
        in invokeModel spec >>= either (pure . Left) (finish before (round now) invocationId')
-  where
-    finish before now invocationId' result =
-      case
-          parseConsolidation
-            (Set.fromList allowedArchiveRefs)
-            (impressionItems before)
-            (Set.fromList allowedExperienceRefs)
-            now
-            (invocationResultText result)
-        of
-        Left failure -> pure (Left failure)
-        Right decision ->
-          let nextRevision = impressionRevision before + 1
-              items = decisionItems decision
-              after =
-                ImpressionState
-                  incarnation
-                  nextRevision
-                  items
-                  consolidationPromptRevision
-                  (stateHash incarnation nextRevision items)
-                  now
-              identifier =
-                "impression-revision-"
-                  <> Text.take 24 (sha256 (TextEncoding.encodeUtf8 (impressionEffectiveHash after)))
-              revision =
-                ImpressionRevision
-                  identifier
-                  incarnation
-                  experienceRef
-                  (impressionRevision before)
-                  nextRevision
-                  (decisionReason decision)
-                  []
-                  []
-                  invocationId'
-                  (invocationResultProvider result <> "/" <> invocationResultModel result)
-                  now
-           in impressionCommit store incarnation (impressionRevision before) after revision
-                <&> fmap (const revision)
+ where
+  finish before now invocationId' result =
+    case parseConsolidation
+      (Set.fromList allowedArchiveRefs)
+      (impressionItems before)
+      (Set.fromList allowedExperienceRefs)
+      now
+      (invocationResultText result) of
+      Left failure -> pure (Left failure)
+      Right decision ->
+        let nextRevision = impressionRevision before + 1
+            items = decisionItems decision
+            after =
+              ImpressionState
+                incarnation
+                nextRevision
+                items
+                consolidationPromptRevision
+                (stateHash incarnation nextRevision items)
+                now
+            identifier =
+              "impression-revision-"
+                <> Text.take 24 (sha256 (TextEncoding.encodeUtf8 (impressionEffectiveHash after)))
+            revision =
+              ImpressionRevision
+                identifier
+                incarnation
+                experienceRef
+                (impressionRevision before)
+                nextRevision
+                (decisionReason decision)
+                []
+                []
+                invocationId'
+                (invocationResultProvider result <> "/" <> invocationResultModel result)
+                now
+         in impressionCommit store incarnation (impressionRevision before) after revision
+              <&> fmap (const revision)
 
 activationPrompt :: ImpressionState -> Text -> Text -> [ChatMessage]
 activationPrompt state intent catalog =
@@ -629,112 +627,113 @@ instance FromJSON ConsolidationDecision where
 parseConsolidation :: Set Text -> [ImpressionItem] -> Set Text -> Integer -> Text -> Either Text ConsolidationDecision
 parseConsolidation allowed previous allowedExperiences now raw =
   decodeStructured raw >>= validate
-  where
-    legacyArchives = Set.fromList (previous >>= impressionSourceMemoryIds)
-    legacyExperiences = Set.fromList (previous >>= impressionSourceExperienceRefs)
-    validate decision
-      | length (decisionItems decision) > 24 = Left "impression state exceeds 24 items"
-      | any invalidItem (decisionItems decision) = Left "impression item is missing a label or intuition"
-      | any invalidStrength (decisionItems decision) = Left "impression strength is outside 0..1"
-      | any (unknownArchiveRef (Set.union allowed legacyArchives)) (decisionItems decision) = Left "impression references an unknown Task archive catalog id"
-      | any (unknownExperienceRef (Set.union allowedExperiences legacyExperiences)) (decisionItems decision) = Left "impression references an unknown experience id"
-      | any lacksEvidence (decisionItems decision) = Left "new or changed impression lacks current experience evidence"
-      | any operationalDiagnostic (decisionItems decision) = Left "system and tool diagnostics cannot be stored as impressions"
-      | not (null (decisionMemoryProposals decision)) = Left "impression consolidation must not emit memory proposals"
-      | not (null (decisionVoidProposals decision)) = Left "impression consolidation must not emit void proposals"
-      | otherwise =
-          Right
-            decision
-              { decisionItems = fmap stamp (decisionItems decision),
-                decisionMemoryProposals = [],
-                decisionVoidProposals = [],
-                decisionReason = Text.take 1000 (decisionReason decision)
-              }
-    invalidItem item =
-      Text.null (Text.strip (impressionLabel item))
-        || Text.null (Text.strip (impressionIntuition item))
-    invalidStrength item = impressionStrength item < 0 || impressionStrength item > 1
-    unknownArchiveRef known = any (`Set.notMember` known) . impressionSourceMemoryIds
-    unknownExperienceRef known = any (`Set.notMember` known) . impressionSourceExperienceRefs
-    lacksEvidence item =
-      null (impressionSourceExperienceRefs item)
-        || bool
-          (Set.null (Set.intersection allowedExperiences (Set.fromList (impressionSourceExperienceRefs item))))
-          False
-          (any (sameImpression item) previous)
-    sameImpression item prior =
-      impressionItemId item == impressionItemId prior
-        && impressionLabel item == impressionLabel prior
-        && impressionIntuition item == impressionIntuition prior
-        && impressionStrength item == impressionStrength prior
-        && impressionSourceMemoryIds item == impressionSourceMemoryIds prior
-        && impressionSourceExperienceRefs item == impressionSourceExperienceRefs prior
-    operationalDiagnostic item =
-      any (`Text.isInfixOf` normalized)
-        [ "memory_grep",
-          "memory_read",
-          "scannedentries",
-          "scanned entries",
-          "grep result",
-          "search result count",
-          "excerpt window",
-          "tool call",
-          "api behavior",
-          "context window",
-          "截断的检索",
-          "工具调用",
-          "接口行为"
-        ]
-      where
-        normalized = Text.toCaseFold (impressionLabel item <> "\n" <> impressionIntuition item)
-    stamp item =
-      item
-        { impressionItemId =
-            bool
-              (impressionItemId item)
-              ("impression-" <> Text.take 20 (sha256 (TextEncoding.encodeUtf8 (impressionLabel item <> "\NUL" <> impressionIntuition item))))
-              (Text.null (impressionItemId item)),
-          impressionLabel = Text.take 120 (Text.strip (impressionLabel item)),
-          impressionIntuition = Text.take 1000 (Text.strip (impressionIntuition item)),
-          impressionUpdated = now
-        }
+ where
+  legacyArchives = Set.fromList (previous >>= impressionSourceMemoryIds)
+  legacyExperiences = Set.fromList (previous >>= impressionSourceExperienceRefs)
+  validate decision
+    | length (decisionItems decision) > 24 = Left "impression state exceeds 24 items"
+    | any invalidItem (decisionItems decision) = Left "impression item is missing a label or intuition"
+    | any invalidStrength (decisionItems decision) = Left "impression strength is outside 0..1"
+    | any (unknownArchiveRef (Set.union allowed legacyArchives)) (decisionItems decision) = Left "impression references an unknown Task archive catalog id"
+    | any (unknownExperienceRef (Set.union allowedExperiences legacyExperiences)) (decisionItems decision) = Left "impression references an unknown experience id"
+    | any lacksEvidence (decisionItems decision) = Left "new or changed impression lacks current experience evidence"
+    | any operationalDiagnostic (decisionItems decision) = Left "system and tool diagnostics cannot be stored as impressions"
+    | not (null (decisionMemoryProposals decision)) = Left "impression consolidation must not emit memory proposals"
+    | not (null (decisionVoidProposals decision)) = Left "impression consolidation must not emit void proposals"
+    | otherwise =
+        Right
+          decision
+            { decisionItems = fmap stamp (decisionItems decision),
+              decisionMemoryProposals = [],
+              decisionVoidProposals = [],
+              decisionReason = Text.take 1000 (decisionReason decision)
+            }
+  invalidItem item =
+    Text.null (Text.strip (impressionLabel item))
+      || Text.null (Text.strip (impressionIntuition item))
+  invalidStrength item = impressionStrength item < 0 || impressionStrength item > 1
+  unknownArchiveRef known = any (`Set.notMember` known) . impressionSourceMemoryIds
+  unknownExperienceRef known = any (`Set.notMember` known) . impressionSourceExperienceRefs
+  lacksEvidence item =
+    null (impressionSourceExperienceRefs item)
+      || bool
+        (Set.null (Set.intersection allowedExperiences (Set.fromList (impressionSourceExperienceRefs item))))
+        False
+        (any (sameImpression item) previous)
+  sameImpression item prior =
+    impressionItemId item == impressionItemId prior
+      && impressionLabel item == impressionLabel prior
+      && impressionIntuition item == impressionIntuition prior
+      && impressionStrength item == impressionStrength prior
+      && impressionSourceMemoryIds item == impressionSourceMemoryIds prior
+      && impressionSourceExperienceRefs item == impressionSourceExperienceRefs prior
+  operationalDiagnostic item =
+    any
+      (`Text.isInfixOf` normalized)
+      [ "memory_grep",
+        "memory_read",
+        "scannedentries",
+        "scanned entries",
+        "grep result",
+        "search result count",
+        "excerpt window",
+        "tool call",
+        "api behavior",
+        "context window",
+        "截断的检索",
+        "工具调用",
+        "接口行为"
+      ]
+   where
+    normalized = Text.toCaseFold (impressionLabel item <> "\n" <> impressionIntuition item)
+  stamp item =
+    item
+      { impressionItemId =
+          bool
+            (impressionItemId item)
+            ("impression-" <> Text.take 20 (sha256 (TextEncoding.encodeUtf8 (impressionLabel item <> "\NUL" <> impressionIntuition item))))
+            (Text.null (impressionItemId item)),
+        impressionLabel = Text.take 120 (Text.strip (impressionLabel item)),
+        impressionIntuition = Text.take 1000 (Text.strip (impressionIntuition item)),
+        impressionUpdated = now
+      }
 
 migrateKnownFalseImpressions :: Integer -> ImpressionStoreState -> ImpressionStoreState
 migrateKnownFalseImpressions now stored =
   foldl' migrate stored (Map.toList (storeStates stored))
-  where
-    migrate state (incarnation, before)
-      | null removed = state
-      | otherwise =
-          state
-            { storeStates = Map.insert incarnation after (storeStates state),
-              storeRevisions = takeEnd 256 (storeRevisions state <> [revision])
-            }
-      where
-        removed = filter knownFalseImpression (impressionItems before)
-        kept = filter (not . knownFalseImpression) (impressionItems before)
-        next = impressionRevision before + 1
-        after =
-          before
-            { impressionRevision = next,
-              impressionItems = kept,
-              impressionGeneratorRevision = consolidationPromptRevision,
-              impressionEffectiveHash = stateHash incarnation next kept,
-              impressionStateUpdated = now
-            }
-        revision =
-          ImpressionRevision
-            ("impression-revision-" <> Text.take 24 (sha256 (TextEncoding.encodeUtf8 (impressionEffectiveHash after))))
-            incarnation
-            "migration/impression-evidence-v3"
-            (impressionRevision before)
-            next
-            "Removed a known false diagnostic impression: journal evidence shows the claimed grep hit never existed in the archived source."
-            []
-            (fmap impressionItemId removed)
-            "migration-impression-evidence-v3"
-            "system/migration"
-            now
+ where
+  migrate state (incarnation, before)
+    | null removed = state
+    | otherwise =
+        state
+          { storeStates = Map.insert incarnation after (storeStates state),
+            storeRevisions = takeEnd 256 (storeRevisions state <> [revision])
+          }
+   where
+    removed = filter knownFalseImpression (impressionItems before)
+    kept = filter (not . knownFalseImpression) (impressionItems before)
+    next = impressionRevision before + 1
+    after =
+      before
+        { impressionRevision = next,
+          impressionItems = kept,
+          impressionGeneratorRevision = consolidationPromptRevision,
+          impressionEffectiveHash = stateHash incarnation next kept,
+          impressionStateUpdated = now
+        }
+    revision =
+      ImpressionRevision
+        ("impression-revision-" <> Text.take 24 (sha256 (TextEncoding.encodeUtf8 (impressionEffectiveHash after))))
+        incarnation
+        "migration/impression-evidence-v3"
+        (impressionRevision before)
+        next
+        "Removed a known false diagnostic impression: journal evidence shows the claimed grep hit never existed in the archived source."
+        []
+        (fmap impressionItemId removed)
+        "migration-impression-evidence-v3"
+        "system/migration"
+        now
 
 knownFalseImpression :: ImpressionItem -> Bool
 knownFalseImpression item =
@@ -744,7 +743,7 @@ knownFalseImpression item =
       (`Text.isInfixOf` Text.toCaseFold (impressionIntuition item))
       ["memory_grep", "scannedentries", "改天孙观为婺女观"]
 
-decodeStructured :: FromJSON value => Text -> Either Text value
+decodeStructured :: (FromJSON value) => Text -> Either Text value
 decodeStructured =
   either (Left . Text.pack) Right
     . eitherDecodeStrict'
@@ -756,8 +755,8 @@ stripFence raw =
   fromMaybe trimmed $ do
     inner <- Text.stripPrefix "```json" trimmed <|> Text.stripPrefix "```" trimmed
     Text.stripSuffix "```" (Text.strip inner)
-  where
-    trimmed = Text.strip raw
+ where
+  trimmed = Text.strip raw
 
 renderImpressionCues :: [ImpressionCue] -> Text
 renderImpressionCues [] = ""
@@ -769,13 +768,13 @@ renderImpressionCues cues =
       ]
         <> fmap render cues
     )
-  where
-    render cue =
-      "- "
-        <> impressionCueHint cue
-        <> maybe "" (" · suggested grep: " <>) (impressionCueSuggestedQuery cue)
-        <> " · confidence "
-        <> Text.pack (show (impressionCueConfidence cue))
+ where
+  render cue =
+    "- "
+      <> impressionCueHint cue
+      <> maybe "" (" · suggested grep: " <>) (impressionCueSuggestedQuery cue)
+      <> " · confidence "
+      <> Text.pack (show (impressionCueConfidence cue))
 
 stateHash :: Text -> Int -> [ImpressionItem] -> Text
 stateHash incarnation revision items =
@@ -791,7 +790,7 @@ invocationIdentifier kind incarnation source revision =
       24
       (sha256 (TextEncoding.encodeUtf8 (Text.intercalate "\NUL" [kind, incarnation, source, Text.pack (show revision)])))
 
-decodeJson :: ToJSON value => value -> Text
+decodeJson :: (ToJSON value) => value -> Text
 decodeJson = TextEncoding.decodeUtf8 . LazyByteString.toStrict . encode
 
 takeEnd :: Int -> [value] -> [value]

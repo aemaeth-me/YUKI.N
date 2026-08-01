@@ -1,0 +1,2 @@
+# Parse files with the same language edition used by the Cabal components.
+- arguments: [-XGHC2024]

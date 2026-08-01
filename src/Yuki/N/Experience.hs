@@ -10,15 +10,15 @@ where
 
 import Control.Concurrent.MVar
 import Control.Exception (IOException, displayException, try)
-import Control.Monad (forM_, (>=>))
+import Control.Monad (forM_)
 import Data.Aeson
-import qualified Data.ByteString.Lazy as LazyByteString
+import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Functor ((<&>))
-import Data.List (foldl', sortOn)
-import qualified Data.Map.Strict as Map
+import Data.List (sortOn)
 import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
 import Data.Text (Text)
-import qualified Data.Text as Text
+import Data.Text qualified as Text
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
@@ -133,8 +133,8 @@ newExperienceStore dir =
   createDirectoryIfMissing True (eventsDir dir)
     *> loadEvents path
     >>= traverse (\loaded -> newMVar loaded <&> mkStore (appendEventFile path) (rewriteEvents path))
-  where
-    path = eventsPath dir
+ where
+  path = eventsPath dir
 
 newMemoryExperienceStore :: IO ExperienceStore
 newMemoryExperienceStore = newMVar emptyState <&> mkStore (const (pure ())) (const (pure ()))
@@ -156,31 +156,35 @@ mkStore persist rewrite lock =
           . stateHeads
           <$> readMVar lock,
       experienceDelete = \incarnation ->
-        () <$ modifyMVar lock (\state ->
-              let changed =
-                    state
-                      { stateEvents = Map.delete incarnation (stateEvents state),
-                        stateHeads = Map.delete incarnation (stateHeads state)
-                      }
-               in rewrite changed *> pure (changed, ()))
+        ()
+          <$ modifyMVar
+            lock
+            ( \state ->
+                let changed =
+                      state
+                        { stateEvents = Map.delete incarnation (stateEvents state),
+                          stateHeads = Map.delete incarnation (stateHeads state)
+                        }
+                 in rewrite changed *> pure (changed, ())
+            )
     }
-  where
-    append expected draft =
-      getPOSIXTime >>= \now ->
-        modifyMVar lock $ \state ->
-          let incarnation = draftIncarnationId draft
-              headSeq = Map.findWithDefault 0 incarnation (stateHeads state)
-           in case stale incarnation headSeq expected of
-                Just failure -> pure (state, Left failure)
-                Nothing ->
-                  let next = headSeq + 1
-                      event = materialize next (round now) draft
-                      updated =
-                        state
-                          { stateEvents = Map.insertWith (flip (<>)) incarnation [event] (stateEvents state),
-                            stateHeads = Map.insert incarnation next (stateHeads state)
-                          }
-                   in persist event *> pure (updated, Right event)
+ where
+  append expected draft =
+    getPOSIXTime >>= \now ->
+      modifyMVar lock $ \state ->
+        let incarnation = draftIncarnationId draft
+            headSeq = Map.findWithDefault 0 incarnation (stateHeads state)
+         in case stale incarnation headSeq expected of
+              Just failure -> pure (state, Left failure)
+              Nothing ->
+                let next = headSeq + 1
+                    event = materialize next (round now) draft
+                    updated =
+                      state
+                        { stateEvents = Map.insertWith (flip (<>)) incarnation [event] (stateEvents state),
+                          stateHeads = Map.insert incarnation next (stateHeads state)
+                        }
+                 in persist event *> pure (updated, Right event)
 
 stale :: Text -> Int -> Maybe ExperienceCursor -> Maybe Text
 stale _ _ Nothing = Nothing
@@ -228,9 +232,9 @@ materialize seqNo now draft =
       experiencePayloadHash = draftPayloadHash draft,
       experienceOccurredAt = now
     }
-  where
-    incarnation = draftIncarnationId draft
-    stream = streamId incarnation
+ where
+  incarnation = draftIncarnationId draft
+  stream = streamId incarnation
 
 streamId :: Text -> Text
 streamId = ("experience/" <>)
@@ -245,54 +249,55 @@ rewriteEvents path state =
   withFile path WriteMode $ \handle ->
     forM_ events $ \event ->
       LazyByteString.hPutStr handle (encode event <> "\n")
-  where
-    events = concat (Map.elems (stateEvents state))
+ where
+  events = concat (Map.elems (stateEvents state))
 
 loadEvents :: FilePath -> IO (Either Text ExperienceState)
 loadEvents path =
   (try (LazyByteString.readFile path) :: IO (Either IOException LazyByteString.ByteString))
     <&> either absent parse
-  where
-    absent failure
-      | isDoesNotExistError failure = Right emptyState
-      | otherwise = Left ("cannot read experience stream: " <> Text.pack (displayException failure))
+ where
+  absent failure
+    | isDoesNotExistError failure = Right emptyState
+    | otherwise = Left ("cannot read experience stream: " <> Text.pack (displayException failure))
 
 parse :: LazyByteString.ByteString -> Either Text ExperienceState
 parse bytes =
   traverse decodeLine numbered >>= validate
-  where
-    numbered =
-      filter (not . LazyByteString.null . snd)
-        (zip [1 ..] (LazyByteString.split 10 bytes))
-    decodeLine (lineNo, line) =
-      either
-        (Left . (\failure -> "invalid experience event at line " <> Text.pack (show lineNo) <> ": " <> Text.pack failure))
+ where
+  numbered =
+    filter
+      (not . LazyByteString.null . snd)
+      (zip [1 :: Int ..] (LazyByteString.split 10 bytes))
+  decodeLine (lineNo, line) =
+    either
+      (Left . (\failure -> "invalid experience event at line " <> Text.pack (show lineNo) <> ": " <> Text.pack failure))
+      Right
+      (eitherDecode line)
+  validate events =
+    foldl' insert (Right emptyState) (sortOn (\event -> (experienceStreamId event, experienceSeq event)) events)
+  insert (Left failure) _ = Left failure
+  insert (Right state) event
+    | experienceStreamId event /= streamId incarnation =
+        Left ("experience stream/id mismatch at " <> experienceEventId event)
+    | experienceSeq event /= expected =
+        Left
+          ( "non-contiguous experience stream "
+              <> experienceStreamId event
+              <> ": expected "
+              <> Text.pack (show expected)
+              <> ", got "
+              <> Text.pack (show (experienceSeq event))
+          )
+    | otherwise =
         Right
-        (eitherDecode line)
-    validate events =
-      foldl' insert (Right emptyState) (sortOn (\event -> (experienceStreamId event, experienceSeq event)) events)
-    insert (Left failure) _ = Left failure
-    insert (Right state) event
-      | experienceStreamId event /= streamId incarnation =
-          Left ("experience stream/id mismatch at " <> experienceEventId event)
-      | experienceSeq event /= expected =
-          Left
-            ( "non-contiguous experience stream "
-                <> experienceStreamId event
-                <> ": expected "
-                <> Text.pack (show expected)
-                <> ", got "
-                <> Text.pack (show (experienceSeq event))
-            )
-      | otherwise =
-          Right
-            state
-              { stateEvents = Map.insertWith (flip (<>)) incarnation [event] (stateEvents state),
-                stateHeads = Map.insert incarnation (experienceSeq event) (stateHeads state)
-              }
-      where
-        incarnation = experienceIncarnationId event
-        expected = Map.findWithDefault 0 incarnation (stateHeads state) + 1
+          state
+            { stateEvents = Map.insertWith (flip (<>)) incarnation [event] (stateEvents state),
+              stateHeads = Map.insert incarnation (experienceSeq event) (stateHeads state)
+            }
+   where
+    incarnation = experienceIncarnationId event
+    expected = Map.findWithDefault 0 incarnation (stateHeads state) + 1
 
 eventsDir :: FilePath -> FilePath
 eventsDir dir = dir </> "events"

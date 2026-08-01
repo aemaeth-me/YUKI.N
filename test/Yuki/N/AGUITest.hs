@@ -12,13 +12,14 @@ module Yuki.N.AGUITest
     aliases,
     normalizedToolResultEvent,
     eventJsonContract,
-    eventJsonRoundTrip
+    eventJsonRoundTrip,
   )
 where
-import Data.Aeson (Value (..), eitherDecode, encode, object, toJSON, withObject, (.=), (.:))
+
+import Data.Aeson (Value (..), eitherDecode, encode, object, toJSON, withObject, (.:), (.=))
 import Data.Aeson.Types (parseMaybe)
 import Data.Text (Text)
-import qualified Data.Text as Text
+import Data.Text qualified as Text
 import Test.QuickCheck
   ( Gen,
     Property,
@@ -46,7 +47,6 @@ import Yuki.N.AGUI.Types
     UserMessage (..),
   )
 
-
 protocolTests :: TestTree
 protocolTests =
   testGroup
@@ -62,6 +62,7 @@ eventJsonTests =
     [ testCase "all public constructors round-trip with a stable type field" eventJsonContract,
       testProperty "decode . encode == Right for generated events" eventJsonRoundTrip
     ]
+
 -- | 规格：AG-UI 边界接受 snake_case 别名并保持 JSON round-trip 等价。
 -- 背景：HTTP 客户（前端、脚本）与 AG-UI 规范通常混用 snake_case 与 camelCase；边界若拒绝别名，既有调用方会整体失效。该用例失败代表协议解析层收缩，而非测试环境问题。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
@@ -77,6 +78,7 @@ verify input =
       runId input @?= "run",
       runMessages input @?= [User (UserMessage "user" (UserText "hello") Nothing)]
     ]
+
 -- | 规格：TOOL_CALL_RESULT 事件按规范化字段（type/messageId/toolCallId/content/role）编码。
 -- 背景：前端依赖该事件的固定 JSON 形状渲染工具结果；字段漂移会造成前端静默丢失结果。该用例失败代表事件编码契约被破坏。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
@@ -90,6 +92,7 @@ normalizedToolResultEvent =
         "content" .= ("ok" :: Text),
         "role" .= ("tool" :: Text)
       ]
+
 -- | 规格：全部 26 个公开事件构造器的 JSON 携带稳定 type 字段且 decode . encode 恒等。
 -- 背景：事件流是前端与审计的唯一通道；任一构造器的字段漂移都会造成消费端静默丢失。
 -- 变更记录：- 2026-08-01: 补充事件 JSON 契约表驱动覆盖。
@@ -148,6 +151,7 @@ sampleAssistant = Assistant (AssistantMessage "a" (Just "answer") Nothing [])
 
 sampleUser :: Message
 sampleUser = User (UserMessage "u" (UserText "hello") Nothing)
+
 -- | 规格：受控生成器产生的任意事件 decode . encode == Right（与表驱动用例互补）。
 -- 背景：表驱动覆盖固定样本，属性覆盖构造器组合的任意取值，防止可选字段回归。
 -- 变更记录：- 2026-08-01: 补充事件 JSON round-trip 属性覆盖。
@@ -186,14 +190,14 @@ genEvent =
       (2, Raw <$> genValue <*> genMaybeText),
       (2, Custom <$> genText <*> genValue)
     ]
-  where
-    genValues = listOf genValue `suchThat` ((<= 3) . length)
-    genMessages = listOf genMessage `suchThat` ((<= 3) . length)
-    genMaybeText = oneof [pure Nothing, Just <$> genText]
-    genMaybeBool = oneof [pure Nothing, Just <$> elements [False, True]]
-    -- 注意：aeson 的 .:? 把 JSON null 视为缺失，Just Null 无法 round-trip，故不生成。
-    genMaybeValue = oneof [pure Nothing, pure (Just (String "v")), pure (Just (Bool True)), pure (Just (Number 1)), pure (Just (object ["k" .= ("v" :: Text)]))]
-    genEntity = elements [EncryptedToolCall, EncryptedMessage]
+ where
+  genValues = listOf genValue `suchThat` ((<= 3) . length)
+  genMessages = listOf genMessage `suchThat` ((<= 3) . length)
+  genMaybeText = oneof [pure Nothing, Just <$> genText]
+  genMaybeBool = oneof [pure Nothing, Just <$> elements [False, True]]
+  -- 注意：aeson 的 .:? 把 JSON null 视为缺失，Just Null 无法 round-trip，故不生成。
+  genMaybeValue = oneof [pure Nothing, pure (Just (String "v")), pure (Just (Bool True)), pure (Just (Number 1)), pure (Just (object ["k" .= ("v" :: Text)]))]
+  genEntity = elements [EncryptedToolCall, EncryptedMessage]
 
 genText :: Gen Text
 genText =

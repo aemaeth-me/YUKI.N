@@ -11,16 +11,18 @@ module Yuki.N.ServerCognitionTest
     incarnationLifecycleOverHttp,
     memoryLifecycleOverHttp,
     workingRoutesOverHttp,
-    threadTransferOverHttp
+    threadTransferOverHttp,
   )
 where
+
+import Data.Aeson (Value (..), decode, eitherDecode, object, withObject, (.:), (.=))
+import Data.Aeson.Key qualified as Key
+import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.Types (parseEither)
-import qualified Data.Aeson.KeyMap as KeyMap
-import qualified Data.Aeson.Key as Key
-import qualified Data.ByteString.Lazy as LazyByteString
+import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Functor (($>))
 import Data.Text (Text)
-import qualified Data.Text as Text
+import Data.Text qualified as Text
 import Network.HTTP.Types
 import Network.Wai (Application)
 import Network.Wai.Test
@@ -32,10 +34,8 @@ import Yuki.N.Inspect (newInspection, withCognition, withSessionService)
 import Yuki.N.Model
 import Yuki.N.Server (application)
 import Yuki.N.Sessions (SessionService (..))
-import Yuki.N.Transcript (transcriptSave)
 import Yuki.N.TestSupport
-import Data.Aeson (Value (..), decode, eitherDecode, object, withObject, (.:), (.=))
-
+import Yuki.N.Transcript (transcriptSave)
 
 serverCognitionTests :: TestTree
 serverCognitionTests =
@@ -46,6 +46,7 @@ serverCognitionTests =
       testCase "working memory, sleep cycles, experiences, impression and epochs over HTTP" workingRoutesOverHttp,
       testCase "thread sleep/import/fork/export transfer over HTTP" threadTransferOverHttp
     ]
+
 -- | 规格：分身创建→列表→读取→改名→归档→恢复→删除全生命周期，响应状态与 JSON 形状逐段校验。
 -- 背景：分身生命周期是认知界面的核心；任一环节的 4xx/5xx 或形状漂移都会让界面失效。
 -- 变更记录：- 2026-08-01: 补充 incarnation 生命周期路由的回归覆盖。
@@ -91,6 +92,7 @@ incarnationLifecycleOverHttp =
     simpleStatus gone @?= status404
     afterDelete <- get app ["incarnations"]
     assertBool "list no longer includes the deleted incarnation" (not (listHas "north" (simpleBody afterDelete)))
+
 -- | 规格：长期记忆 remember→catalog→detail→search→void→receipts 全流程，含 404 与形状断言。
 -- 背景：长期记忆路由是记忆治理界面的数据源；void 语义错误会让不可用记忆继续浮现。
 -- 变更记录：- 2026-08-01: 补充记忆生命周期路由的回归覆盖。
@@ -121,6 +123,7 @@ memoryLifecycleOverHttp =
     receipts <- get app ["incarnations", "north", "memory-receipts"]
     simpleStatus receipts @?= status200
     assertBool "memory receipts recorded" (lengthOf (simpleBody receipts) >= 1)
+
 -- | 规格：working-memory 初始 404；睡眠后 head/sleep-cycles/experiences/impression/context-epochs 全部可达。
 -- 背景：睡眠是工作记忆的唯一写入路径；路由形状错误会让睡眠结果不可见。
 -- 变更记录：- 2026-08-01: 补充工作记忆与睡眠路由的回归覆盖。
@@ -154,6 +157,7 @@ workingRoutesOverHttp =
     epochs <- get app ["threads", "t1", "context-epochs"]
     simpleStatus epochs @?= status200
     assertBool "sleep committed a context epoch" (lengthOf (simpleBody epochs) >= 1)
+
 -- | 规格：线程创建→fork→export→import（含重复 import 409）→sleep→未知线程 404。
 -- 背景：线程传输是任务可迁移性的契约；409 语义错误会让重复导入破坏数据。
 -- 变更记录：- 2026-08-01: 补充线程传输路由的回归覆盖。
@@ -221,7 +225,8 @@ cognitionFixture use =
         service <- sessionServiceAt dir (const (pure ()))
         runtime <- testRuntime echoModel [] Parallel
         let inspection =
-              withCognition cognition
+              withCognition
+                cognition
                 ( withSessionService
                     service
                     (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service)))
@@ -284,36 +289,40 @@ decodeInt selector body =
 
 fieldPath :: Text -> Value -> Maybe Value
 fieldPath selector value = go (Text.splitOn "." selector) value
-  where
-    go [] _ = Nothing
-    go [key] (Object fields) = KeyMap.lookup (Key.fromText key) fields
-    go (key : rest) (Object fields) = KeyMap.lookup (Key.fromText key) fields >>= go rest
-    go _ _ = Nothing
+ where
+  go [] _ = Nothing
+  go [key] (Object fields) = KeyMap.lookup (Key.fromText key) fields
+  go (key : rest) (Object fields) = KeyMap.lookup (Key.fromText key) fields >>= go rest
+  go _ _ = Nothing
 
 listHas :: Text -> LazyByteString.ByteString -> Bool
 listHas needle body =
   case eitherDecode body :: Either String [Value] of
     Right items -> any hasNeedle items
     Left _ -> False
-  where
-    hasNeedle value = case value of
-      Object fields -> KeyMap.lookup "id" fields == Just (String needle)
-      _ -> False
+ where
+  hasNeedle value = case value of
+    Object fields -> KeyMap.lookup "id" fields == Just (String needle)
+    _ -> False
 
 snippetsHave :: Text -> LazyByteString.ByteString -> Bool
 snippetsHave needle body =
   case eitherDecode body >>= parseEither parse of
     Right hits -> needle `elem` hits
     Left _ -> False
-  where
-    parse =
-      withObject "search" $ \fields -> do
-        snippets <- fields .: "snippets"
-        mapM snippetRef (snippets :: [Value])
-    snippetRef snippet =
-      withObject "snippet" (\s -> do
-        ref <- s .: "ref"
-        withObject "ref" (.: "id") ref) snippet
+ where
+  parse =
+    withObject "search" $ \fields -> do
+      snippets <- fields .: "snippets"
+      mapM snippetRef (snippets :: [Value])
+  snippetRef snippet =
+    withObject
+      "snippet"
+      ( \s -> do
+          ref <- s .: "ref"
+          withObject "ref" (.: "id") ref
+      )
+      snippet
 
 lengthOf :: LazyByteString.ByteString -> Int
 lengthOf body =

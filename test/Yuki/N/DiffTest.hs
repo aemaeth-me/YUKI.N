@@ -10,11 +10,12 @@ module Yuki.N.DiffTest
     unifiedReplacesMiddle,
     unifiedIdenticalInput,
     unifiedAppendOnly,
-    unifiedDifferenceNonEmpty
+    unifiedDifferenceNonEmpty,
   )
 where
+
 import Data.Text (Text)
-import qualified Data.Text as Text
+import Data.Text qualified as Text
 import Test.QuickCheck
   ( Gen,
     Property,
@@ -32,7 +33,6 @@ import Test.Tasty.HUnit
 import Test.Tasty.QuickCheck (testProperty)
 import Yuki.N.Diff (unified)
 
-
 diffTests :: TestTree
 diffTests =
   testGroup
@@ -42,6 +42,7 @@ diffTests =
       testProperty "append-only changes add lines and never delete" unifiedAppendOnly,
       testProperty "different inputs always produce a non-empty diff" unifiedDifferenceNonEmpty
     ]
+
 -- | 规格：中段单行替换产生包含 "-b" 与 "+x" 内容行的补丁。
 -- 背景：unified 输出被审计/展示消费；替换行形状错误会让人类与工具都读错变更。
 -- 变更记录：- 2026-08-01: 补充 Diff 基础替换形状的回归覆盖。
@@ -54,6 +55,7 @@ unifiedReplacesMiddle =
           assertBool "removed line is marked with -" (any (Text.isPrefixOf "-b") contentLines),
           assertBool "added line is marked with +" (any (Text.isPrefixOf "+x") contentLines)
         ]
+
 -- | 规格：任意输入与自身比较时 unified 输出为空串。
 -- 背景：相同输入的零 hunk 是 diff 的根基契约；非空输出会污染审计差异。
 -- 变更记录：- 2026-08-01: 补充 Diff 相同输入不变量的属性覆盖。
@@ -61,6 +63,7 @@ unifiedIdenticalInput :: Property
 unifiedIdenticalInput =
   forAll genText $ \content ->
     unified "note.md" content content === ""
+
 -- | 规格：旧文本是新文本的前缀时，补丁只含 ' ' 与 '+' 行，且 '+' 行数等于追加行数。
 -- 背景：追加-only 是日志/档案追加写入的常见形态；出现 '-' 行代表前缀匹配被破坏。
 -- 变更记录：- 2026-08-01: 补充 Diff 追加单调性的属性覆盖。
@@ -95,6 +98,7 @@ unifiedAppendOnly =
                 )
                   .&&. removals === 0
                   .&&. additions === length appended
+
 -- | 规格：行序列不同时输出必然非空。
 -- 背景：hunk 折叠可能把可见变更压没；空输出会掩盖真实差异（仅尾随换行差异不在行序列中体现，属行级 diff 的既有语义）。
 -- 变更记录：- 2026-08-01: 补充 Diff 差异非空的属性覆盖。
@@ -104,7 +108,9 @@ unifiedDifferenceNonEmpty =
     forAll genText $ \new ->
       let output = unified "note.md" old new
        in counterexample (Text.unpack output) $
-            (Text.lines old /= Text.lines new) ==> output /= ""
+            (Text.lines old /= Text.lines new) ==>
+              output /= ""
+
 -- | 受控文本生成器：避免无界输入拖慢属性测试。
 genText :: Gen Text
 genText =

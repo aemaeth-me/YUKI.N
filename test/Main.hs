@@ -1,7 +1,8 @@
 module Main (main) where
-import Test.Tasty
+
 import E2E (e2eTests)
 import Golden (goldenTests)
+import Test.Tasty
 import Yuki.N.AGUITest
 import Yuki.N.AdversarialTest
 import Yuki.N.AgentTest
@@ -32,14 +33,12 @@ import Yuki.N.ThreadConfigTest
 import Yuki.N.ToolsTest
 import Yuki.N.TranscriptTest
 
-
 main :: IO ()
 main =
   defaultMain $
     testGroup
       "yuki-n"
-      [
-        protocolTests,
+      [ protocolTests,
         eventJsonTests,
         providerTests,
         providersTests,

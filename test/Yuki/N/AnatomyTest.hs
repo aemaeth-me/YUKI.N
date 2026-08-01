@@ -7,9 +7,10 @@
 module Yuki.N.AnatomyTest
   ( anatomyTests,
     aggregates,
-    emptyJournal
+    emptyJournal,
   )
 where
+
 import Control.Applicative ()
 import Control.Concurrent ()
 import Control.Concurrent.MVar ()
@@ -19,14 +20,14 @@ import Data.Aeson
 import Data.Aeson.Types ()
 import Data.Bool ()
 import Data.ByteString ()
-import qualified Data.ByteString.Lazy as LazyByteString
+import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Foldable ()
 import Data.Functor ()
 import Data.IORef ()
 import Data.List ()
 import Data.Maybe ()
 import Data.Text (Text)
-import qualified Data.Text as Text
+import Data.Text qualified as Text
 import Network.HTTP.Client ()
 import Network.HTTP.Client.TLS ()
 import Network.HTTP.Types ()
@@ -41,13 +42,12 @@ import System.Process ()
 import System.Timeout ()
 import Test.Tasty
 import Test.Tasty.HUnit
+import Yuki.N.AGUI.Types
+import Yuki.N.Agent ()
 import Yuki.N.Anatomy
 import Yuki.N.Journal
 import Yuki.N.Model
-import Yuki.N.Agent ()
-import Yuki.N.AGUI.Types
 import Yuki.N.TestSupport ()
-
 
 anatomyTests :: TestTree
 anatomyTests =
@@ -56,6 +56,7 @@ anatomyTests =
     [ testCase "aggregates categories across model requests" aggregates,
       testCase "treats an empty journal as zero" emptyJournal
     ]
+
 -- | 规格：anatomyEntries 跨多个模型请求聚合 token 类别，并区分总览与最近请求。
 -- 背景：token 解剖是成本与上下文预算诊断的输入；聚合错误会误导优化决策。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
@@ -66,11 +67,13 @@ aggregates =
       2
       (Anatomy 8 (2 * specimenSize) 20 36 8 32)
       (Just (Anatomy 4 specimenSize 12 24 4 16))
+
 -- | 规格：空 journal 的解剖报告为零值。
 -- 背景：空输入必须得到确定的零报告；否则诊断视图出现幽灵数据。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 emptyJournal :: Assertion
 emptyJournal = anatomyEntries [] @?= AnatomyReport 0 mempty Nothing
+
 specimen :: [Entry]
 specimen =
   [ Entry 1 ["run"] Nothing (ModelRequestEntry firstRequest),

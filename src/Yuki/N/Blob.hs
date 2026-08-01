@@ -13,14 +13,13 @@ import Control.Exception (IOException, displayException, try)
 import Control.Monad ((>=>))
 import Data.Aeson
 import Data.Bits
-import qualified Data.ByteString as ByteString
-import qualified Data.ByteString.Lazy as LazyByteString
+import Data.ByteString qualified as ByteString
+import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Functor ((<&>))
-import Data.List (foldl')
-import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
 import Data.Text (Text)
-import qualified Data.Text as Text
+import Data.Text qualified as Text
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import Data.Word (Word32, Word64, Word8)
 import Numeric (showHex)
@@ -124,21 +123,21 @@ newMemoryBlobStore =
 
 fileStore :: FilePath -> MVar BlobIndex -> BlobStore
 fileStore dir = store persist write fetch
-  where
-    persist = atomicEncodeFile (indexPath dir)
-    write identifier = atomicWriteLazy (objectPath dir identifier)
-    fetch identifier =
-      (try (LazyByteString.readFile (objectPath dir identifier)) :: IO (Either IOException LazyByteString.ByteString))
-        <&> either
-          (Left . (\failure -> "cannot read blob " <> identifier <> ": " <> failure) . Text.pack . displayException)
-          Right
+ where
+  persist = atomicEncodeFile (indexPath dir)
+  write identifier = atomicWriteLazy (objectPath dir identifier)
+  fetch identifier =
+    (try (LazyByteString.readFile (objectPath dir identifier)) :: IO (Either IOException LazyByteString.ByteString))
+      <&> either
+        (Left . (\failure -> "cannot read blob " <> identifier <> ": " <> failure) . Text.pack . displayException)
+        Right
 
 memoryStore :: MVar (Map Text LazyByteString.ByteString) -> MVar BlobIndex -> BlobStore
 memoryStore payloads = store (const (pure ())) write fetch
-  where
-    write identifier bytes = modifyMVar_ payloads (pure . Map.insert identifier bytes)
-    fetch identifier =
-      maybe (Left ("unknown blob: " <> identifier)) Right . Map.lookup identifier <$> readMVar payloads
+ where
+  write identifier bytes = modifyMVar_ payloads (pure . Map.insert identifier bytes)
+  fetch identifier =
+    maybe (Left ("unknown blob: " <> identifier)) Right . Map.lookup identifier <$> readMVar payloads
 
 store ::
   (BlobIndex -> IO ()) ->
@@ -158,27 +157,27 @@ store persist write fetch lock =
           . indexRefs
           <$> readMVar lock
     }
-  where
-    put mediaType bytes =
-      getPOSIXTime >>= \now ->
-        let identifier = "sha256-" <> sha256 (LazyByteString.toStrict bytes)
-            meta = BlobMeta identifier (fromIntegral (LazyByteString.length bytes)) mediaType (round now)
-         in modifyMVar lock $ \index ->
-              case Map.lookup identifier (indexMetas index) of
-                Just existing -> pure (index, existing)
-                Nothing ->
-                  write identifier bytes
-                    *> let updated = index {indexMetas = Map.insert identifier meta (indexMetas index)}
-                        in persist updated *> pure (updated, meta)
-    attach refId identifier incarnation purpose source =
-      getPOSIXTime >>= \now ->
-        modifyMVar lock $ \index ->
-          case Map.lookup identifier (indexMetas index) of
-            Nothing -> pure (index, Left ("unknown blob: " <> identifier))
-            Just _ ->
-              let ref = BlobRef refId identifier incarnation purpose source (round now)
-                  updated = index {indexRefs = Map.insert refId ref (indexRefs index)}
-               in persist updated *> pure (updated, Right ref)
+ where
+  put mediaType bytes =
+    getPOSIXTime >>= \now ->
+      let identifier = "sha256-" <> sha256 (LazyByteString.toStrict bytes)
+          meta = BlobMeta identifier (fromIntegral (LazyByteString.length bytes)) mediaType (round now)
+       in modifyMVar lock $ \index ->
+            case Map.lookup identifier (indexMetas index) of
+              Just existing -> pure (index, existing)
+              Nothing ->
+                write identifier bytes
+                  *> let updated = index {indexMetas = Map.insert identifier meta (indexMetas index)}
+                      in persist updated *> pure (updated, meta)
+  attach refId identifier incarnation purpose source =
+    getPOSIXTime >>= \now ->
+      modifyMVar lock $ \index ->
+        case Map.lookup identifier (indexMetas index) of
+          Nothing -> pure (index, Left ("unknown blob: " <> identifier))
+          Just _ ->
+            let ref = BlobRef refId identifier incarnation purpose source (round now)
+                updated = index {indexRefs = Map.insert refId ref (indexRefs index)}
+             in persist updated *> pure (updated, Right ref)
 
 loadIndex :: FilePath -> IO (Either Text BlobIndex)
 loadIndex path =
@@ -199,8 +198,8 @@ indexPath dir = dir </> "blob-index.json"
 objectPath :: FilePath -> Text -> FilePath
 objectPath dir identifier =
   payloadPath dir </> Text.unpack (Text.take 2 digest) </> Text.unpack digest
-  where
-    digest = Text.drop 7 identifier
+ where
+  digest = Text.drop 7 identifier
 
 sha256 :: ByteString.ByteString -> Text
 sha256 =
@@ -213,14 +212,14 @@ sha256 =
 
 pad :: [Word8] -> [Word8]
 pad bytes = bytes <> [0x80] <> replicate zeros 0 <> word64be bits
-  where
-    bits = fromIntegral (length bytes) * 8
-    zeros = (56 - (length bytes + 1) `mod` 64) `mod` 64
+ where
+  bits = fromIntegral (length bytes) * 8
+  zeros = (56 - (length bytes + 1) `mod` 64) `mod` 64
 
 word64be :: Word64 -> [Word8]
 word64be word =
-  [ fromIntegral (word `shiftR` shift)
-    | shift <- [56, 48 .. 0]
+  [ fromIntegral (word `shiftR` bitShift)
+  | bitShift <- [56, 48 .. 0]
   ]
 
 chunksOf :: Int -> [value] -> [[value]]
@@ -228,40 +227,36 @@ chunksOf _ [] = []
 chunksOf count values = take count values : chunksOf count (drop count values)
 
 compress :: [Word32] -> [Word8] -> [Word32]
-compress state block = zipWith (+) state [a, b, c, d, e, f, g, h]
-  where
-    schedule = extend (fmap word32be (chunksOf 4 block)) 16
-    extend words index
-      | index >= 64 = words
-      | otherwise =
-          extend
-            ( words
-                <> [ small1 (words !! (index - 2))
-                       + words !! (index - 7)
-                       + small0 (words !! (index - 15))
-                       + words !! (index - 16)
-                   ]
-            )
-            (index + 1)
-    [a, b, c, d, e, f, g, h] =
-      foldl'
-        roundHash
-        state
-        (zip roundConstants schedule)
-    roundHash [a', b', c', d', e', f', g', h'] (constant, word) =
-      [ t1 + t2,
-        a',
-        b',
-        c',
-        d' + t1,
-        e',
-        f',
-        g'
-      ]
-      where
-        t1 = h' + big1 e' + choose e' f' g' + constant + word
-        t2 = big0 a' + majority a' b' c'
-    roundHash hash _ = hash
+compress state block =
+  zipWith (+) state (foldl' roundHash state (zip roundConstants schedule))
+ where
+  schedule = extend (fmap word32be (chunksOf 4 block)) 16
+  extend scheduleWords index
+    | index >= 64 = scheduleWords
+    | otherwise =
+        extend
+          ( scheduleWords
+              <> [ small1 (scheduleWords !! (index - 2))
+                     + scheduleWords !! (index - 7)
+                     + small0 (scheduleWords !! (index - 15))
+                     + scheduleWords !! (index - 16)
+                 ]
+          )
+          (index + 1)
+  roundHash [a', b', c', d', e', f', g', h'] (constant, word) =
+    [ t1 + t2,
+      a',
+      b',
+      c',
+      d' + t1,
+      e',
+      f',
+      g'
+    ]
+   where
+    t1 = h' + big1 e' + choose e' f' g' + constant + word
+    t2 = big0 a' + majority a' b' c'
+  roundHash hash _ = hash
 
 word32be :: [Word8] -> Word32
 word32be = foldl' (\word byte -> word `shiftL` 8 .|. fromIntegral byte) 0
@@ -280,8 +275,8 @@ small1 x = rotateR x 17 `xor` rotateR x 19 `xor` shiftR x 10
 
 hex32 :: Word32 -> String
 hex32 word = replicate (8 - length rendered) '0' <> rendered
-  where
-    rendered = showHex word ""
+ where
+  rendered = showHex word ""
 
 initialHash :: [Word32]
 initialHash =

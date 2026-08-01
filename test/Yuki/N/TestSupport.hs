@@ -44,26 +44,31 @@ module Yuki.N.TestSupport
     testRuntime,
     collectEvents,
     takeEnd,
-    transcriptHistory
+    transcriptHistory,
   )
 where
+
 import Control.Applicative ()
+import Control.Concurrent (threadDelay)
 import Control.Concurrent.MVar
 import Control.Exception ()
 import Control.Monad ()
 import Data.Aeson
+import Data.Aeson.Types (parseEither)
 import Data.Bool (bool)
 import Data.ByteString (ByteString)
-import qualified Data.ByteString.Builder as Builder
-import qualified Data.ByteString.Lazy as LazyByteString
+import Data.ByteString.Builder qualified as Builder
+import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Foldable ()
 import Data.Functor (($>), (<&>))
 import Data.IORef
-import qualified Data.Map.Strict as Map
+import Data.List (find)
+import Data.Map.Strict qualified as Map
+import Data.Maybe (listToMaybe)
 import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Text.Encoding as TextEncoding
-import qualified Data.Text.IO as TextIO
+import Data.Text qualified as Text
+import Data.Text.Encoding qualified as TextEncoding
+import Data.Text.IO qualified as TextIO
 import Network.HTTP.Client ()
 import Network.HTTP.Client.TLS ()
 import Network.HTTP.Types
@@ -71,6 +76,7 @@ import Network.Wai (Application, Request, pathInfo, requestHeaders, requestMetho
 import Network.Wai.Handler.Warp ()
 import Network.Wai.Internal (ResponseReceived (..))
 import Network.Wai.Test
+import System.Directory (createDirectoryIfMissing, createDirectoryLink, createFileLink, getTemporaryDirectory)
 import System.Exit ()
 import System.FilePath ()
 import System.Process ()
@@ -111,31 +117,25 @@ import Yuki.N.SubAgent ()
 import Yuki.N.ThreadConfig
 import Yuki.N.Tools ()
 import Yuki.N.Transcript
-import System.Directory (createDirectoryIfMissing, createDirectoryLink, createFileLink, getTemporaryDirectory)
-import Data.Maybe (listToMaybe)
-import Data.List (find)
-import Data.Aeson.Types (parseEither)
-import Control.Concurrent (threadDelay)
-
 
 afterSpy :: IORef [[ChatMessage]] -> AgentHooks
 afterSpy ref = defaultHooks {afterRun = \_ messages -> modifyIORef' ref (messages :)}
 waitUntil :: IO Bool -> IO Bool
 waitUntil probe = go (100 :: Int)
-  where
-    go 0 = pure False
-    go n = probe >>= bool (threadDelay 50000 *> go (n - 1)) (pure True)
+ where
+  go 0 = pure False
+  go n = probe >>= bool (threadDelay 50000 *> go (n - 1)) (pure True)
 streamInput :: Application -> RunAgentInput -> IORef [Builder.Builder] -> MVar () -> IO ()
 streamInput app input chunks done =
   newIORef (LazyByteString.toStrict (encode input)) >>= \body ->
     app (streamRequest body) respond $> ()
-  where
-    respond response =
-      case responseToStream response of
-        (_, _, withBody) ->
-          withBody (\body -> body (\builder -> modifyIORef' chunks (builder :)) (pure ()))
-            *> putMVar done ()
-            $> ResponseReceived
+ where
+  respond response =
+    case responseToStream response of
+      (_, _, withBody) ->
+        withBody (\body -> body (\builder -> modifyIORef' chunks (builder :)) (pure ()))
+          *> putMVar done ()
+          $> ResponseReceived
 streamRequest :: IORef ByteString -> Request
 streamRequest body =
   setRequestBodyChunks (atomicModifyIORef' body (\current -> ("", current))) $
@@ -158,40 +158,40 @@ cancelRequest run =
 decodeChunks :: IORef [Builder.Builder] -> IO [Event]
 decodeChunks ref =
   reverse <$> readIORef ref >>= decodeAll . foldl feed (emptySseDecoder, []) . fmap bytes
-  where
-    bytes = LazyByteString.toStrict . Builder.toLazyByteString
-    feed (decoder, acc) chunk =
-      let (decoder', decoded) = feedSse decoder chunk in (decoder', acc <> decoded)
-    decodeAll (decoder, payloads) =
-      let (_, trailing) = finishSse decoder
-       in either assertFailure pure (traverse eitherDecodeStrict' (payloads <> trailing))
+ where
+  bytes = LazyByteString.toStrict . Builder.toLazyByteString
+  feed (decoder, acc) chunk =
+    let (decoder', decoded) = feedSse decoder chunk in (decoder', acc <> decoded)
+  decodeAll (decoder, payloads) =
+    let (_, trailing) = finishSse decoder
+     in either assertFailure pure (traverse eitherDecodeStrict' (payloads <> trailing))
 contextConfig :: ContextConfig
 contextConfig = ContextConfig 64 4 96 4096
 contextConversation :: [ChatMessage]
 contextConversation = ChatSystem "local rules" : concatMap exchange [1 .. 12]
-  where
-    exchange index =
-      [ ChatUser ("user-" <> label <> ": " <> Text.replicate 90 "u"),
-        ChatAssistant
-          ( AssistantTurn
-              ("message-" <> label)
-              (Just ("assistant-" <> label <> ": " <> Text.replicate 90 "a"))
-              Nothing
-              []
-          )
-      ]
-      where
-        label = Text.pack (show (index :: Int))
+ where
+  exchange index =
+    [ ChatUser ("user-" <> label <> ": " <> Text.replicate 90 "u"),
+      ChatAssistant
+        ( AssistantTurn
+            ("message-" <> label)
+            (Just ("assistant-" <> label <> ": " <> Text.replicate 90 "a"))
+            Nothing
+            []
+        )
+    ]
+   where
+    label = Text.pack (show (index :: Int))
 isContextSummary :: ChatMessage -> Bool
 isContextSummary (ChatSystem text) = contextSummaryMarker `Text.isPrefixOf` text
 isContextSummary _ = False
 echoModel :: Model
 echoModel = (fakeModel stream) {modelRender = requestValue testProvider}
-  where
-    stream req emit =
-      case lastMessage req of
-        Just (ChatToolResult {}) -> emit (ModelTextDelta "done") $> Stop
-        _ -> emit (ModelToolCallDelta 0 (Just "call-echo") (Just "echo") "{\"x\":1}") $> ToolUse
+ where
+  stream req emit =
+    case lastMessage req of
+      Just (ChatToolResult {}) -> emit (ModelTextDelta "done") $> Stop
+      _ -> emit (ModelToolCallDelta 0 (Just "call-echo") (Just "echo") "{\"x\":1}") $> ToolUse
 echoTool :: BackendTool
 echoTool = jsonTool (tool "echo") (\(value :: Value) -> pure (Right value))
 lastMessage :: ModelRequest -> Maybe ChatMessage
@@ -209,7 +209,7 @@ promptCaptureModel captured =
     writeIORef captured (requestMessages req)
       *> emit (ModelTextDelta "# Generated Charter\nA model-generated, auditable charter.")
       $> Stop
-jsonText :: ToJSON value => value -> Text
+jsonText :: (ToJSON value) => value -> Text
 jsonText = TextEncoding.decodeUtf8 . LazyByteString.toStrict . encode
 withTextRight :: (value -> Assertion) -> Either Text value -> Assertion
 withTextRight use = either (assertFailure . Text.unpack) use
@@ -233,8 +233,8 @@ callTool :: [BackendTool] -> Text -> Value -> IO ToolOutcome
 callTool tools name arguments =
   maybe (assertFailure ("missing tool: " <> Text.unpack name)) pure (find (named . backendToolSpec) tools)
     >>= \backend -> runBackendTool backend (ToolContext "run" "thread" "call" (const (pure ())) Nothing) arguments
-  where
-    named = (== name) . toolName
+ where
+  named = (== name) . toolName
 outcomeValue :: ToolOutcome -> IO Value
 outcomeValue = either assertFailure pure . eitherDecodeStrict' . TextEncoding.encodeUtf8 . toolOutcomeContent
 taskIdOf :: ToolOutcome -> IO Text
@@ -243,10 +243,10 @@ taskIdOf outcome =
 pollOf :: ToolOutcome -> IO (Bool, Maybe Int, Text, Bool)
 pollOf outcome =
   outcomeValue outcome >>= either assertFailure pure . parseEither parse
-  where
-    parse =
-      withObject "poll" $ \fields ->
-        (,,,) <$> fields .: "running" <*> fields .:? "exitCode" <*> fields .: "output" <*> fields .: "truncated"
+ where
+  parse =
+    withObject "poll" $ \fields ->
+      (,,,) <$> fields .: "running" <*> fields .:? "exitCode" <*> fields .: "output" <*> fields .: "truncated"
 withSandbox :: (FilePath -> Assertion) -> Assertion
 withSandbox action =
   getTemporaryDirectory >>= \tmp ->
@@ -271,7 +271,7 @@ sessionServiceAt dir cleanup =
     <*> newTranscriptStore dir
     <*> newThreadConfigStore dir
     <*> pure cleanup
-jsonRequest :: ToJSON body => Method -> [Text] -> body -> SRequest
+jsonRequest :: (ToJSON body) => Method -> [Text] -> body -> SRequest
 jsonRequest method path body =
   SRequest
     { simpleRequest =
@@ -291,8 +291,8 @@ testSettings =
   either (error . Text.unpack) id (resolveSettings (Map.singleton "DEEPSEEK_API_KEY" "super-secret-key-123"))
 testView :: ThreadConfigStore -> ConfigView
 testView store = ConfigView (renderGlobalConfig testSettings defaults) store defaults (pure (Right [])) (pure [])
-  where
-    defaults = globalThreadConfig testSettings
+ where
+  defaults = globalThreadConfig testSettings
 putConfig :: Text -> LazyByteString.ByteString -> SRequest
 putConfig threadId body =
   SRequest
@@ -341,33 +341,33 @@ testRuntime model tools execution =
   newIORef (0 :: Int) >>= \counter ->
     newBackgroundRegistry <&> \background ->
       Runtime
-      { runtimeModel = model,
-        runtimeTools = Map.fromList [(toolName (backendToolSpec backend), backend) | backend <- tools],
-        runtimeToolExecution = execution,
-        runtimeMaxTurns = 8,
-        runtimeSystemPrompt = "",
-        runtimeHooks = defaultHooks,
-        runtimeNewId =
-          atomicModifyIORef' counter (\value -> let next = value + 1 in (next, next))
-            <&> ("id-" <>) . Text.pack . show,
-        runtimeJournal = Nothing,
-        runtimeArtifactStore = Nothing,
-        runtimeBackground = background,
-        runtimeDepth = 1,
-        runtimeProviderRetries = 0,
-        runtimeFallbacks = [],
-        runtimeSplice = Nothing,
-        runtimeContext = Nothing,
-        runtimeRuns = Nothing,
-        runtimeSteer = const (pure []),
-        runtimeFollowUp = const (pure [])
-      }
+        { runtimeModel = model,
+          runtimeTools = Map.fromList [(toolName (backendToolSpec backend), backend) | backend <- tools],
+          runtimeToolExecution = execution,
+          runtimeMaxTurns = 8,
+          runtimeSystemPrompt = "",
+          runtimeHooks = defaultHooks,
+          runtimeNewId =
+            atomicModifyIORef' counter (\value -> let next = value + 1 in (next, next))
+              <&> ("id-" <>) . Text.pack . show,
+          runtimeJournal = Nothing,
+          runtimeArtifactStore = Nothing,
+          runtimeBackground = background,
+          runtimeDepth = 1,
+          runtimeProviderRetries = 0,
+          runtimeFallbacks = [],
+          runtimeSplice = Nothing,
+          runtimeContext = Nothing,
+          runtimeRuns = Nothing,
+          runtimeSteer = const (pure []),
+          runtimeFollowUp = const (pure [])
+        }
 collectEvents :: Runtime -> RunAgentInput -> IO [Event]
 collectEvents runtime input = newIORef [] >>= collect
-  where
-    collect events =
-      runAgent runtime input (\event -> modifyIORef' events (event :))
-        *> (reverse <$> readIORef events)
+ where
+  collect events =
+    runAgent runtime input (\event -> modifyIORef' events (event :))
+      *> (reverse <$> readIORef events)
 takeEnd :: Int -> [value] -> [value]
 takeEnd count values = drop (length values - count) values
 transcriptHistory :: [ChatMessage]

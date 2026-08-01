@@ -17,18 +17,18 @@ import Data.Aeson
 import Data.Bool (bool)
 import Data.Functor ((<&>))
 import Data.List (sortOn)
-import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
-import qualified Data.Text as Text
+import Data.Text qualified as Text
+import Data.Text.Encoding qualified as TextEncoding
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
 import System.IO.Error (isDoesNotExistError)
 import Yuki.N.AtomicFile (atomicEncodeFile)
 import Yuki.N.Blob (sha256)
-import qualified Data.Text.Encoding as TextEncoding
 
 data IncarnationStatus = IncarnationActive | IncarnationArchived
   deriving stock (Eq, Show)
@@ -89,9 +89,10 @@ data PromptLayer
   deriving stock (Eq, Show)
 
 instance ToJSON PromptLayer where
-  toJSON = String . \case
-    RootConstitution -> "root"
-    IncarnationCharter -> "charter"
+  toJSON =
+    String . \case
+      RootConstitution -> "root"
+      IncarnationCharter -> "charter"
 
 instance FromJSON PromptLayer where
   parseJSON = withText "PromptLayer" $ \case
@@ -103,10 +104,11 @@ data PromptStatus = PromptDraft | PromptActive | PromptRetired
   deriving stock (Eq, Show)
 
 instance ToJSON PromptStatus where
-  toJSON = String . \case
-    PromptDraft -> "draft"
-    PromptActive -> "active"
-    PromptRetired -> "retired"
+  toJSON =
+    String . \case
+      PromptDraft -> "draft"
+      PromptActive -> "active"
+      PromptRetired -> "retired"
 
 instance FromJSON PromptStatus where
   parseJSON = withText "PromptStatus" $ \case
@@ -254,187 +256,186 @@ mkStore persist lock =
       promptActivate = activate,
       promptActivateRoot = activateRoot
     }
-  where
-    create identifier name direction model
-      | not (validId identifier) = pure (Left "invalid incarnation id")
-      | Text.null (Text.strip name) = pure (Left "incarnation name must not be empty")
-      | Text.null (Text.strip direction) = pure (Left "incarnation direction must not be empty")
-      | otherwise =
-          getPOSIXTime >>= \now ->
-            modifyMVar lock $ \state ->
-              case Map.lookup identifier (stateIncarnations state) of
-                Just _ -> pure (state, Left ("incarnation already exists: " <> identifier))
-                Nothing ->
-                  let stamp = round now
-                      incarnation =
-                        Incarnation identifier (Text.take 80 (Text.strip name)) (Text.strip direction) Nothing model 1 IncarnationActive stamp stamp
-                      changed = state {stateIncarnations = Map.insert identifier incarnation (stateIncarnations state)}
-                   in persist changed *> pure (changed, Right incarnation)
-    update identifier expected name direction model
-      | Text.null (Text.strip name) = pure (Left "incarnation name must not be empty")
-      | Text.null (Text.strip direction) = pure (Left "incarnation direction must not be empty")
-      | otherwise =
-          mutate identifier expected requireActive $ \now incarnation ->
-            incarnation
-              { incarnationName = Text.take 80 (Text.strip name),
-                incarnationDirection = Text.strip direction,
-                incarnationImpressionModel = model,
-                incarnationRevision = expected + 1,
-                incarnationUpdated = now
-              }
-    archive "yuki" _ = pure (Left "default incarnation yuki cannot be archived")
-    archive identifier expected =
-      mutate identifier expected requireActive $ \now incarnation ->
-        incarnation
-          { incarnationStatus = IncarnationArchived,
-            incarnationRevision = expected + 1,
-            incarnationUpdated = now
-          }
-    restore identifier expected =
-      mutate identifier expected requireArchived $ \now incarnation ->
-        incarnation
-          { incarnationStatus = IncarnationActive,
-            incarnationRevision = expected + 1,
-            incarnationUpdated = now
-          }
-    delete "yuki" _ = pure (Left "default incarnation yuki cannot be deleted")
-    delete identifier expected =
-      getPOSIXTime >>= \now ->
-        modifyMVar lock $ \state ->
-          case Map.lookup identifier (stateIncarnations state) of
-            Nothing -> pure (state, Left ("unknown incarnation: " <> identifier))
-            Just incarnation
-              | incarnationRevision incarnation /= expected ->
-                  pure (state, Left (stale expected (incarnationRevision incarnation)))
-              | incarnationStatus incarnation /= IncarnationArchived ->
-                  pure (state, Left ("incarnation is not archived: " <> identifier))
-              | otherwise ->
-                  let kept = filter ((/= Just identifier) . promptIncarnationId) (Map.elems (statePrompts state))
-                      changed =
-                        state
-                          { stateIncarnations = Map.delete identifier (stateIncarnations state),
-                            statePrompts = Map.fromList [(promptRevisionId prompt, prompt) | prompt <- kept]
-                          }
-                   in persist changed *> pure (changed, Right incarnation)
-    mutate identifier expected allowed change =
-      getPOSIXTime >>= \now ->
-        modifyMVar lock $ \state ->
-          case Map.lookup identifier (stateIncarnations state) of
-            Nothing -> pure (state, Left ("unknown incarnation: " <> identifier))
-            Just incarnation
-              | incarnationRevision incarnation /= expected ->
-                  pure (state, Left (stale expected (incarnationRevision incarnation)))
-              | Just failure <- allowed incarnation ->
-                  pure (state, Left failure)
-              | otherwise ->
-                  let changedIncarnation = change (round now) incarnation
-                      changed = state {stateIncarnations = Map.insert identifier changedIncarnation (stateIncarnations state)}
-                   in persist changed *> pure (changed, Right changedIncarnation)
-    appendPrompt owner layer source content generator invocation parent status =
-      getPOSIXTime >>= \now ->
-        modifyMVar lock $ \state ->
-          let related =
-                filter
-                  (\candidate -> promptIncarnationId candidate == owner && promptLayer candidate == layer)
-                  (Map.elems (statePrompts state))
-              ordinal = maximum (0 : fmap promptOrdinal related) + 1
-              digest = sha256 (TextEncoding.encodeUtf8 (Text.intercalate "\NUL" [fromMaybe "root" owner, Text.pack (show layer), Text.pack (show ordinal), content]))
-              identifier = "prompt-" <> Text.take 24 digest
-              prompt =
-                PromptRevision identifier owner layer source content generator invocation parent ordinal status digest (round now)
-              changed = state {statePrompts = Map.insert identifier prompt (statePrompts state)}
-           in persist changed *> pure (changed, prompt)
-    activate incarnationId' expected promptId =
+ where
+  create identifier name direction model
+    | not (validId identifier) = pure (Left "invalid incarnation id")
+    | Text.null (Text.strip name) = pure (Left "incarnation name must not be empty")
+    | Text.null (Text.strip direction) = pure (Left "incarnation direction must not be empty")
+    | otherwise =
+        getPOSIXTime >>= \now ->
+          modifyMVar lock $ \state ->
+            case Map.lookup identifier (stateIncarnations state) of
+              Just _ -> pure (state, Left ("incarnation already exists: " <> identifier))
+              Nothing ->
+                let stamp = round now
+                    incarnation =
+                      Incarnation identifier (Text.take 80 (Text.strip name)) (Text.strip direction) Nothing model 1 IncarnationActive stamp stamp
+                    changed = state {stateIncarnations = Map.insert identifier incarnation (stateIncarnations state)}
+                 in persist changed *> pure (changed, Right incarnation)
+  update identifier expected name direction model
+    | Text.null (Text.strip name) = pure (Left "incarnation name must not be empty")
+    | Text.null (Text.strip direction) = pure (Left "incarnation direction must not be empty")
+    | otherwise =
+        mutate identifier expected requireActive $ \now incarnation ->
+          incarnation
+            { incarnationName = Text.take 80 (Text.strip name),
+              incarnationDirection = Text.strip direction,
+              incarnationImpressionModel = model,
+              incarnationRevision = expected + 1,
+              incarnationUpdated = now
+            }
+  archive "yuki" _ = pure (Left "default incarnation yuki cannot be archived")
+  archive identifier expected =
+    mutate identifier expected requireActive $ \now incarnation ->
+      incarnation
+        { incarnationStatus = IncarnationArchived,
+          incarnationRevision = expected + 1,
+          incarnationUpdated = now
+        }
+  restore identifier expected =
+    mutate identifier expected requireArchived $ \now incarnation ->
+      incarnation
+        { incarnationStatus = IncarnationActive,
+          incarnationRevision = expected + 1,
+          incarnationUpdated = now
+        }
+  delete "yuki" _ = pure (Left "default incarnation yuki cannot be deleted")
+  delete identifier expected =
+    modifyMVar lock $ \state ->
+      case Map.lookup identifier (stateIncarnations state) of
+        Nothing -> pure (state, Left ("unknown incarnation: " <> identifier))
+        Just incarnation
+          | incarnationRevision incarnation /= expected ->
+              pure (state, Left (stale expected (incarnationRevision incarnation)))
+          | incarnationStatus incarnation /= IncarnationArchived ->
+              pure (state, Left ("incarnation is not archived: " <> identifier))
+          | otherwise ->
+              let kept = filter ((/= Just identifier) . promptIncarnationId) (Map.elems (statePrompts state))
+                  changed =
+                    state
+                      { stateIncarnations = Map.delete identifier (stateIncarnations state),
+                        statePrompts = Map.fromList [(promptRevisionId prompt, prompt) | prompt <- kept]
+                      }
+               in persist changed *> pure (changed, Right incarnation)
+  mutate identifier expected allowed change =
+    getPOSIXTime >>= \now ->
       modifyMVar lock $ \state ->
-        case (Map.lookup incarnationId' (stateIncarnations state), Map.lookup promptId (statePrompts state)) of
-          (Nothing, _) -> pure (state, Left ("unknown incarnation: " <> incarnationId'))
-          (_, Nothing) -> pure (state, Left ("unknown prompt revision: " <> promptId))
-          (Just incarnation, Just prompt)
+        case Map.lookup identifier (stateIncarnations state) of
+          Nothing -> pure (state, Left ("unknown incarnation: " <> identifier))
+          Just incarnation
             | incarnationRevision incarnation /= expected ->
                 pure (state, Left (stale expected (incarnationRevision incarnation)))
-            | incarnationStatus incarnation /= IncarnationActive ->
-                pure (state, Left ("incarnation is archived: " <> incarnationId'))
-            | promptIncarnationId prompt /= Just incarnationId' ->
-                pure (state, Left "prompt revision belongs to another incarnation")
+            | Just failure <- allowed incarnation ->
+                pure (state, Left failure)
             | otherwise ->
-                getPOSIXTime >>= \now ->
-                  let activated = incarnation {incarnationPromptRevision = Just promptId, incarnationRevision = expected + 1, incarnationUpdated = round now}
-                      prompts =
-                        Map.map
-                          (\candidate ->
+                let changedIncarnation = change (round now) incarnation
+                    changed = state {stateIncarnations = Map.insert identifier changedIncarnation (stateIncarnations state)}
+                 in persist changed *> pure (changed, Right changedIncarnation)
+  appendPrompt owner layer source content generator invocation parent status =
+    getPOSIXTime >>= \now ->
+      modifyMVar lock $ \state ->
+        let related =
+              filter
+                (\candidate -> promptIncarnationId candidate == owner && promptLayer candidate == layer)
+                (Map.elems (statePrompts state))
+            ordinal = maximum (0 : fmap promptOrdinal related) + 1
+            digest = sha256 (TextEncoding.encodeUtf8 (Text.intercalate "\NUL" [fromMaybe "root" owner, Text.pack (show layer), Text.pack (show ordinal), content]))
+            identifier = "prompt-" <> Text.take 24 digest
+            prompt =
+              PromptRevision identifier owner layer source content generator invocation parent ordinal status digest (round now)
+            changed = state {statePrompts = Map.insert identifier prompt (statePrompts state)}
+         in persist changed *> pure (changed, prompt)
+  activate incarnationId' expected promptId =
+    modifyMVar lock $ \state ->
+      case (Map.lookup incarnationId' (stateIncarnations state), Map.lookup promptId (statePrompts state)) of
+        (Nothing, _) -> pure (state, Left ("unknown incarnation: " <> incarnationId'))
+        (_, Nothing) -> pure (state, Left ("unknown prompt revision: " <> promptId))
+        (Just incarnation, Just prompt)
+          | incarnationRevision incarnation /= expected ->
+              pure (state, Left (stale expected (incarnationRevision incarnation)))
+          | incarnationStatus incarnation /= IncarnationActive ->
+              pure (state, Left ("incarnation is archived: " <> incarnationId'))
+          | promptIncarnationId prompt /= Just incarnationId' ->
+              pure (state, Left "prompt revision belongs to another incarnation")
+          | otherwise ->
+              getPOSIXTime >>= \now ->
+                let activated = incarnation {incarnationPromptRevision = Just promptId, incarnationRevision = expected + 1, incarnationUpdated = round now}
+                    prompts =
+                      Map.map
+                        ( \candidate ->
                             if promptIncarnationId candidate == Just incarnationId' && promptLayer candidate == promptLayer prompt
                               then candidate {promptStatus = bool PromptRetired PromptActive (promptRevisionId candidate == promptId)}
                               else candidate
+                        )
+                        (statePrompts state)
+                    changed =
+                      state
+                        { stateIncarnations = Map.insert incarnationId' activated (stateIncarnations state),
+                          statePrompts = prompts
+                        }
+                 in persist changed *> pure (changed, Right activated)
+  activateRoot expected promptId =
+    modifyMVar lock $ \state ->
+      let roots =
+            filter
+              ( (&&)
+                  <$> ((== Nothing) . promptIncarnationId)
+                  <*> ((== RootConstitution) . promptLayer)
+              )
+              (Map.elems (statePrompts state))
+          active =
+            listToMaybe
+              . reverse
+              . sortOn promptOrdinal
+              . filter ((== PromptActive) . promptStatus)
+              $ roots
+          actual = maybe 0 promptOrdinal active
+       in case Map.lookup promptId (statePrompts state) of
+            Nothing -> pure (state, Left ("unknown prompt revision: " <> promptId))
+            Just prompt
+              | actual /= expected ->
+                  pure
+                    ( state,
+                      Left
+                        ( "stale root prompt ordinal: expected "
+                            <> Text.pack (show expected)
+                            <> ", actual "
+                            <> Text.pack (show actual)
+                        )
+                    )
+              | promptIncarnationId prompt /= Nothing ->
+                  pure (state, Left "prompt revision belongs to an incarnation")
+              | promptLayer prompt /= RootConstitution ->
+                  pure (state, Left "prompt revision is not a Root Constitution")
+              | otherwise ->
+                  let prompts =
+                        Map.map
+                          ( \candidate ->
+                              if promptIncarnationId candidate == Nothing && promptLayer candidate == RootConstitution
+                                then candidate {promptStatus = bool PromptRetired PromptActive (promptRevisionId candidate == promptId)}
+                                else candidate
                           )
                           (statePrompts state)
-                      changed =
-                        state
-                          { stateIncarnations = Map.insert incarnationId' activated (stateIncarnations state),
-                            statePrompts = prompts
-                          }
+                      activated = fromMaybe prompt (Map.lookup promptId prompts)
+                      changed = state {statePrompts = prompts}
                    in persist changed *> pure (changed, Right activated)
-    activateRoot expected promptId =
-      modifyMVar lock $ \state ->
-        let roots =
-              filter
-                ( (&&)
-                    <$> ((== Nothing) . promptIncarnationId)
-                    <*> ((== RootConstitution) . promptLayer)
-                )
-                (Map.elems (statePrompts state))
-            active =
-              listToMaybe
-                . reverse
-                . sortOn promptOrdinal
-                . filter ((== PromptActive) . promptStatus)
-                $ roots
-            actual = maybe 0 promptOrdinal active
-         in case Map.lookup promptId (statePrompts state) of
-              Nothing -> pure (state, Left ("unknown prompt revision: " <> promptId))
-              Just prompt
-                | actual /= expected ->
-                    pure
-                      ( state,
-                        Left
-                          ( "stale root prompt ordinal: expected "
-                              <> Text.pack (show expected)
-                              <> ", actual "
-                              <> Text.pack (show actual)
-                          )
-                      )
-                | promptIncarnationId prompt /= Nothing ->
-                    pure (state, Left "prompt revision belongs to an incarnation")
-                | promptLayer prompt /= RootConstitution ->
-                    pure (state, Left "prompt revision is not a Root Constitution")
-                | otherwise ->
-                    let prompts =
-                          Map.map
-                            ( \candidate ->
-                                if promptIncarnationId candidate == Nothing && promptLayer candidate == RootConstitution
-                                  then candidate {promptStatus = bool PromptRetired PromptActive (promptRevisionId candidate == promptId)}
-                                  else candidate
-                            )
-                            (statePrompts state)
-                        activated = fromMaybe prompt (Map.lookup promptId prompts)
-                        changed = state {statePrompts = prompts}
-                     in persist changed *> pure (changed, Right activated)
-    requireActive incarnation
-      | incarnationStatus incarnation == IncarnationActive = Nothing
-      | otherwise = Just ("incarnation is already archived: " <> incarnationId incarnation)
-    requireArchived incarnation
-      | incarnationStatus incarnation == IncarnationArchived = Nothing
-      | otherwise = Just ("incarnation is already active: " <> incarnationId incarnation)
+  requireActive incarnation
+    | incarnationStatus incarnation == IncarnationActive = Nothing
+    | otherwise = Just ("incarnation is already archived: " <> incarnationId incarnation)
+  requireArchived incarnation
+    | incarnationStatus incarnation == IncarnationArchived = Nothing
+    | otherwise = Just ("incarnation is already active: " <> incarnationId incarnation)
 
 validId :: Text -> Bool
 validId identifier =
   not (Text.null identifier)
     && Text.length identifier <= 80
     && Text.all (\character -> character == '-' || character == '_' || character == '.' || asciiAlphaNum character) identifier
-  where
-    asciiAlphaNum character =
-      character >= 'a' && character <= 'z'
-        || character >= 'A' && character <= 'Z'
-        || character >= '0' && character <= '9'
+ where
+  asciiAlphaNum character =
+    character >= 'a' && character <= 'z'
+      || character >= 'A' && character <= 'Z'
+      || character >= '0' && character <= '9'
 
 stale :: Int -> Int -> Text
 stale expected actual =

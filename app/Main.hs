@@ -1,8 +1,8 @@
 module Main (main) where
 
 import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Text.IO as TextIO
+import Data.Text qualified as Text
+import Data.Text.IO qualified as TextIO
 import System.Environment (getArgs)
 import System.Exit (die)
 import Yuki.N (runFromEnvironment)
@@ -30,26 +30,26 @@ audit :: FilePath -> Maybe Text -> IO ()
 audit path wanted =
   replayFile defaultHooks path wanted
     >>= either (die . Text.unpack) report
-  where
-    report result =
-      maybe clean diverged (reportDivergence result)
-      where
-        clean =
-          putStrLn
-            ( "replay OK: run "
-                <> Text.unpack (reportRunId result)
-                <> ", "
-                <> show (reportEvents result)
-                <> " events reproduced"
-            )
-        diverged divergence =
-          die
-            ( "replay diverged at event "
-                <> show (divergenceAt divergence)
-                <> ": expected "
-                <> maybe "∅" showEvent (divergenceExpected divergence)
-                <> ", got "
-                <> maybe "∅" showEvent (divergenceActual divergence)
-                <> maybe "" (("\n" <>) . Text.unpack) (divergenceNote divergence)
-            )
-    showEvent = Text.unpack . eventType
+ where
+  report result =
+    maybe clean diverged (reportDivergence result)
+   where
+    clean =
+      putStrLn
+        ( "replay OK: run "
+            <> Text.unpack (reportRunId result)
+            <> ", "
+            <> show (reportEvents result)
+            <> " events reproduced"
+        )
+    diverged divergence =
+      die
+        ( "replay diverged at event "
+            <> show (divergenceAt divergence)
+            <> ": expected "
+            <> maybe "∅" showEvent (divergenceExpected divergence)
+            <> ", got "
+            <> maybe "∅" showEvent (divergenceActual divergence)
+            <> maybe "" (("\n" <>) . Text.unpack) (divergenceNote divergence)
+        )
+  showEvent = Text.unpack . eventType

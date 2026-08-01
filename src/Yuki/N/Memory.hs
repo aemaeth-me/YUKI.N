@@ -24,22 +24,22 @@ import Control.Monad (void, (>=>))
 import Data.Aeson
 import Data.Aeson.Types (parseMaybe)
 import Data.Bool (bool)
-import qualified Data.ByteString.Lazy as LazyByteString
-import qualified Data.Char as Char
+import Data.ByteString.Lazy qualified as LazyByteString
+import Data.Char qualified as Char
 import Data.Foldable (traverse_)
 import Data.Functor (($>), (<&>))
 import Data.IORef
 import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
+import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Text.Encoding as TextEncoding
+import Data.Text qualified as Text
+import Data.Text.Encoding qualified as TextEncoding
 import Data.Time.Clock (UTCTime)
 import Data.Time.Clock.POSIX (getPOSIXTime, posixSecondsToUTCTime)
 import Data.Time.Format.ISO8601 (iso8601Show)
 import System.Directory (createDirectoryIfMissing)
-import qualified Yuki.N.AGUI.Types as AGUI
+import Yuki.N.AGUI.Types qualified as AGUI
 import Yuki.N.Agent
 import Yuki.N.Artifact (fnv1a64, renderHash)
 import Yuki.N.AtomicFile (atomicEncodeFile)
@@ -137,51 +137,51 @@ memoryHooks model store facts journal state =
 watcherStep :: Model -> FactStore -> Maybe Journal -> IORef MemoryState -> AGUI.RunAgentInput -> [ChatMessage] -> IO ()
 watcherStep model facts journal state input messages =
   Map.findWithDefault emptyWatcher threadId . memoryWatchers <$> readIORef state >>= refresh
-  where
-    threadId = AGUI.runThreadId input
-    runId = AGUI.runId input
-    refresh seen
-      | null delta = pure ()
-      | otherwise =
-          complete (journaledModel runId journal model) (watcherPrompt (watcherRollingSummary seen) delta)
-            >>= applyDecision seen . flip parseDecision (watcherRollingSummary seen)
-      where
-        delta = filter (not . injected) (drop (watcherLastSeen seen) messages)
-    injected message = markedWith briefingMarker message || markedWith candidatesMarker message
-    applyDecision seen decision =
-      traverse_ memorize (decisionMemorize decision)
-        *> traverse_ invalidate (decisionInvalidate decision)
-        *> seek
-      where
-        memorize (Memorandum content kind _) = factAdd facts content kind runId
-        invalidate (Invalidation content _) = void (factInvalidate facts content)
-        round' = watcherRound seen + 1
-        base =
-          seen
-            { watcherRollingSummary = decisionSummary decision,
-              watcherLastSeen = length messages,
-              watcherRound = round',
-              watcherCooldowns = Map.filter (> round') (watcherCooldowns seen)
-            }
-        seek = case decisionRetrieve decision of
-          Nothing -> commit base Nothing
-          Just (Retrieval query _)
-            | spent >= retrievalRunBudget || cooling query -> commit base Nothing
-            | otherwise ->
-                factSearch facts query
-                  >>= \hits -> commit (spend query base) (Just hits)
-        spent = Map.findWithDefault 0 runId (watcherSpent seen)
-        cooling query =
-          maybe False (watcherRound seen <) (Map.lookup (queryHash query) (watcherCooldowns seen))
-        spend query watcher =
-          watcher
-            { watcherSpent = Map.insert runId (spent + 1) (watcherSpent watcher),
-              watcherCooldowns =
-                Map.insert (queryHash query) (round' + cooldownRounds) (watcherCooldowns watcher)
-            }
-        commit watcher hits =
-          recordMaybe (subJournal runId <$> journal) (StoreFactsEntry (toJSON hits))
-            *> modifyIORef' state (insertWatcher threadId watcher . maybe id (insertCandidates runId) hits)
+ where
+  threadId = AGUI.runThreadId input
+  runId = AGUI.runId input
+  refresh seen
+    | null delta = pure ()
+    | otherwise =
+        complete (journaledModel runId journal model) (watcherPrompt (watcherRollingSummary seen) delta)
+          >>= applyDecision seen . flip parseDecision (watcherRollingSummary seen)
+   where
+    delta = filter (not . injected) (drop (watcherLastSeen seen) messages)
+  injected message = markedWith briefingMarker message || markedWith candidatesMarker message
+  applyDecision seen decision =
+    traverse_ memorize (decisionMemorize decision)
+      *> traverse_ invalidate (decisionInvalidate decision)
+      *> seek
+   where
+    memorize (Memorandum content kind _) = factAdd facts content kind runId
+    invalidate (Invalidation content _) = void (factInvalidate facts content)
+    round' = watcherRound seen + 1
+    base =
+      seen
+        { watcherRollingSummary = decisionSummary decision,
+          watcherLastSeen = length messages,
+          watcherRound = round',
+          watcherCooldowns = Map.filter (> round') (watcherCooldowns seen)
+        }
+    seek = case decisionRetrieve decision of
+      Nothing -> commit base Nothing
+      Just (Retrieval query _)
+        | spent >= retrievalRunBudget || cooling query -> commit base Nothing
+        | otherwise ->
+            factSearch facts query
+              >>= \hits -> commit (spend query base) (Just hits)
+    spent = Map.findWithDefault 0 runId (watcherSpent seen)
+    cooling query =
+      maybe False (watcherRound seen <) (Map.lookup (queryHash query) (watcherCooldowns seen))
+    spend query watcher =
+      watcher
+        { watcherSpent = Map.insert runId (spent + 1) (watcherSpent watcher),
+          watcherCooldowns =
+            Map.insert (queryHash query) (round' + cooldownRounds) (watcherCooldowns watcher)
+        }
+    commit watcher hits =
+      recordMaybe (subJournal runId <$> journal) (StoreFactsEntry (toJSON hits))
+        *> modifyIORef' state (insertWatcher threadId watcher . maybe id (insertCandidates runId) hits)
 
 markedWith :: Text -> ChatMessage -> Bool
 markedWith marker (ChatSystem text) = marker `Text.isInfixOf` text
@@ -196,26 +196,26 @@ insertWatcher threadId seen state = state {memoryWatchers = Map.insert threadId 
 closeEpisode :: ThreadStore -> IORef MemoryState -> AGUI.RunAgentInput -> IO ()
 closeEpisode store state input =
   Map.lookup threadId . memoryWatchers <$> readIORef state >>= traverse_ save
-  where
-    threadId = AGUI.runThreadId input
-    save seen =
-      getPOSIXTime
-        >>= threadSaveEpisode store threadId . Episode (AGUI.runId input) (watcherRollingSummary seen) . round
+ where
+  threadId = AGUI.runThreadId input
+  save seen =
+    getPOSIXTime
+      >>= threadSaveEpisode store threadId . Episode (AGUI.runId input) (watcherRollingSummary seen) . round
 
 injectBriefing :: ThreadStore -> Maybe Journal -> IORef MemoryState -> AGUI.RunAgentInput -> [ChatMessage] -> IO [ChatMessage]
 injectBriefing store journal state input messages
   | any (markedWith briefingMarker) messages = pure messages
   | otherwise = cached >>= maybe (pure messages) (pure . (: messages) . ChatSystem)
-  where
-    runId = AGUI.runId input
-    cached = Map.lookup runId . memoryBriefings <$> readIORef state >>= maybe render pure
-    render =
-      threadBrief store (AGUI.runThreadId input)
-        >>= \brief ->
-          let rendered = renderBriefing <$> (brief >>= inhabited)
-           in recordMaybe (subJournal runId <$> journal) (StoreBriefEntry (toJSON brief))
-                *> modifyIORef' state (insertBriefing runId rendered)
-                $> rendered
+ where
+  runId = AGUI.runId input
+  cached = Map.lookup runId . memoryBriefings <$> readIORef state >>= maybe render pure
+  render =
+    threadBrief store (AGUI.runThreadId input)
+      >>= \brief ->
+        let rendered = renderBriefing <$> (brief >>= inhabited)
+         in recordMaybe (subJournal runId <$> journal) (StoreBriefEntry (toJSON brief))
+              *> modifyIORef' state (insertBriefing runId rendered)
+              $> rendered
 
 insertBriefing :: Text -> Maybe Text -> MemoryState -> MemoryState
 insertBriefing runId rendered state = state {memoryBriefings = Map.insert runId rendered (memoryBriefings state)}
@@ -226,11 +226,11 @@ injectCandidates facts state input messages
   | otherwise =
       Map.lookup (AGUI.runId input) . memoryCandidates <$> readIORef state
         >>= maybe (pure messages) materialize
-  where
-    materialize hits = case renderCandidates hits of
-      ([], _) -> pure messages
-      (included, block) ->
-        factTouch facts included *> pure (slotAfterBriefing (ChatSystem block) messages)
+ where
+  materialize hits = case renderCandidates hits of
+    ([], _) -> pure messages
+    (included, block) ->
+      factTouch facts included *> pure (slotAfterBriefing (ChatSystem block) messages)
 
 slotAfterBriefing :: ChatMessage -> [ChatMessage] -> [ChatMessage]
 slotAfterBriefing slot messages = case messages of
@@ -239,13 +239,13 @@ slotAfterBriefing slot messages = case messages of
 
 renderCandidates :: [Fact] -> ([Fact], Text)
 renderCandidates hits = (included, render included)
-  where
-    included = foldl' pick [] hits
-    pick chosen fact =
-      bool chosen candidate (Text.length (render candidate) <= candidatesCap)
-      where
-        candidate = chosen <> [fact]
-    render facts = Text.intercalate "\n" (candidatesMarker : fmap candidateLine facts)
+ where
+  included = foldl' pick [] hits
+  pick chosen fact =
+    bool chosen candidate (Text.length (render candidate) <= candidatesCap)
+   where
+    candidate = chosen <> [fact]
+  render facts = Text.intercalate "\n" (candidatesMarker : fmap candidateLine facts)
 
 candidateLine :: Fact -> Text
 candidateLine fact = "- " <> factKindName (factKind fact) <> ": " <> factContent fact
@@ -262,9 +262,9 @@ clearRunState state input =
         memoryBriefings = Map.delete runId (memoryBriefings memory),
         memoryCandidates = Map.delete runId (memoryCandidates memory)
       }
-  where
-    runId = AGUI.runId input
-    clearBudget watcher = watcher {watcherSpent = Map.delete runId (watcherSpent watcher)}
+ where
+  runId = AGUI.runId input
+  clearBudget watcher = watcher {watcherSpent = Map.delete runId (watcherSpent watcher)}
 
 memoryTransientCounts :: IORef MemoryState -> IO (Int, Int, Int, Int)
 memoryTransientCounts state =
@@ -287,14 +287,14 @@ renderBriefing brief =
         <> fmap episodeLine recent
         <> maybe [] (pure . asOfLine) asOf
     )
-  where
-    summary = Text.take briefingSummaryCap (briefRollingSummary brief)
-    recent = reverse (take briefingEpisodeCount (reverse (briefEpisodes brief)))
-    asOf = listToMaybe (reverse (briefEpisodes brief))
-    episodeLine (Episode _ text time) =
-      "episode " <> iso8601 (posixSecondsToUTCTime (fromIntegral time)) <> ": " <> text
-    asOfLine (Episode _ _ time) =
-      "as of " <> iso8601 (posixSecondsToUTCTime (fromIntegral time))
+ where
+  summary = Text.take briefingSummaryCap (briefRollingSummary brief)
+  recent = reverse (take briefingEpisodeCount (reverse (briefEpisodes brief)))
+  asOf = listToMaybe (reverse (briefEpisodes brief))
+  episodeLine (Episode _ text time) =
+    "episode " <> iso8601 (posixSecondsToUTCTime (fromIntegral time)) <> ": " <> text
+  asOfLine (Episode _ _ time) =
+    "as of " <> iso8601 (posixSecondsToUTCTime (fromIntegral time))
 
 iso8601 :: UTCTime -> Text
 iso8601 = Text.pack . iso8601Show
@@ -302,24 +302,24 @@ iso8601 = Text.pack . iso8601Show
 complete :: Model -> [ChatMessage] -> IO Text
 complete model messages =
   newIORef "" >>= \text -> streamModel model (ModelRequest messages []) (gather text) *> readIORef text
-  where
-    gather text = \case
-      ModelTextDelta delta -> modifyIORef' text (<> delta)
-      _ -> pure ()
+ where
+  gather text = \case
+    ModelTextDelta delta -> modifyIORef' text (<> delta)
+    _ -> pure ()
 
 journaledModel :: Text -> Maybe Journal -> Model -> Model
 journaledModel runId journal model = maybe model wrap scoped
-  where
-    scoped = subJournal "memory" . subJournal runId <$> journal
-    wrap watched =
-      model
-        { streamModel = \request emit ->
-            record (ModelRequestEntry request)
-              *> streamModel model request (\event -> record (ModelEventEntry event) *> emit event)
-              >>= \reason -> reason <$ record (ModelFinishEntry reason)
-        }
-      where
-        record = recordMaybe (Just watched)
+ where
+  scoped = subJournal "memory" . subJournal runId <$> journal
+  wrap watched =
+    model
+      { streamModel = \request emit ->
+          record (ModelRequestEntry request)
+            *> streamModel model request (\event -> record (ModelEventEntry event) *> emit event)
+            >>= \reason -> reason <$ record (ModelFinishEntry reason)
+      }
+   where
+    record = recordMaybe (Just watched)
 
 watcherPrompt :: Text -> [ChatMessage] -> [ChatMessage]
 watcherPrompt previous delta =
@@ -369,21 +369,21 @@ instance FromJSON Invalidation where
 
 parseDecision :: Text -> Text -> WatcherDecision
 parseDecision raw previous = maybe unparsed structured decoded
-  where
-    decoded = decode (LazyByteString.fromStrict (TextEncoding.encodeUtf8 raw)) :: Maybe Value
-    structured value =
-      WatcherDecision
-        (fromMaybe previous (parseMaybe (withObject "decision" (.: "summary")) value))
-        (maybe [] (mapMaybe (parseMaybe parseJSON)) memoranda)
-        (fromMaybe Nothing (parseMaybe (withObject "decision" (.:? "retrieve")) value))
-        (maybe [] (mapMaybe (parseMaybe parseJSON)) invalidations)
-      where
-        memoranda = parseMaybe (withObject "decision" (.: "memorize")) value :: Maybe [Value]
-        invalidations = parseMaybe (withObject "decision" (.: "invalidate")) value :: Maybe [Value]
-    unparsed = WatcherDecision fallback [] Nothing []
-      where
-        stripped = Text.strip raw
-        fallback = bool previous raw (not (Text.null stripped) && not ("{" `Text.isPrefixOf` stripped))
+ where
+  decoded = decode (LazyByteString.fromStrict (TextEncoding.encodeUtf8 raw)) :: Maybe Value
+  structured value =
+    WatcherDecision
+      (fromMaybe previous (parseMaybe (withObject "decision" (.: "summary")) value))
+      (maybe [] (mapMaybe (parseMaybe parseJSON)) memoranda)
+      (fromMaybe Nothing (parseMaybe (withObject "decision" (.:? "retrieve")) value))
+      (maybe [] (mapMaybe (parseMaybe parseJSON)) invalidations)
+   where
+    memoranda = parseMaybe (withObject "decision" (.: "memorize")) value :: Maybe [Value]
+    invalidations = parseMaybe (withObject "decision" (.: "invalidate")) value :: Maybe [Value]
+  unparsed = WatcherDecision fallback [] Nothing []
+   where
+    stripped = Text.strip raw
+    fallback = bool previous raw (not (Text.null stripped) && not ("{" `Text.isPrefixOf` stripped))
 
 renderMessages :: [ChatMessage] -> Text
 renderMessages = Text.intercalate "\n" . fmap renderMessage
@@ -404,20 +404,20 @@ insulate = shield ()
 shield :: a -> IO a -> IO a
 shield fallback action =
   attempt action >>= either recover pure
-  where
-    attempt :: IO a -> IO (Either SomeException a)
-    attempt = try
-    recover exception =
-      maybe (pure fallback) throwIO (fromException exception :: Maybe SomeAsyncException)
+ where
+  attempt :: IO a -> IO (Either SomeException a)
+  attempt = try
+  recover exception =
+    maybe (pure fallback) throwIO (fromException exception :: Maybe SomeAsyncException)
 
 newThreadStore :: FilePath -> IO ThreadStore
 newThreadStore dir =
   createDirectoryIfMissing True (threadsPath dir)
     *> newMVar ()
     <&> \lock -> ThreadStore (save lock) (readBrief dir)
-  where
-    save lock threadId episode =
-      withMVar lock (const (persist dir threadId episode))
+ where
+  save lock threadId episode =
+    withMVar lock (const (persist dir threadId episode))
 
 persist :: FilePath -> Text -> Episode -> IO ()
 persist dir threadId episode =
@@ -433,10 +433,10 @@ newMemoryThreadStore :: IO ThreadStore
 newMemoryThreadStore =
   newIORef Map.empty
     <&> \threads -> ThreadStore (save threads) (brief threads)
-  where
-    save threads threadId episode =
-      modifyIORef' threads (Map.alter (Just . extendBrief episode . fromMaybe emptyBrief) threadId)
-    brief threads threadId = Map.lookup threadId <$> readIORef threads
+ where
+  save threads threadId episode =
+    modifyIORef' threads (Map.alter (Just . extendBrief episode . fromMaybe emptyBrief) threadId)
+  brief threads threadId = Map.lookup threadId <$> readIORef threads
 
 extendBrief :: Episode -> ThreadBrief -> ThreadBrief
 extendBrief episode current =
@@ -461,11 +461,11 @@ threadPath dir threadId = threadsPath dir ++ "/" ++ Text.unpack (sanitizeThreadI
 
 sanitizeThreadId :: Text -> Text
 sanitizeThreadId raw = bool cleaned "thread" (Text.null cleaned)
-  where
-    cleaned = Text.map safe raw
-    safe char
-      | Char.isAsciiLower char || Char.isAsciiUpper char || Char.isDigit char || char == '-' || char == '_' || char == '.' = char
-      | otherwise = '-'
+ where
+  cleaned = Text.map safe raw
+  safe char
+    | Char.isAsciiLower char || Char.isAsciiUpper char || Char.isDigit char || char == '-' || char == '_' || char == '.' = char
+    | otherwise = '-'
 
 readOnlyThreadStore :: ThreadStore -> ThreadStore
 readOnlyThreadStore store = store {threadSaveEpisode = \_ _ -> pure ()}

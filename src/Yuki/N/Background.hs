@@ -21,15 +21,15 @@ import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, readMVar, takeMVar,
 import Control.Exception (IOException, displayException, try)
 import Data.Bool (bool)
 import Data.Foldable (traverse_)
-import Data.Functor ((<&>), ($>))
+import Data.Functor (($>), (<&>))
 import Data.IORef
 import Data.List (sortOn)
 import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
+import Data.Map.Strict qualified as Map
 import Data.Maybe (isJust, isNothing, mapMaybe)
 import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Text.IO as TextIO
+import Data.Text qualified as Text
+import Data.Text.IO qualified as TextIO
 import Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 import System.Exit (ExitCode (..))
 import System.IO (Handle, hClose, hFlush)
@@ -99,15 +99,15 @@ spawnBackground registry threadId taskId root command =
                           )
                         *> (fmap fromIntegral <$> getPid process)
     setup -> cleanupProcess setup $> Nothing
-  where
-    sh =
-      (shell command)
-        { cwd = Just root,
-          std_in = CreatePipe,
-          std_out = CreatePipe,
-          std_err = CreatePipe,
-          create_group = True
-        }
+ where
+  sh =
+    (shell command)
+      { cwd = Just root,
+        std_in = CreatePipe,
+        std_out = CreatePipe,
+        std_err = CreatePipe,
+        create_group = True
+      }
 
 finish :: BackgroundRegistry -> MVar Int -> Int -> IO ()
 finish registry exit code = putMVar exit code *> pruneCompleted registry
@@ -118,68 +118,68 @@ exitCodeOf (ExitFailure code) = code
 
 pump :: Handle -> IORef Text -> IORef Bool -> IO ()
 pump handle buffer truncated = loop
-  where
-    loop =
-      TextIO.hGetChunk handle >>= \chunk ->
-        bool (append chunk *> loop) (pure ()) (Text.null chunk)
-    append chunk =
-      atomicModifyIORef' buffer (keep chunk)
-        >>= \dropped -> bool (pure ()) (writeIORef truncated True) dropped
-    keep chunk existing =
-      let merged = existing <> chunk
-       in (Text.takeEnd ringLimit merged, Text.length merged > ringLimit)
+ where
+  loop =
+    TextIO.hGetChunk handle >>= \chunk ->
+      bool (append chunk *> loop) (pure ()) (Text.null chunk)
+  append chunk =
+    atomicModifyIORef' buffer (keep chunk)
+      >>= \dropped -> bool (pure ()) (writeIORef truncated True) dropped
+  keep chunk existing =
+    let merged = existing <> chunk
+     in (Text.takeEnd ringLimit merged, Text.length merged > ringLimit)
 
 snapshotBackground :: BackgroundRegistry -> Text -> Text -> Maybe Int -> IO (Either Text BackgroundSnapshot)
 snapshotBackground registry threadId taskId waitSeconds =
   owned registry threadId taskId >>= \case
     Nothing -> pure (Left (unknown taskId))
     Just task -> Right <$> poll task
-  where
-    poll task =
-      await (backgroundExit task) >>= \code ->
-        BackgroundSnapshot (isNothing code) code
-          <$> readIORef (backgroundBuffer task)
-          <*> readIORef (backgroundTruncated task)
-    await exit = maybe (tryReadMVar exit) (\seconds -> timeout (seconds * 1000000) (readMVar exit)) waitSeconds
+ where
+  poll task =
+    await (backgroundExit task) >>= \code ->
+      BackgroundSnapshot (isNothing code) code
+        <$> readIORef (backgroundBuffer task)
+        <*> readIORef (backgroundTruncated task)
+  await exit = maybe (tryReadMVar exit) (\seconds -> timeout (seconds * 1000000) (readMVar exit)) waitSeconds
 
 feedBackground :: BackgroundRegistry -> Text -> Text -> Text -> Bool -> IO (Either Text Bool)
 feedBackground registry threadId taskId text eof =
   owned registry threadId taskId >>= \case
     Nothing -> pure (Left (unknown taskId))
     Just task -> feed task
-  where
-    feed task =
-      readIORef (backgroundStdin task) >>= \case
-        Nothing -> pure (Left ("stdin is closed for background task: " <> taskId))
-        Just handle ->
-          (try (TextIO.hPutStr handle text *> hFlush handle) :: IO (Either IOException ())) >>= \case
-            Left failure -> pure (Left (Text.pack (displayException failure)))
-            Right () -> close task eof
-    close task True =
-      atomicModifyIORef' (backgroundStdin task) (\current -> (Nothing, current)) >>= \case
-        Nothing -> pure (Right False)
-        Just open -> (try (hClose open) :: IO (Either IOException ())) $> Right False
-    close _ False = pure (Right True)
+ where
+  feed task =
+    readIORef (backgroundStdin task) >>= \case
+      Nothing -> pure (Left ("stdin is closed for background task: " <> taskId))
+      Just handle ->
+        (try (TextIO.hPutStr handle text *> hFlush handle) :: IO (Either IOException ())) >>= \case
+          Left failure -> pure (Left (Text.pack (displayException failure)))
+          Right () -> close task eof
+  close task True =
+    atomicModifyIORef' (backgroundStdin task) (\current -> (Nothing, current)) >>= \case
+      Nothing -> pure (Right False)
+      Just open -> (try (hClose open) :: IO (Either IOException ())) $> Right False
+  close _ False = pure (Right True)
 
 killBackground :: BackgroundRegistry -> Text -> Text -> IO (Either Text Bool)
 killBackground registry threadId taskId =
   atomicModifyIORef' (registryProcesses registry) takeOwned >>= \case
     Nothing -> pure (Left (unknown taskId))
     Just task -> stopTask task <&> Right
-  where
-    takeOwned procs =
-      case Map.lookup taskId procs of
-        Just task
-          | backgroundThreadId task == threadId -> (Map.delete taskId procs, Just task)
-        _ -> (procs, Nothing)
+ where
+  takeOwned procs =
+    case Map.lookup taskId procs of
+      Just task
+        | backgroundThreadId task == threadId -> (Map.delete taskId procs, Just task)
+      _ -> (procs, Nothing)
 
 shutdownBackgroundThread :: BackgroundRegistry -> Text -> IO ()
 shutdownBackgroundThread registry threadId =
   atomicModifyIORef' (registryProcesses registry) detach >>= traverse_ stopTask
-  where
-    detach processes =
-      let (ownedTasks, remaining) = Map.partition ((== threadId) . backgroundThreadId) processes
-       in (remaining, Map.elems ownedTasks)
+ where
+  detach processes =
+    let (ownedTasks, remaining) = Map.partition ((== threadId) . backgroundThreadId) processes
+     in (remaining, Map.elems ownedTasks)
 
 shutdownBackground :: BackgroundRegistry -> IO ()
 shutdownBackground registry =
@@ -191,15 +191,15 @@ stopTask task =
   closeInput task
     *> tryReadMVar (backgroundExit task)
     >>= maybe stop (const (pure True))
-  where
-    stop =
-      ignoringIO (interruptProcessGroupOf (backgroundProcess task))
-        *> timeout 5000000 (readMVar (backgroundExit task))
-        >>= maybe force (const (pure True))
-    force =
-      ignoringIO (terminateProcess (backgroundProcess task))
-        *> timeout 5000000 (readMVar (backgroundExit task))
-        <&> isJust
+ where
+  stop =
+    ignoringIO (interruptProcessGroupOf (backgroundProcess task))
+      *> timeout 5000000 (readMVar (backgroundExit task))
+      >>= maybe force (const (pure True))
+  force =
+    ignoringIO (terminateProcess (backgroundProcess task))
+      *> timeout 5000000 (readMVar (backgroundExit task))
+      <&> isJust
 
 closeInput :: BackgroundProc -> IO ()
 closeInput task =
@@ -225,8 +225,8 @@ pruneCompleted registry =
        in atomicModifyIORef'
             (registryProcesses registry)
             (\processes -> (Map.withoutKeys processes (Map.keysSet expired), ()))
-  where
-    completed pair@(_, task) = tryReadMVar (backgroundExit task) <&> bool Nothing (Just pair) . isJust
+ where
+  completed pair@(_, task) = tryReadMVar (backgroundExit task) <&> bool Nothing (Just pair) . isJust
 
 unknown :: Text -> Text
 unknown taskId = "unknown background task: " <> taskId

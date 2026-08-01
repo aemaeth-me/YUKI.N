@@ -26,7 +26,7 @@ import Data.Aeson
 import Data.Aeson.Types (Pair, Parser)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import qualified Data.Text as Text
+import Data.Text qualified as Text
 
 data RunAgentInput = RunAgentInput
   { runThreadId :: Text,
@@ -317,9 +317,9 @@ instance ToJSON InputContent where
     InputAudio source metadata -> sourced "audio" source metadata
     InputVideo source metadata -> sourced "video" source metadata
     InputDocument source metadata -> sourced "document" source metadata
-    where
-      sourced kind source metadata =
-        object $ ["type" .= (kind :: Text), "source" .= source] <> pair "metadata" metadata
+   where
+    sourced kind source metadata =
+      object $ ["type" .= (kind :: Text), "source" .= source] <> pair "metadata" metadata
 
 instance FromJSON InputSource where
   parseJSON = withObject "InputSource" $ \o ->
@@ -384,23 +384,23 @@ userText :: UserContent -> Either Text Text
 userText = \case
   UserText text -> Right text
   UserParts parts -> Text.intercalate "\n" <$> traverse textOf parts
-  where
-    textOf (InputText text) = Right text
-    textOf _ = Left "the configured model provider does not support multimodal input"
+ where
+  textOf (InputText text) = Right text
+  textOf _ = Left "the configured model provider does not support multimodal input"
 
-required :: FromJSON a => Object -> Key -> Key -> Parser a
+required :: (FromJSON a) => Object -> Key -> Key -> Parser a
 required fields camel snake = fields .: camel <|> fields .: snake
 
-firstPresent :: FromJSON a => Object -> [Key] -> Parser (Maybe a)
+firstPresent :: (FromJSON a) => Object -> [Key] -> Parser (Maybe a)
 firstPresent fields =
   foldr (\key rest -> fields .:? key >>= maybe rest (pure . Just)) (pure Nothing)
 
-optional :: FromJSON a => Object -> Key -> Key -> Parser (Maybe a)
+optional :: (FromJSON a) => Object -> Key -> Key -> Parser (Maybe a)
 optional fields camel snake = firstPresent fields [camel, snake]
 
-pair :: ToJSON a => Key -> Maybe a -> [Pair]
+pair :: (ToJSON a) => Key -> Maybe a -> [Pair]
 pair key = maybe [] (pure . (key .=))
 
-requireFunction :: MonadFail m => Text -> m ()
+requireFunction :: (MonadFail m) => Text -> m ()
 requireFunction "function" = pure ()
 requireFunction _ = fail "AG-UI supports only function tool calls"

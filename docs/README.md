@@ -10,6 +10,7 @@
 | **[cognition-design.md](cognition-design.md)** | 认知体系设计（权威） | 记忆子系统是认知的一部分；睡眠/上下文编译/运行次序/Invocation/不变式 |
 | **[incarnation-design.md](incarnation-design.md)** | 分身、记忆与 Prompt 治理（概念权威蓝图） | 领域级概念构思；Memory 只是分身治理的一部分 |
 | **[memory/](memory/)** | 记忆子系统设计（源码提炼） | 印象 / 工作记忆 / 长期记忆 / 生命周期 / 演进方向 |
+| **[haskell-architecture.md](haskell-architecture.md)** | Haskell 分层、Domain 纯度与 effect 边界 | 源码依赖和迁移实施基线 |
 | **[research/](research/)** | Agent Memory 领域调查资料库（2026-08 综述） | 演进依据；262 份第一手原始资料 + 7 份精读笔记 |
 | [frontend-redesign.md](frontend-redesign.md) | 前端重设计（YUKI 本位） | 界面基线 |
 | [frontend-product-model.md](frontend-product-model.md) | 前端产品模型（design/v1） | 实现基线 |

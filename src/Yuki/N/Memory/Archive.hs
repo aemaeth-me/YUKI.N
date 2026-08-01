@@ -19,26 +19,26 @@ module Yuki.N.Memory.Archive
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Concurrent.MVar
 import Control.Exception (IOException, displayException, try)
-import Control.Applicative ((<|>))
 import Control.Monad ((>=>))
 import Data.Aeson
 import Data.Bool (bool)
-import qualified Data.ByteString.Lazy as LazyByteString
+import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Char (isAlphaNum)
 import Data.Foldable (traverse_)
 import Data.Functor (($>), (<&>))
 import Data.List (findIndex, sortOn)
-import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
 import Data.Maybe (listToMaybe, mapMaybe)
 import Data.Ord (Down (..))
-import qualified Data.Set as Set
 import Data.Set (Set)
+import Data.Set qualified as Set
 import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Text.Encoding as TextEncoding
+import Data.Text qualified as Text
+import Data.Text.Encoding qualified as TextEncoding
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
@@ -530,9 +530,9 @@ newTaskArchiveStore dir blobs =
     >>= either
       (pure . Left)
       (const (loadState index >>= traverse (newMVar >=> pure . makeStore (persistState index) blobs)))
-  where
-    path = dir </> "task-archive"
-    index = path </> "index.json"
+ where
+  path = dir </> "task-archive"
+  index = path </> "index.json"
 
 newMemoryTaskArchiveStore :: BlobStore -> IO TaskArchiveStore
 newMemoryTaskArchiveStore blobs =
@@ -610,12 +610,12 @@ stateFromStored stored
         *> traverse_ (validateRun entryMap) runs
         *> validateSequences entries
         $> ArchiveState runMap entryMap heads (Set.fromList (storedArchiveLegacyImports stored))
-  where
-    runs = storedArchiveRuns stored
-    entries = storedArchiveEntries stored
-    runMap = Map.fromList [(archiveRunId run, run) | run <- runs]
-    entryMap = Map.fromList [(archiveEntryId entry, entry) | entry <- entries]
-    heads = Map.fromListWith max [(entryScope entry, archiveEntrySeq entry) | entry <- entries]
+ where
+  runs = storedArchiveRuns stored
+  entries = storedArchiveEntries stored
+  runMap = Map.fromList [(archiveRunId run, run) | run <- runs]
+  entryMap = Map.fromList [(archiveEntryId entry, entry) | entry <- entries]
+  heads = Map.fromListWith max [(entryScope entry, archiveEntrySeq entry) | entry <- entries]
 
 validateEntry :: ArchiveEntry -> Either Text ()
 validateEntry entry =
@@ -644,19 +644,19 @@ validateRun entries run =
       uniqueText "task archive run entry" (archiveRunEntryIds run),
       traverse_ known (archiveRunEntryIds run)
     ]
-  where
-    known identifier =
-      maybe
-        (Left ("task archive run references unknown entry: " <> identifier))
-        ( \entry ->
-            require
-              ( entryScope entry
-                  == scopeKey (archiveRunIncarnationId run) (archiveRunTaskId run)
-                  && archiveEntryRunId entry == archiveRunSourceRunId run
-              )
-              ("task archive run/entry scope mismatch: " <> identifier)
-        )
-        (Map.lookup identifier entries)
+ where
+  known identifier =
+    maybe
+      (Left ("task archive run references unknown entry: " <> identifier))
+      ( \entry ->
+          require
+            ( entryScope entry
+                == scopeKey (archiveRunIncarnationId run) (archiveRunTaskId run)
+                && archiveEntryRunId entry == archiveRunSourceRunId run
+            )
+            ("task archive run/entry scope mismatch: " <> identifier)
+      )
+      (Map.lookup identifier entries)
 
 validateSequences :: [ArchiveEntry] -> Either Text ()
 validateSequences =
@@ -664,11 +664,11 @@ validateSequences =
     . Map.toList
     . Map.fromListWith (<>)
     . fmap (\entry -> (entryScope entry, [archiveEntrySeq entry]))
-  where
-    contiguous (scope, seqs) =
-      require
-        (sortOn id seqs == [1 .. length seqs])
-        ("non-contiguous task archive sequence: " <> scope)
+ where
+  contiguous (scope, seqs) =
+    require
+      (sortOn id seqs == [1 .. length seqs])
+      ("non-contiguous task archive sequence: " <> scope)
 
 appendRun ::
   (ArchiveState -> IO (Either Text ())) ->
@@ -695,23 +695,22 @@ importLegacy persist blobs lock incarnation task entries =
   readMVar lock >>= \state ->
     if Set.member marker (stateLegacyImports state)
       then pure (Right Nothing)
-      else
-        case entries of
-          [] -> markImported persist lock marker <&> fmap (const Nothing)
-          _ ->
-            appendRun persist blobs lock (Just marker) draft
-              <&> fmap Just
-  where
-    marker = legacyMarker incarnation task
-    draft =
-      ArchiveRunDraft
-        incarnation
-        task
-        ("legacy-import-" <> Text.take 24 (digest [incarnation, task]))
-        Nothing
-        "legacy"
-        Nothing
-        entries
+      else case entries of
+        [] -> markImported persist lock marker <&> fmap (const Nothing)
+        _ ->
+          appendRun persist blobs lock (Just marker) draft
+            <&> fmap Just
+ where
+  marker = legacyMarker incarnation task
+  draft =
+    ArchiveRunDraft
+      incarnation
+      task
+      ("legacy-import-" <> Text.take 24 (digest [incarnation, task]))
+      Nothing
+      "legacy"
+      Nothing
+      entries
 
 markImported :: (ArchiveState -> IO (Either Text ())) -> MVar ArchiveState -> Text -> IO (Either Text ())
 markImported persist lock marker =
@@ -740,58 +739,58 @@ cleanRunDraft draft =
         archiveRunDraftStatus = status,
         archiveRunDraftEntries = entries
       }
-  where
-    incarnation = Text.strip (archiveRunDraftIncarnationId draft)
-    task = Text.strip (archiveRunDraftTaskId draft)
-    run = Text.strip (archiveRunDraftRunId draft)
-    status = Text.strip (archiveRunDraftStatus draft)
-    entries = archiveRunDraftEntries draft
-    validateDraft entry =
-      nonEmpty "archive entry source id" (archiveEntryDraftSourceId entry)
-        *> require
-          (not (Text.null (Text.strip (archiveEntryDraftContent entry))))
-          ("archive entry content must not be empty: " <> archiveEntryDraftSourceId entry)
+ where
+  incarnation = Text.strip (archiveRunDraftIncarnationId draft)
+  task = Text.strip (archiveRunDraftTaskId draft)
+  run = Text.strip (archiveRunDraftRunId draft)
+  status = Text.strip (archiveRunDraftStatus draft)
+  entries = archiveRunDraftEntries draft
+  validateDraft entry =
+    nonEmpty "archive entry source id" (archiveEntryDraftSourceId entry)
+      *> require
+        (not (Text.null (Text.strip (archiveEntryDraftContent entry))))
+        ("archive entry content must not be empty: " <> archiveEntryDraftSourceId entry)
 
 prepareEntries :: BlobStore -> ArchiveRunDraft -> IO (Either Text [PreparedEntry])
 prepareEntries blobs run =
   traverse prepare (archiveRunDraftEntries run) <&> sequence
-  where
-    prepare entry =
-      let content = archiveEntryDraftContent entry
-          bytes = TextEncoding.encodeUtf8 content
-          contentHash = sha256 bytes
-          identifier =
-            "task-entry-"
-              <> Text.take
-                40
-                ( digest
-                    [ archiveRunDraftIncarnationId run,
-                      archiveRunDraftTaskId run,
-                      archiveRunDraftRunId run,
-                      archiveEntryDraftSourceId entry,
-                      archiveKindName (archiveEntryDraftKind entry),
+ where
+  prepare entry =
+    let content = archiveEntryDraftContent entry
+        bytes = TextEncoding.encodeUtf8 content
+        contentHash = sha256 bytes
+        identifier =
+          "task-entry-"
+            <> Text.take
+              40
+              ( digest
+                  [ archiveRunDraftIncarnationId run,
+                    archiveRunDraftTaskId run,
+                    archiveRunDraftRunId run,
+                    archiveEntryDraftSourceId entry,
+                    archiveKindName (archiveEntryDraftKind entry),
+                    contentHash
+                  ]
+              )
+     in blobPut blobs "text/plain; charset=utf-8" (LazyByteString.fromStrict bytes) >>= \meta ->
+          blobAttach
+            blobs
+            identifier
+            (blobId meta)
+            (archiveRunDraftIncarnationId run)
+            "task-archive"
+            (archiveRunDraftTaskId run <> "/" <> archiveRunDraftRunId run <> "/" <> archiveEntryDraftSourceId entry)
+            <&> fmap
+              ( const
+                  ( PreparedEntry
+                      identifier
+                      (blobId meta)
                       contentHash
-                    ]
-                )
-       in blobPut blobs "text/plain; charset=utf-8" (LazyByteString.fromStrict bytes) >>= \meta ->
-            blobAttach
-              blobs
-              identifier
-              (blobId meta)
-              (archiveRunDraftIncarnationId run)
-              "task-archive"
-              (archiveRunDraftTaskId run <> "/" <> archiveRunDraftRunId run <> "/" <> archiveEntryDraftSourceId entry)
-              <&> fmap
-                ( const
-                    ( PreparedEntry
-                        identifier
-                        (blobId meta)
-                        contentHash
-                        (Text.length content)
-                        (preview content)
-                        entry
-                    )
-                )
+                      (Text.length content)
+                      (preview content)
+                      entry
+                  )
+              )
 
 commitPrepared ::
   (ArchiveState -> IO (Either Text ())) ->
@@ -812,121 +811,119 @@ commitPrepared persist lock legacy draft prepared =
                 (const (updated, Right run))
         )
         (transition (round now) state)
-  where
-    identifier = runIdFor draft
-    transition stamp snapshot =
-      case Map.lookup identifier (stateRuns snapshot) of
-        Just current -> merge stamp snapshot current
-        Nothing
-          | null prepared -> Left "archive run must contain at least one entry"
-          | otherwise ->
-              let start = Map.findWithDefault 0 scope (stateHeads snapshot)
-                  entries = zipWith (materialize stamp start 0) [1 ..] prepared
-                  run =
-                    ArchiveRun
-                      identifier
-                      (archiveRunDraftIncarnationId draft)
-                      (archiveRunDraftTaskId draft)
-                      (archiveRunDraftRunId draft)
-                      (archiveRunDraftIntentId draft)
-                      (archiveRunDraftStatus draft)
-                      (archiveRunDraftFailure draft)
-                      (fmap archiveEntryId entries)
-                      stamp
-                  updated =
-                    mark
-                      snapshot
-                        { stateRuns = Map.insert identifier run (stateRuns snapshot),
-                          stateEntries = foldr (\entry -> Map.insert (archiveEntryId entry) entry) (stateEntries snapshot) entries,
-                          stateHeads = Map.insert scope (start + length entries) (stateHeads snapshot)
-                        }
-               in Right (updated, run)
-      where
-        mark state' =
-          maybe state' (\marker -> state' {stateLegacyImports = Set.insert marker (stateLegacyImports state')}) legacy
-        merge stamp' snapshot' current =
-          validateIdentity current
-            *> validateTransition current
-            *> traverse_ (validatePrepared current snapshot') prepared
-            *> let currentEntries = mapMaybe (\entryId -> Map.lookup entryId (stateEntries snapshot')) (archiveRunEntryIds current)
-                   known = Set.fromList (fmap entryDraftKey currentEntries)
-                   novel = filter ((`Set.notMember` known) . preparedKey) prepared
-                   taskStart = Map.findWithDefault 0 scope (stateHeads snapshot')
-                   runStart = length (archiveRunEntryIds current)
-                   entries = zipWith (materialize stamp' taskStart runStart) [1 ..] novel
-                   revised =
-                     current
-                       { archiveRunStatus = archiveRunDraftStatus draft,
-                         archiveRunFailure = archiveRunDraftFailure draft,
-                         archiveRunEntryIds = archiveRunEntryIds current <> fmap archiveEntryId entries
-                       }
-                   updated =
-                     mark
-                       snapshot'
-                         { stateRuns = Map.insert identifier revised (stateRuns snapshot'),
-                           stateEntries = foldr (\entry -> Map.insert (archiveEntryId entry) entry) (stateEntries snapshot') entries,
-                           stateHeads = Map.insert scope (taskStart + length entries) (stateHeads snapshot')
-                         }
-                in Right (updated, revised)
-        validateIdentity current =
+ where
+  identifier = runIdFor draft
+  transition stamp snapshot =
+    case Map.lookup identifier (stateRuns snapshot) of
+      Just current -> merge stamp snapshot current
+      Nothing
+        | null prepared -> Left "archive run must contain at least one entry"
+        | otherwise ->
+            let start = Map.findWithDefault 0 scope (stateHeads snapshot)
+                entries = zipWith (materialize stamp start 0) [1 ..] prepared
+                run =
+                  ArchiveRun
+                    identifier
+                    (archiveRunDraftIncarnationId draft)
+                    (archiveRunDraftTaskId draft)
+                    (archiveRunDraftRunId draft)
+                    (archiveRunDraftIntentId draft)
+                    (archiveRunDraftStatus draft)
+                    (archiveRunDraftFailure draft)
+                    (fmap archiveEntryId entries)
+                    stamp
+                updated =
+                  mark
+                    snapshot
+                      { stateRuns = Map.insert identifier run (stateRuns snapshot),
+                        stateEntries = foldr (\entry -> Map.insert (archiveEntryId entry) entry) (stateEntries snapshot) entries,
+                        stateHeads = Map.insert scope (start + length entries) (stateHeads snapshot)
+                      }
+             in Right (updated, run)
+   where
+    mark state' =
+      maybe state' (\marker -> state' {stateLegacyImports = Set.insert marker (stateLegacyImports state')}) legacy
+    merge stamp' snapshot' current =
+      validateIdentity current
+        *> validateTransition current
+        *> traverse_ (validatePrepared current snapshot') prepared
+        *> let currentEntries = mapMaybe (\entryId -> Map.lookup entryId (stateEntries snapshot')) (archiveRunEntryIds current)
+               known = Set.fromList (fmap entryDraftKey currentEntries)
+               novel = filter ((`Set.notMember` known) . preparedKey) prepared
+               taskStart = Map.findWithDefault 0 scope (stateHeads snapshot')
+               runStart = length (archiveRunEntryIds current)
+               entries = zipWith (materialize stamp' taskStart runStart) [1 ..] novel
+               revised =
+                 current
+                   { archiveRunStatus = archiveRunDraftStatus draft,
+                     archiveRunFailure = archiveRunDraftFailure draft,
+                     archiveRunEntryIds = archiveRunEntryIds current <> fmap archiveEntryId entries
+                   }
+               updated =
+                 mark
+                   snapshot'
+                     { stateRuns = Map.insert identifier revised (stateRuns snapshot'),
+                       stateEntries = foldr (\entry -> Map.insert (archiveEntryId entry) entry) (stateEntries snapshot') entries,
+                       stateHeads = Map.insert scope (taskStart + length entries) (stateHeads snapshot')
+                     }
+            in Right (updated, revised)
+    validateIdentity current =
+      require
+        ( archiveRunIncarnationId current == archiveRunDraftIncarnationId draft
+            && archiveRunTaskId current == archiveRunDraftTaskId draft
+            && archiveRunSourceRunId current == archiveRunDraftRunId draft
+            && compatibleIntent (archiveRunIntentId current) (archiveRunDraftIntentId draft)
+        )
+        ("task archive run conflict: " <> archiveRunDraftRunId draft)
+    validateTransition current =
+      require
+        ( archiveRunStatus current == "running"
+            || ( archiveRunStatus current == archiveRunDraftStatus draft
+                   && archiveRunFailure current == archiveRunDraftFailure draft
+               )
+        )
+        ("task archive run is already sealed: " <> archiveRunDraftRunId draft)
+    validatePrepared current snapshot' preparedEntry =
+      case filter
+        ((== preparedKey preparedEntry) . entryDraftKey)
+        (mapMaybe (\entryId -> Map.lookup entryId (stateEntries snapshot')) (archiveRunEntryIds current)) of
+        [] -> Right ()
+        existing : _ ->
           require
-            ( archiveRunIncarnationId current == archiveRunDraftIncarnationId draft
-                && archiveRunTaskId current == archiveRunDraftTaskId draft
-                && archiveRunSourceRunId current == archiveRunDraftRunId draft
-                && compatibleIntent (archiveRunIntentId current) (archiveRunDraftIntentId draft)
-            )
-            ("task archive run conflict: " <> archiveRunDraftRunId draft)
-        validateTransition current =
-          require
-            ( archiveRunStatus current == "running"
-                || ( archiveRunStatus current == archiveRunDraftStatus draft
-                       && archiveRunFailure current == archiveRunDraftFailure draft
+            ( archiveEntryContentHash existing == preparedContentHash preparedEntry
+                || ( archiveEntryKind existing == ArchiveToolResult
+                       && archiveEntryContentChars existing >= preparedContentChars preparedEntry
                    )
             )
-            ("task archive run is already sealed: " <> archiveRunDraftRunId draft)
-        validatePrepared current snapshot' preparedEntry =
-          case
-              filter
-                ((== preparedKey preparedEntry) . entryDraftKey)
-                (mapMaybe (\entryId -> Map.lookup entryId (stateEntries snapshot')) (archiveRunEntryIds current))
-            of
-            [] -> Right ()
-            existing : _ ->
-              require
-                ( archiveEntryContentHash existing == preparedContentHash preparedEntry
-                    || ( archiveEntryKind existing == ArchiveToolResult
-                           && archiveEntryContentChars existing >= preparedContentChars preparedEntry
-                       )
-                )
-                ("task archive source changed content: " <> archiveEntryDraftSourceId (preparedDraft preparedEntry))
-        compatibleIntent Nothing _ = True
-        compatibleIntent _ Nothing = True
-        compatibleIntent left right = left == right
-    scope = draftScope draft
-    materialize now taskStart runStart localSeq preparedEntry =
-      let entry = preparedDraft preparedEntry
-       in ArchiveEntry
-            (preparedId preparedEntry)
-            (archiveRunDraftIncarnationId draft)
-            (archiveRunDraftTaskId draft)
-            (archiveRunDraftRunId draft)
-            (taskStart + localSeq)
-            (runStart + localSeq)
-            (archiveEntryDraftSourceId entry)
-            (archiveEntryDraftKind entry)
-            (preparedContentRef preparedEntry)
-            (preparedContentHash preparedEntry)
-            (preparedContentChars preparedEntry)
-            (preparedPreview preparedEntry)
-            (archiveEntryDraftParentId entry)
-            (archiveEntryDraftCallId entry)
-            (archiveEntryDraftToolName entry)
-            now
-    preparedKey preparedEntry =
-      (archiveEntryDraftSourceId entry, archiveEntryDraftKind entry)
-      where
-        entry = preparedDraft preparedEntry
-    entryDraftKey entry = (archiveEntrySourceId entry, archiveEntryKind entry)
+            ("task archive source changed content: " <> archiveEntryDraftSourceId (preparedDraft preparedEntry))
+    compatibleIntent Nothing _ = True
+    compatibleIntent _ Nothing = True
+    compatibleIntent left right = left == right
+  scope = draftScope draft
+  materialize now taskStart runStart localSeq preparedEntry =
+    let entry = preparedDraft preparedEntry
+     in ArchiveEntry
+          (preparedId preparedEntry)
+          (archiveRunDraftIncarnationId draft)
+          (archiveRunDraftTaskId draft)
+          (archiveRunDraftRunId draft)
+          (taskStart + localSeq)
+          (runStart + localSeq)
+          (archiveEntryDraftSourceId entry)
+          (archiveEntryDraftKind entry)
+          (preparedContentRef preparedEntry)
+          (preparedContentHash preparedEntry)
+          (preparedContentChars preparedEntry)
+          (preparedPreview preparedEntry)
+          (archiveEntryDraftParentId entry)
+          (archiveEntryDraftCallId entry)
+          (archiveEntryDraftToolName entry)
+          now
+  preparedKey preparedEntry =
+    (archiveEntryDraftSourceId entry, archiveEntryDraftKind entry)
+   where
+    entry = preparedDraft preparedEntry
+  entryDraftKey entry = (archiveEntrySourceId entry, archiveEntryKind entry)
 
 catalogTasks :: MVar ArchiveState -> Text -> Int -> IO [ArchiveTaskSummary]
 catalogTasks lock rawIncarnation requested
@@ -942,24 +939,24 @@ catalogTasks lock rawIncarnation requested
           . filter ((== incarnation) . archiveEntryIncarnationId)
           . Map.elems
           . stateEntries
-  where
-    incarnation = Text.strip rawIncarnation
-    summary (task, entries) =
-      case sortOn archiveEntrySeq entries of
-        [] -> Nothing
-        first : rest ->
-          let last' = foldl (\_ entry -> entry) first rest
-              ordered = first : rest
-           in Just
-                ( ArchiveTaskSummary
-                    incarnation
-                    task
-                    (Set.size (Set.fromList (fmap archiveEntryRunId ordered)))
-                    (length ordered)
-                    (archiveEntryCreated first)
-                    (archiveEntryCreated last')
-                    (archiveEntryPreview last')
-                )
+ where
+  incarnation = Text.strip rawIncarnation
+  summary (task, entries) =
+    case sortOn archiveEntrySeq entries of
+      [] -> Nothing
+      first : rest ->
+        let last' = foldl (\_ entry -> entry) first rest
+            ordered = first : rest
+         in Just
+              ( ArchiveTaskSummary
+                  incarnation
+                  task
+                  (Set.size (Set.fromList (fmap archiveEntryRunId ordered)))
+                  (length ordered)
+                  (archiveEntryCreated first)
+                  (archiveEntryCreated last')
+                  (archiveEntryPreview last')
+              )
 
 recentEntries :: MVar ArchiveState -> Text -> Int -> IO [ArchiveEntryCatalog]
 recentEntries lock rawIncarnation requested
@@ -972,8 +969,8 @@ recentEntries lock rawIncarnation requested
           . filter ((== incarnation) . archiveEntryIncarnationId)
           . Map.elems
           . stateEntries
-  where
-    incarnation = Text.strip rawIncarnation
+ where
+  incarnation = Text.strip rawIncarnation
 
 catalogEntry :: ArchiveEntry -> ArchiveEntryCatalog
 catalogEntry entry =
@@ -998,28 +995,28 @@ grepArchive blobs lock request =
                 . Map.elems
                 $ stateEntries state
          in scanEntries blobs state clean candidates <&> fmap (result clean candidates)
-  where
-    result clean candidates hits =
-      let offset = archiveGrepOffset clean
-          limit = archiveGrepLimit clean
-          selected = take limit (drop offset hits)
-          next = offset + length selected
-          more = next < length hits
-       in ArchiveGrepResult
-            (archiveGrepQuery clean)
-            "fixed"
-            (archiveGrepCaseSensitive clean)
-            (Set.size (Set.fromList (fmap archiveEntryTaskId candidates)))
-            (length candidates)
-            (Set.size (Set.fromList (fmap archiveHitEntryId hits)))
-            (length hits)
-            (length selected)
-            offset
-            limit
-            (bool Nothing (Just next) more)
-            more
-            more
-            selected
+ where
+  result clean candidates hits =
+    let offset = archiveGrepOffset clean
+        limit = archiveGrepLimit clean
+        selected = take limit (drop offset hits)
+        next = offset + length selected
+        more = next < length hits
+     in ArchiveGrepResult
+          (archiveGrepQuery clean)
+          "fixed"
+          (archiveGrepCaseSensitive clean)
+          (Set.size (Set.fromList (fmap archiveEntryTaskId candidates)))
+          (length candidates)
+          (Set.size (Set.fromList (fmap archiveHitEntryId hits)))
+          (length hits)
+          (length selected)
+          offset
+          limit
+          (bool Nothing (Just next) more)
+          more
+          more
+          selected
 
 cleanGrep :: ArchiveGrepRequest -> Either Text ArchiveGrepRequest
 cleanGrep request =
@@ -1038,9 +1035,9 @@ cleanGrep request =
         archiveGrepExcludeTaskId = nonBlank =<< archiveGrepExcludeTaskId request,
         archiveGrepKinds = Set.toList (Set.fromList (archiveGrepKinds request))
       }
-  where
-    incarnation = Text.strip (archiveGrepIncarnationId request)
-    query = Text.strip (archiveGrepQuery request)
+ where
+  incarnation = Text.strip (archiveGrepIncarnationId request)
+  query = Text.strip (archiveGrepQuery request)
 
 grepEntry :: ArchiveState -> ArchiveGrepRequest -> ArchiveEntry -> Bool
 grepEntry state request entry =
@@ -1049,8 +1046,8 @@ grepEntry state request entry =
     && maybe True (/= archiveEntryTaskId entry) (archiveGrepExcludeTaskId request)
     && archiveEntryKind entry `elem` kinds
     && (archiveGrepIncludeProcess request || not (processEntry state entry))
-  where
-    kinds = bool (archiveGrepKinds request) defaultSearchKinds (null (archiveGrepKinds request))
+ where
+  kinds = bool (archiveGrepKinds request) defaultSearchKinds (null (archiveGrepKinds request))
 
 defaultSearchKinds :: [ArchiveKind]
 defaultSearchKinds = [ArchiveUser, ArchiveAssistant, ArchiveToolCall, ArchiveToolResult]
@@ -1090,15 +1087,15 @@ looksMemoryProcess content =
 resolvedToolName :: ArchiveState -> ArchiveEntry -> Maybe Text
 resolvedToolName state entry =
   archiveEntryToolName entry <|> (archiveEntryCallId entry >>= lookupCall)
-  where
-    lookupCall call =
-      listToMaybe
-        [ name
-          | candidate <- Map.elems (stateEntries state),
-            archiveEntryKind candidate == ArchiveToolCall,
-            archiveEntryCallId candidate == Just call,
-            name <- maybe [] pure (archiveEntryToolName candidate)
-        ]
+ where
+  lookupCall call =
+    listToMaybe
+      [ name
+      | candidate <- Map.elems (stateEntries state),
+        archiveEntryKind candidate == ArchiveToolCall,
+        archiveEntryCallId candidate == Just call,
+        name <- maybe [] pure (archiveEntryToolName candidate)
+      ]
 
 sourceCompleteness :: ArchiveState -> ArchiveEntry -> Text -> Text
 sourceCompleteness state entry content
@@ -1110,82 +1107,82 @@ sourceCompleteness state entry content
 
 artifactIds :: Text -> [Text]
 artifactIds = Set.toAscList . Set.fromList . go
-  where
-    go text =
-      case Text.breakOn "art-" text of
-        (_, suffix)
-          | Text.null suffix -> []
-          | otherwise ->
-              let identifier = Text.takeWhile (\char -> isAlphaNum char || char == '-') suffix
-                  rest = Text.drop (max 1 (Text.length identifier)) suffix
-               in bool (go rest) (identifier : go rest) (Text.length identifier > 4)
+ where
+  go text =
+    case Text.breakOn "art-" text of
+      (_, suffix)
+        | Text.null suffix -> []
+        | otherwise ->
+            let identifier = Text.takeWhile (\char -> isAlphaNum char || char == '-') suffix
+                rest = Text.drop (max 1 (Text.length identifier)) suffix
+             in bool (go rest) (identifier : go rest) (Text.length identifier > 4)
 
 scanEntries :: BlobStore -> ArchiveState -> ArchiveGrepRequest -> [ArchiveEntry] -> IO (Either Text [ArchiveHit])
 scanEntries blobs state request = go []
-  where
-    go hits [] = pure (Right hits)
-    go hits (entry : rest) =
-      fetchContent blobs entry >>= \case
-        Left failure -> pure (Left failure)
-        Right content ->
-          let found = lineHits state request entry content
-           in go (hits <> found) rest
+ where
+  go hits [] = pure (Right hits)
+  go hits (entry : rest) =
+    fetchContent blobs entry >>= \case
+      Left failure -> pure (Left failure)
+      Right content ->
+        let found = lineHits state request entry content
+         in go (hits <> found) rest
 
 lineHits :: ArchiveState -> ArchiveGrepRequest -> ArchiveEntry -> Text -> [ArchiveHit]
 lineHits state request entry content =
   zipWith build [1 ..] matches
-  where
-    matches = indexedLines content >>= lineMatches
-    count = length matches
-    needle = normalized (archiveGrepQuery request)
-    normalized = bool Text.toCaseFold id (archiveGrepCaseSensitive request)
-    lineMatches (lineNumber, offset, line) =
-      fmap (\column -> (lineNumber, offset, line, column)) (occurrenceColumns needle (normalized line))
-    build index (lineNumber, offset, line, column) =
-      ArchiveHit
-        (archiveEntryId entry)
-        (archiveEntryTaskId entry)
-        (archiveEntryRunId entry)
-        (archiveEntrySeq entry)
-        (archiveEntryKind entry)
-        (archiveEntrySourceId entry)
-        (resolvedToolName state entry)
-        (archiveEntryCallId entry)
-        (evidenceClass state entry)
-        (sourceCompleteness state entry content)
-        (artifactIds content)
-        lineNumber
-        (offset + column)
-        index
-        count
-        (excerptAt column line)
-        (archiveEntryCreated entry)
+ where
+  matches = indexedLines content >>= lineMatches
+  count = length matches
+  needle = normalized (archiveGrepQuery request)
+  normalized = bool Text.toCaseFold id (archiveGrepCaseSensitive request)
+  lineMatches (lineNumber, offset, line) =
+    fmap (\column -> (lineNumber, offset, line, column)) (occurrenceColumns needle (normalized line))
+  build index (lineNumber, offset, line, column) =
+    ArchiveHit
+      (archiveEntryId entry)
+      (archiveEntryTaskId entry)
+      (archiveEntryRunId entry)
+      (archiveEntrySeq entry)
+      (archiveEntryKind entry)
+      (archiveEntrySourceId entry)
+      (resolvedToolName state entry)
+      (archiveEntryCallId entry)
+      (evidenceClass state entry)
+      (sourceCompleteness state entry content)
+      (artifactIds content)
+      lineNumber
+      (offset + column)
+      index
+      count
+      (excerptAt column line)
+      (archiveEntryCreated entry)
 
 occurrenceColumns :: Text -> Text -> [Int]
 occurrenceColumns needle = go 0
-  where
-    width = Text.length needle
-    go offset text =
-      let (before, after) = Text.breakOn needle text
-       in if Text.null after
-            then []
-            else
-              let column = offset + Text.length before
-               in column : go (column + width) (Text.drop width after)
+ where
+  width = Text.length needle
+  go offset text =
+    let (before, after) = Text.breakOn needle text
+     in if Text.null after
+          then []
+          else
+            let column = offset + Text.length before
+             in column : go (column + width) (Text.drop width after)
 
 indexedLines :: Text -> [(Int, Int, Text)]
 indexedLines = snd . foldl' next (0, []) . zip [1 ..] . Text.splitOn "\n"
-  where
-    next (offset, rows) (lineNumber, line) =
-      (offset + Text.length line + 1, rows <> [(lineNumber, offset, line)])
+ where
+  next (offset, rows) (lineNumber, line) =
+    (offset + Text.length line + 1, rows <> [(lineNumber, offset, line)])
 
 excerptAt :: Int -> Text -> Text
 excerptAt column line =
   prefix <> Text.take excerptChars (Text.drop start line) <> suffix
-  where
-    start = max 0 (column - excerptLead)
-    prefix = bool "" "…" (start > 0)
-    suffix = bool "" "…" (start + excerptChars < Text.length line)
+ where
+  start = max 0 (column - excerptLead)
+  prefix = bool "" "…" (start > 0)
+  suffix = bool "" "…" (start + excerptChars < Text.length line)
 
 excerptLead, excerptChars :: Int
 excerptLead = 100
@@ -1227,9 +1224,9 @@ cleanRead request =
       { archiveReadIncarnationId = incarnation,
         archiveReadEntryId = identifier
       }
-  where
-    incarnation = Text.strip (archiveReadIncarnationId request)
-    identifier = Text.strip (archiveReadEntryId request)
+ where
+  incarnation = Text.strip (archiveReadIncarnationId request)
+  identifier = Text.strip (archiveReadEntryId request)
 
 renderWindow ::
   BlobStore ->
@@ -1249,39 +1246,39 @@ renderWindow blobs state request anchor entries index =
             )
             . sequence
         )
-  where
-    start = max 0 (index - archiveReadBefore request)
-    end = min (length entries) (index + archiveReadAfter request + 1)
-    selected = closeEntryGroups entries (take (end - start) (drop start entries))
-    load entry = fetchContent blobs entry <&> fmap (entry,)
-    renderLoaded loaded =
-      zipWith
-        ( \(entry, content) budget ->
-            sliceEntry
-              state
-              budget
-              (bool 0 (archiveReadOffset request) (archiveEntryId entry == archiveEntryId anchor))
-              entry
-              content
-        )
-        loaded
-        (readBudgets (archiveReadChars request) (archiveEntryId anchor) (fmap fst loaded))
+ where
+  start = max 0 (index - archiveReadBefore request)
+  end = min (length entries) (index + archiveReadAfter request + 1)
+  selected = closeEntryGroups entries (take (end - start) (drop start entries))
+  load entry = fetchContent blobs entry <&> fmap (entry,)
+  renderLoaded loaded =
+    zipWith
+      ( \(entry, content) budget ->
+          sliceEntry
+            state
+            budget
+            (bool 0 (archiveReadOffset request) (archiveEntryId entry == archiveEntryId anchor))
+            entry
+            content
+      )
+      loaded
+      (readBudgets (archiveReadChars request) (archiveEntryId anchor) (fmap fst loaded))
 
 closeEntryGroups :: [ArchiveEntry] -> [ArchiveEntry] -> [ArchiveEntry]
 closeEntryGroups available seed =
   sortOn archiveEntrySeq (expand (Set.fromList (fmap archiveEntryId seed)) seed)
-  where
-    expand seen selected =
-      let groups = Set.unions (fmap entryGroups selected)
-          related =
-            [ entry
-              | entry <- available,
-                archiveEntryId entry `Set.notMember` seen,
-                not (Set.disjoint groups (entryGroups entry))
-            ]
-       in case related of
-            [] -> selected
-            _ -> expand (Set.union seen (Set.fromList (fmap archiveEntryId related))) (selected <> related)
+ where
+  expand seen selected =
+    let groups = Set.unions (fmap entryGroups selected)
+        related =
+          [ entry
+          | entry <- available,
+            archiveEntryId entry `Set.notMember` seen,
+            not (Set.disjoint groups (entryGroups entry))
+          ]
+     in case related of
+          [] -> selected
+          _ -> expand (Set.union seen (Set.fromList (fmap archiveEntryId related))) (selected <> related)
 
 entryGroups :: ArchiveEntry -> Set Text
 entryGroups entry =
@@ -1289,26 +1286,26 @@ entryGroups entry =
     ( maybe [] (\group -> [prefix <> "/turn/" <> group]) (archiveEntryParentId entry)
         <> maybe [] (\group -> [prefix <> "/call/" <> group]) (archiveEntryCallId entry)
     )
-  where
-    prefix = archiveEntryRunId entry
+ where
+  prefix = archiveEntryRunId entry
 
 readBudgets :: Int -> Text -> [ArchiveEntry] -> [Int]
 readBudgets wanted anchor entries =
   snd (foldl allocate (extra, []) entries)
-  where
-    neighbours = max 0 (length entries - 1)
-    anchorBudget =
-      bool
-        wanted
-        (max 1 (max (wanted `div` 2) (wanted - neighbours * 400)))
-        (neighbours > 0)
-    remaining = max 0 (wanted - anchorBudget)
-    base = bool 0 (remaining `div` neighbours) (neighbours > 0)
-    extra = bool 0 (remaining `mod` neighbours) (neighbours > 0)
-    allocate (left, budgets) entry
-      | archiveEntryId entry == anchor = (left, budgets <> [anchorBudget])
-      | left > 0 = (left - 1, budgets <> [base + 1])
-      | otherwise = (left, budgets <> [base])
+ where
+  neighbours = max 0 (length entries - 1)
+  anchorBudget =
+    bool
+      wanted
+      (max 1 (max (wanted `div` 2) (wanted - neighbours * 400)))
+      (neighbours > 0)
+  remaining = max 0 (wanted - anchorBudget)
+  base = bool 0 (remaining `div` neighbours) (neighbours > 0)
+  extra = bool 0 (remaining `mod` neighbours) (neighbours > 0)
+  allocate (left, budgets) entry
+    | archiveEntryId entry == anchor = (left, budgets <> [anchorBudget])
+    | left > 0 = (left - 1, budgets <> [base + 1])
+    | otherwise = (left, budgets <> [base])
 
 sliceEntry :: ArchiveState -> Int -> Int -> ArchiveEntry -> Text -> ArchiveEntrySlice
 sliceEntry state wanted anchor entry content =
@@ -1330,11 +1327,11 @@ sliceEntry state wanted anchor entry content =
     (start > 0)
     (start + Text.length visible < total)
     (archiveEntryCreated entry)
-  where
-    total = Text.length content
-    maximumStart = max 0 (total - wanted)
-    start = min maximumStart (max 0 (anchor - wanted `div` 3))
-    visible = Text.take wanted (Text.drop start content)
+ where
+  total = Text.length content
+  maximumStart = max 0 (total - wanted)
+  start = min maximumStart (max 0 (anchor - wanted `div` 3))
+  visible = Text.take wanted (Text.drop start content)
 
 fetchContent :: BlobStore -> ArchiveEntry -> IO (Either Text Text)
 fetchContent blobs entry =
@@ -1398,7 +1395,7 @@ digest = sha256 . TextEncoding.encodeUtf8 . Text.intercalate "\NUL"
 preview :: Text -> Text
 preview = Text.take 360 . Text.unwords . Text.words
 
-unique :: Ord key => Text -> (value -> key) -> [value] -> Either Text ()
+unique :: (Ord key) => Text -> (value -> key) -> [value] -> Either Text ()
 unique label key values =
   require
     (Set.size (Set.fromList (fmap key values)) == length values)
@@ -1415,11 +1412,11 @@ nonBlank :: Text -> Maybe Text
 nonBlank value
   | Text.null clean = Nothing
   | otherwise = Just clean
-  where
-    clean = Text.strip value
+ where
+  clean = Text.strip value
 
 require :: Bool -> Text -> Either Text ()
 require condition failure = bool (Left failure) (Right ()) condition
 
-shown :: Show value => value -> Text
+shown :: (Show value) => value -> Text
 shown = Text.pack . show

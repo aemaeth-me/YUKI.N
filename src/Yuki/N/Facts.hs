@@ -17,16 +17,16 @@ where
 import Control.Concurrent.MVar
 import Control.Exception (IOException, try)
 import Data.Aeson
-import qualified Data.ByteString.Lazy as LazyByteString
+import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Functor ((<&>))
 import Data.List (sortOn)
 import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
+import Data.Map.Strict qualified as Map
 import Data.Ord (Down (..))
 import Data.Set (Set)
-import qualified Data.Set as Set
+import Data.Set qualified as Set
 import Data.Text (Text)
-import qualified Data.Text as Text
+import Data.Text qualified as Text
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import System.Directory (createDirectoryIfMissing)
 import Yuki.N.Artifact (fnv1a64, renderHash)
@@ -47,13 +47,13 @@ instance ToJSON FactKind where
 
 instance FromJSON FactKind where
   parseJSON = withText "FactKind" parse
-    where
-      parse = \case
-        "user" -> pure FactUser
-        "project" -> pure FactProject
-        "preference" -> pure FactPreference
-        "decision" -> pure FactDecision
-        other -> fail ("unknown fact kind: " <> Text.unpack other)
+   where
+    parse = \case
+      "user" -> pure FactUser
+      "project" -> pure FactProject
+      "preference" -> pure FactPreference
+      "decision" -> pure FactDecision
+      other -> fail ("unknown fact kind: " <> Text.unpack other)
 
 data Fact = Fact
   { factId :: Text,
@@ -121,47 +121,47 @@ factIdFor = ("fact-" <>) . renderHash . fnv1a64
 
 mkFactStore :: Int -> MVar (Map Text Fact) -> (Map Text Fact -> IO ()) -> FactStore
 mkFactStore limit lock persist = FactStore add search touch list archive invalidate
-  where
-    add content kind source =
+ where
+  add content kind source =
+    modifyMVar lock $ \facts ->
+      case Map.lookup content facts of
+        Just existing -> pure (facts, existing)
+        Nothing ->
+          getPOSIXTime >>= \now ->
+            let fact = Fact (factIdFor content) content kind source (round now) 0 0 False False
+                updated = retainFacts limit (Just content) (Map.insert content fact facts)
+             in persist updated *> pure (updated, fact)
+  search query = rank query <$> list
+  touch hits =
+    getPOSIXTime >>= \now ->
       modifyMVar lock $ \facts ->
-        case Map.lookup content facts of
-          Just existing -> pure (facts, existing)
-          Nothing ->
-            getPOSIXTime >>= \now ->
-              let fact = Fact (factIdFor content) content kind source (round now) 0 0 False False
-                  updated = retainFacts limit (Just content) (Map.insert content fact facts)
-               in persist updated *> pure (updated, fact)
-    search query = rank query <$> list
-    touch hits =
-      getPOSIXTime >>= \now ->
-        modifyMVar lock $ \facts ->
-          let bumped = fmap (bump (round now)) hits
-              updated = merge facts bumped
-           in persist updated *> pure (updated, ())
-    bump now fact = fact {factLastUsed = now, factUseCount = factUseCount fact + 1}
-    list = Map.elems <$> readMVar lock
-    archive cutoff =
-      modifyMVar lock $ \facts ->
-        let doomed = [fact {factArchived = True} | fact <- Map.elems facts, stale fact]
-            updated = merge facts doomed
-         in persist updated *> pure (updated, length doomed)
-      where
-        stale fact = not (factArchived fact) && factUseCount fact == 0 && factCreated fact < cutoff
-    invalidate content =
-      modifyMVar lock $ \facts ->
-        case Map.lookup content facts of
-          Nothing -> pure (facts, False)
-          Just fact ->
-            let voided = fact {factVoid = True}
-                updated = Map.insert content voided facts
-             in persist updated *> pure (updated, True)
-    merge = foldl' (\facts fact -> Map.insert (factContent fact) fact facts)
+        let bumped = fmap (bump (round now)) hits
+            updated = merge facts bumped
+         in persist updated *> pure (updated, ())
+  bump now fact = fact {factLastUsed = now, factUseCount = factUseCount fact + 1}
+  list = Map.elems <$> readMVar lock
+  archive cutoff =
+    modifyMVar lock $ \facts ->
+      let doomed = [fact {factArchived = True} | fact <- Map.elems facts, stale fact]
+          updated = merge facts doomed
+       in persist updated *> pure (updated, length doomed)
+   where
+    stale fact = not (factArchived fact) && factUseCount fact == 0 && factCreated fact < cutoff
+  invalidate content =
+    modifyMVar lock $ \facts ->
+      case Map.lookup content facts of
+        Nothing -> pure (facts, False)
+        Just fact ->
+          let voided = fact {factVoid = True}
+              updated = Map.insert content voided facts
+           in persist updated *> pure (updated, True)
+  merge = foldl' (\facts fact -> Map.insert (factContent fact) fact facts)
 
 rank :: Text -> [Fact] -> [Fact]
 rank query = take retrievalTopK . sortOn (Down . score) . filter ((> 0) . score) . filter visible
-  where
-    score = Set.size . Set.intersection needles . tokens . factContent
-    needles = tokens query
+ where
+  score = Set.size . Set.intersection needles . tokens . factContent
+  needles = tokens query
 
 visible :: Fact -> Bool
 visible = (&&) <$> (not . factArchived) <*> (not . factVoid)
@@ -184,9 +184,9 @@ newFactStoreWithLimit requestedLimit dir =
        in persistFacts path retained
             *> newMVar retained
             <&> \lock -> mkFactStore limit lock (persistFacts path)
-  where
-    limit = max 1 requestedLimit
-    path = factsPath dir
+ where
+  limit = max 1 requestedLimit
+  path = factsPath dir
 
 newMemoryFactStore :: IO FactStore
 newMemoryFactStore = newMemoryFactStoreWithLimit factRetentionLimit
@@ -208,23 +208,23 @@ persistFacts path =
 loadFacts :: FilePath -> IO (Map Text Fact)
 loadFacts path =
   either (const Map.empty) (foldl' insert Map.empty . LazyByteString.split 10) <$> attempt
-  where
-    attempt = try (LazyByteString.readFile path) :: IO (Either IOException LazyByteString.ByteString)
-    insert facts = maybe facts (\fact -> Map.insert (factContent fact) fact facts) . decode
+ where
+  attempt = try (LazyByteString.readFile path) :: IO (Either IOException LazyByteString.ByteString)
+  insert facts = maybe facts (\fact -> Map.insert (factContent fact) fact facts) . decode
 
 retainFacts :: Int -> Maybe Text -> Map Text Fact -> Map Text Fact
 retainFacts limit preferred facts =
   Map.restrictKeys facts (Set.fromList (take limit ordered))
-  where
-    first = maybe [] pure preferred
-    ordered =
-      first
-        <> [ factContent fact
-             | fact <- sortOn (Down . retentionKey) (Map.elems facts),
-               factContent fact `notElem` first
-           ]
-    retentionKey fact =
-      ( visible fact,
-        max (factCreated fact) (factLastUsed fact),
-        factUseCount fact
-      )
+ where
+  first = maybe [] pure preferred
+  ordered =
+    first
+      <> [ factContent fact
+         | fact <- sortOn (Down . retentionKey) (Map.elems facts),
+           factContent fact `notElem` first
+         ]
+  retentionKey fact =
+    ( visible fact,
+      max (factCreated fact) (factLastUsed fact),
+      factUseCount fact
+    )

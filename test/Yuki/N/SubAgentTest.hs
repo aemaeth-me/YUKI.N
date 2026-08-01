@@ -10,24 +10,27 @@ module Yuki.N.SubAgentTest
     inheritedShell,
     registration,
     delegation,
-    depthExhausted
+    depthExhausted,
   )
 where
+
 import Control.Applicative ()
 import Control.Concurrent ()
 import Control.Concurrent.MVar ()
 import Control.Exception ()
 import Control.Monad ()
 import Data.Aeson
+import Data.Aeson.Types (parseMaybe)
 import Data.Bool ()
 import Data.ByteString ()
 import Data.Foldable ()
+import Data.Functor (($>))
 import Data.IORef ()
 import Data.List ()
-import qualified Data.Map.Strict as Map
+import Data.Map.Strict qualified as Map
 import Data.Maybe ()
 import Data.Text (Text)
-import qualified Data.Text as Text
+import Data.Text qualified as Text
 import Network.HTTP.Client ()
 import Network.HTTP.Client.TLS (newTlsManager)
 import Network.HTTP.Types ()
@@ -42,20 +45,17 @@ import System.Process ()
 import System.Timeout ()
 import Test.Tasty
 import Test.Tasty.HUnit
-import Yuki.N.Agent
-import Yuki.N.Model
-import Yuki.N.Journal
-import Yuki.N.Replay
-import Yuki.N.ThreadConfig
-import Yuki.N.Provider.OpenAI ()
-import Yuki.N.AGUI.Types
 import Yuki.N.AGUI.Event
-import Yuki.N.Tools ()
+import Yuki.N.AGUI.Types
+import Yuki.N.Agent
+import Yuki.N.Journal
+import Yuki.N.Model
+import Yuki.N.Provider.OpenAI ()
+import Yuki.N.Replay
 import Yuki.N.SubAgent
 import Yuki.N.TestSupport
-import Data.Functor (($>))
-import Data.Aeson.Types (parseMaybe)
-
+import Yuki.N.ThreadConfig
+import Yuki.N.Tools ()
 
 subAgentTests :: TestTree
 subAgentTests =
@@ -67,6 +67,7 @@ subAgentTests =
       testCase "a resolved cwd lets the child execute a local shell request" inheritedShell,
       testCase "resolveRuntime registers sub_agent only above depth zero" registration
     ]
+
 -- | 规格：sub_agent 工具描述列举子代继承的确切工具（shell、fs_read）且不包含自身。
 -- 背景：子代理能力描述是模型决策是否委派的依据；漏列或自我引用会误导模型。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
@@ -83,6 +84,7 @@ capabilityDescription =
                   assertBool "description names fs_read" ("fs_read" `Text.isInfixOf` description),
                   assertBool "description excludes itself" (not ("sub_agent" `Text.isInfixOf` description))
                 ]
+
 -- | 规格：已解析 cwd 的子代理可执行本地 shell 请求，父代收到子回答并暴露嵌套 shell 事件。
 -- 背景：委派必须继承工作目录等环境；否则子代理与父代行为不一致。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
@@ -106,6 +108,7 @@ inheritedShell =
                   [ assertBool "parent receives the child answer" (any childAnswer events),
                     assertBool "nested event exposes the shell call" (any nestedShell events)
                   ]
+
 childAnswer :: Event -> Bool
 childAnswer (ToolCallResult _ "call-delegate" content) = "child-ok" `Text.isInfixOf` content
 childAnswer _ = False
@@ -121,6 +124,7 @@ nestedShell (Custom "agent.sub" value) =
     value
     == Just ("TOOL_CALL_START" :: Text, Just ("shell" :: Text))
 nestedShell _ = False
+
 -- | 规格：resolveRuntime 只在深度 >0 时注册 sub_agent 工具。
 -- 背景：深度 0 的子代理不应再委派；注册失控会造成无限递归。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
@@ -136,6 +140,7 @@ registration =
                 assertBool "depth zero omits" (Map.notMember "sub_agent" (runtimeTools zero)),
                 runtimeDepth one @?= 1
               ]
+
 -- | 规格：委派到受限子运行并 journal 嵌套 scope，可无分歧重放。
 -- 背景：委派是核心能力；scope 嵌套记录错误会让重放与审计无法还原层次。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
@@ -155,6 +160,7 @@ delegation =
                       assertBool "journal nests the sub-run scope" (any ((== 2) . length . entryScope) recorded),
                       fmap reportDivergence report @?= Right Nothing
                     ]
+
 -- | 规格：深度 0 时委派被拒绝且返回说明性结果，不产生子运行事件。
 -- 背景：深度耗尽必须优雅失败而非崩溃或死循环。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
@@ -168,6 +174,7 @@ depthExhausted =
             [ [content | ToolCallResult _ "call-delegate" content <- events] @?= ["delegation depth exhausted"],
               assertBool "no sub-run events" (all (not . isSubEvent) events)
             ]
+
 isSubEvent :: Event -> Bool
 isSubEvent (Custom "agent.sub" _) = True
 isSubEvent _ = False

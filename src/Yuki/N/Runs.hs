@@ -19,8 +19,8 @@ import Control.Exception (Exception, bracket)
 import Data.Functor (($>))
 import Data.IORef
 import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
-import qualified Data.Set as Set
+import Data.Map.Strict qualified as Map
+import Data.Set qualified as Set
 import Data.Text (Text)
 import Yuki.N.Model (ChatMessage)
 
@@ -43,14 +43,14 @@ withRunRegistration registry runId =
 withRunRegistrationFor :: RunRegistry -> Text -> Text -> IO a -> IO a
 withRunRegistrationFor (RunRegistry ref) runId taskId action =
   bracket acquire (const release) (const action)
-  where
-    acquire =
-      myThreadId >>= \thread ->
-        newIORef [] >>= \steer ->
-          newIORef [] >>= \followUp ->
-            mutate (Map.insert runId (RunHandle thread taskId steer followUp))
-    release = mutate (Map.delete runId)
-    mutate f = atomicModifyIORef' ref (\runs -> (f runs, ()))
+ where
+  acquire =
+    myThreadId >>= \thread ->
+      newIORef [] >>= \steer ->
+        newIORef [] >>= \followUp ->
+          mutate (Map.insert runId (RunHandle thread taskId steer followUp))
+  release = mutate (Map.delete runId)
+  mutate f = atomicModifyIORef' ref (\runs -> (f runs, ()))
 
 activeThreads :: RunRegistry -> IO [Text]
 activeThreads (RunRegistry ref) =
@@ -73,8 +73,8 @@ followUpRun (RunRegistry ref) runId message =
 queueRun :: (RunHandle -> IORef [ChatMessage]) -> IORef (Map Text RunHandle) -> Text -> ChatMessage -> IO Bool
 queueRun field ref runId message =
   readIORef ref >>= maybe (pure False) push . Map.lookup runId
-  where
-    push handle = atomicModifyIORef' (field handle) (\queued -> (message : queued, ())) $> True
+ where
+  push handle = atomicModifyIORef' (field handle) (\queued -> (message : queued, ())) $> True
 
 drainSteering :: RunRegistry -> Text -> IO [ChatMessage]
 drainSteering (RunRegistry ref) runId =
@@ -87,8 +87,8 @@ drainFollowUps (RunRegistry ref) runId =
 drainRun :: (RunHandle -> IORef [ChatMessage]) -> IORef (Map Text RunHandle) -> Text -> IO [ChatMessage]
 drainRun field ref runId =
   readIORef ref >>= maybe (pure []) drain . Map.lookup runId
-  where
-    drain handle = atomicModifyIORef' (field handle) (\queued -> ([], reverse queued))
+ where
+  drain handle = atomicModifyIORef' (field handle) (\queued -> ([], reverse queued))
 
 newtype RunCancelled = RunCancelled Text
   deriving stock (Eq, Show)

@@ -7,7 +7,7 @@ where
 
 import Data.Aeson
 import Data.Text (Text)
-import qualified Data.Text as Text
+import Data.Text qualified as Text
 import Yuki.N.AGUI.Types (Message, pair)
 
 data Event
@@ -74,53 +74,53 @@ eventType = \case
 instance ToJSON Event where
   toJSON event =
     object $ ["type" .= eventType event] <> fields event
-    where
-      fields = \case
-        RunStarted thread run parent ->
-          ["threadId" .= thread, "runId" .= run] <> pair "parentRunId" parent
-        RunFinished thread run result ->
-          ["threadId" .= thread, "runId" .= run] <> pair "result" result
-        RunError message code ->
-          ["message" .= message] <> pair "code" code
-        StepStarted name -> ["stepName" .= name]
-        StepFinished name -> ["stepName" .= name]
-        TextMessageStarted message -> ["messageId" .= message, "role" .= ("assistant" :: Text)]
-        TextMessageContent message delta -> ["messageId" .= message, "delta" .= delta]
-        TextMessageEnded message -> ["messageId" .= message]
-        ToolCallStarted call name parent ->
-          ["toolCallId" .= call, "toolCallName" .= name] <> pair "parentMessageId" parent
-        ToolCallArguments call delta -> ["toolCallId" .= call, "delta" .= delta]
-        ToolCallEnded call -> ["toolCallId" .= call]
-        ToolCallResult message call content ->
-          [ "messageId" .= message,
-            "toolCallId" .= call,
-            "content" .= content,
-            "role" .= ("tool" :: Text)
-          ]
-        StateSnapshot snapshot -> ["snapshot" .= snapshot]
-        StateDelta delta -> ["delta" .= delta]
-        MessagesSnapshot messages -> ["messages" .= messages]
-        ActivitySnapshot message activity content replace ->
-          [ "messageId" .= message,
-            "activityType" .= activity,
-            "content" .= content
-          ]
-            <> pair "replace" replace
-        ActivityDelta message activity patch ->
-          ["messageId" .= message, "activityType" .= activity, "patch" .= patch]
-        ReasoningStarted message -> ["messageId" .= message]
-        ReasoningMessageStarted message ->
-          ["messageId" .= message, "role" .= ("reasoning" :: Text)]
-        ReasoningMessageContent message delta -> ["messageId" .= message, "delta" .= delta]
-        ReasoningMessageEnded message -> ["messageId" .= message]
-        ReasoningEnded message -> ["messageId" .= message]
-        ReasoningEncryptedValue subtype entity value ->
-          [ "subtype" .= encryptedEntity subtype,
-            "entityId" .= entity,
-            "encryptedValue" .= value
-          ]
-        Raw raw source -> ["event" .= raw] <> pair "source" source
-        Custom name value -> ["name" .= name, "value" .= value]
+   where
+    fields = \case
+      RunStarted thread run parent ->
+        ["threadId" .= thread, "runId" .= run] <> pair "parentRunId" parent
+      RunFinished thread run result ->
+        ["threadId" .= thread, "runId" .= run] <> pair "result" result
+      RunError message code ->
+        ["message" .= message] <> pair "code" code
+      StepStarted name -> ["stepName" .= name]
+      StepFinished name -> ["stepName" .= name]
+      TextMessageStarted message -> ["messageId" .= message, "role" .= ("assistant" :: Text)]
+      TextMessageContent message delta -> ["messageId" .= message, "delta" .= delta]
+      TextMessageEnded message -> ["messageId" .= message]
+      ToolCallStarted call name parent ->
+        ["toolCallId" .= call, "toolCallName" .= name] <> pair "parentMessageId" parent
+      ToolCallArguments call delta -> ["toolCallId" .= call, "delta" .= delta]
+      ToolCallEnded call -> ["toolCallId" .= call]
+      ToolCallResult message call content ->
+        [ "messageId" .= message,
+          "toolCallId" .= call,
+          "content" .= content,
+          "role" .= ("tool" :: Text)
+        ]
+      StateSnapshot snapshot -> ["snapshot" .= snapshot]
+      StateDelta delta -> ["delta" .= delta]
+      MessagesSnapshot messages -> ["messages" .= messages]
+      ActivitySnapshot message activity content replace ->
+        [ "messageId" .= message,
+          "activityType" .= activity,
+          "content" .= content
+        ]
+          <> pair "replace" replace
+      ActivityDelta message activity patch ->
+        ["messageId" .= message, "activityType" .= activity, "patch" .= patch]
+      ReasoningStarted message -> ["messageId" .= message]
+      ReasoningMessageStarted message ->
+        ["messageId" .= message, "role" .= ("reasoning" :: Text)]
+      ReasoningMessageContent message delta -> ["messageId" .= message, "delta" .= delta]
+      ReasoningMessageEnded message -> ["messageId" .= message]
+      ReasoningEnded message -> ["messageId" .= message]
+      ReasoningEncryptedValue subtype entity value ->
+        [ "subtype" .= encryptedEntity subtype,
+          "entityId" .= entity,
+          "encryptedValue" .= value
+        ]
+      Raw raw source -> ["event" .= raw] <> pair "source" source
+      Custom name value -> ["name" .= name, "value" .= value]
 
 encryptedEntity :: EncryptedEntity -> Text
 encryptedEntity = \case
@@ -171,8 +171,8 @@ instance FromJSON Event where
       "RAW" -> Raw <$> fields .: "event" <*> fields .:? "source"
       "CUSTOM" -> Custom <$> fields .: "name" <*> fields .: "value"
       other -> fail ("unknown AG-UI event type: " <> other)
-    where
-      parseEntity = \case
-        ("tool-call" :: Text) -> pure EncryptedToolCall
-        "message" -> pure EncryptedMessage
-        other -> fail ("unknown encrypted entity: " <> Text.unpack other)
+   where
+    parseEntity = \case
+      ("tool-call" :: Text) -> pure EncryptedToolCall
+      "message" -> pure EncryptedMessage
+      other -> fail ("unknown encrypted entity: " <> Text.unpack other)

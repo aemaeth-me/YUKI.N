@@ -17,17 +17,17 @@ import Data.Aeson
     (.=),
   )
 import Data.Bool (bool)
-import qualified Data.ByteString.Lazy as LazyByteString
+import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Foldable (traverse_)
-import Data.Functor ((<&>), ($>))
+import Data.Functor (($>), (<&>))
 import Data.IORef (IORef, atomicModifyIORef', modifyIORef', newIORef, readIORef)
 import Data.List (isPrefixOf, sort, tails)
-import qualified Data.Map.Strict as Map
+import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Text.Encoding as TextEncoding
-import qualified Data.Text.IO as TextIO
+import Data.Text qualified as Text
+import Data.Text.Encoding qualified as TextEncoding
+import Data.Text.IO qualified as TextIO
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import System.Directory
   ( canonicalizePath,
@@ -42,12 +42,12 @@ import System.Exit (ExitCode (..))
 import System.FilePath
   ( addTrailingPathSeparator,
     dropTrailingPathSeparator,
+    hasTrailingPathSeparator,
     isDrive,
     joinPath,
     splitDirectories,
     takeDirectory,
     takeFileName,
-    hasTrailingPathSeparator,
     (</>),
   )
 import System.IO (Handle)
@@ -94,53 +94,53 @@ workTools store root =
             ["path", "old", "new"]
         )
         (runEdit store ledger root),
-    textTool
-      ( spec
-          "fs_list"
-          "list directory entries up to depth two, directories end with /"
-          (object ["path" .= stringSchema])
-          []
-      )
-      (runList root),
-    textTool
-      ( spec
-          "fs_glob"
-          "find files by glob pattern (*, **, ?), paths relative to the search root"
-          (object ["pattern" .= stringSchema, "path" .= stringSchema])
-          ["pattern"]
-      )
-      (runGlob store root),
-    textTool
-      ( spec
-          "fs_grep"
-          "search files for a literal substring, one path:line:content per match"
-          (object ["pattern" .= stringSchema, "path" .= stringSchema, "include" .= stringSchema])
-          ["pattern"]
-      )
-      (runGrep store root),
-    contextTool
-      ( spec
-          "plan"
-          "track your own progress on a longer task: set replaces the plan with pending items, update marks one item pending/doing/done, clear empties the plan"
-          ( object
-              [ "action" .= enumSchema ["set", "update", "clear"],
-                "items" .= arraySchema itemSchema,
-                "id" .= stringSchema,
-                "status" .= enumSchema ["pending", "doing", "done"]
-              ]
-          )
-          ["action"]
-      )
-      (\context -> runPlan context plan),
-    contextTool
-      ( spec
-          "shell"
-          "run a command with sh -c in the work directory"
-          (object ["command" .= stringSchema, "timeoutSeconds" .= integerSchema])
-          ["command"]
-      )
-      (\context -> runShell context store root)
-  ]
+      textTool
+        ( spec
+            "fs_list"
+            "list directory entries up to depth two, directories end with /"
+            (object ["path" .= stringSchema])
+            []
+        )
+        (runList root),
+      textTool
+        ( spec
+            "fs_glob"
+            "find files by glob pattern (*, **, ?), paths relative to the search root"
+            (object ["pattern" .= stringSchema, "path" .= stringSchema])
+            ["pattern"]
+        )
+        (runGlob store root),
+      textTool
+        ( spec
+            "fs_grep"
+            "search files for a literal substring, one path:line:content per match"
+            (object ["pattern" .= stringSchema, "path" .= stringSchema, "include" .= stringSchema])
+            ["pattern"]
+        )
+        (runGrep store root),
+      contextTool
+        ( spec
+            "plan"
+            "track your own progress on a longer task: set replaces the plan with pending items, update marks one item pending/doing/done, clear empties the plan"
+            ( object
+                [ "action" .= enumSchema ["set", "update", "clear"],
+                  "items" .= arraySchema itemSchema,
+                  "id" .= stringSchema,
+                  "status" .= enumSchema ["pending", "doing", "done"]
+                ]
+            )
+            ["action"]
+        )
+        (\context -> runPlan context plan),
+      contextTool
+        ( spec
+            "shell"
+            "run a command with sh -c in the work directory"
+            (object ["command" .= stringSchema, "timeoutSeconds" .= integerSchema])
+            ["command"]
+        )
+        (\context -> runShell context store root)
+    ]
 
 backgroundTools :: BackgroundRegistry -> FilePath -> [BackendTool]
 backgroundTools registry root =
@@ -215,24 +215,24 @@ itemSchema =
       "additionalProperties" .= False
     ]
 
-textTool :: FromJSON input => ToolSpec -> (input -> IO (Either Text Text)) -> BackendTool
+textTool :: (FromJSON input) => ToolSpec -> (input -> IO (Either Text Text)) -> BackendTool
 textTool toolSpec execute = contextTool toolSpec (const execute)
 
-contextTool :: FromJSON input => ToolSpec -> (ToolContext -> input -> IO (Either Text Text)) -> BackendTool
+contextTool :: (FromJSON input) => ToolSpec -> (ToolContext -> input -> IO (Either Text Text)) -> BackendTool
 contextTool toolSpec execute = BackendTool toolSpec decode
-  where
-    decode context arguments = case fromJSON arguments of
-      Error message -> pure (failure ("invalid tool arguments: " <> Text.pack message))
-      Success input -> execute context input <&> either failure success
+ where
+  decode context arguments = case fromJSON arguments of
+    Error message -> pure (failure ("invalid tool arguments: " <> Text.pack message))
+    Success input -> execute context input <&> either failure success
 
 contextJsonTool :: (FromJSON input, ToJSON output) => ToolSpec -> (ToolContext -> input -> IO (Either Text output)) -> BackendTool
 contextJsonTool toolSpec execute = BackendTool toolSpec decode
-  where
-    decode context arguments = case fromJSON arguments of
-      Error message -> pure (failure ("invalid tool arguments: " <> Text.pack message))
-      Success input ->
-        execute context input
-          <&> either failure (success . TextEncoding.decodeUtf8 . LazyByteString.toStrict . encode)
+ where
+  decode context arguments = case fromJSON arguments of
+    Error message -> pure (failure ("invalid tool arguments: " <> Text.pack message))
+    Success input ->
+      execute context input
+        <&> either failure (success . TextEncoding.decodeUtf8 . LazyByteString.toStrict . encode)
 
 failure :: Text -> ToolOutcome
 failure content = ToolOutcome content True False
@@ -333,70 +333,70 @@ data PlanItem = PlanItem
 runRead :: Maybe ArtifactStore -> Ledger -> FilePath -> FsRead -> IO (Either Text Text)
 runRead store ledger root (FsRead path offset limit) =
   resolvePath root path >>=? readTarget
-  where
-    readTarget target =
-      (try (TextIO.readFile target) :: IO (Either IOException Text)) >>= \case
-        Left err -> pure (Left (describe err))
-        Right content ->
-          remember ledger target
-            *> either (pure . Left) (fmap Right . present store "fs_read" (Text.take 200)) (selected content)
-    selected content
-      | isJust offset || isJust limit = paginate path offset limit content
-      | otherwise = Right content
-    describe = (prefix <>) . Text.pack . displayException
-    prefix = "cannot read " <> Text.pack path <> ": "
+ where
+  readTarget target =
+    (try (TextIO.readFile target) :: IO (Either IOException Text)) >>= \case
+      Left err -> pure (Left (describe err))
+      Right content ->
+        remember ledger target
+          *> either (pure . Left) (fmap Right . present store "fs_read" (Text.take 200)) (selected content)
+  selected content
+    | isJust offset || isJust limit = paginate path offset limit content
+    | otherwise = Right content
+  describe = (prefix <>) . Text.pack . displayException
+  prefix = "cannot read " <> Text.pack path <> ": "
 
 paginate :: FilePath -> Maybe Int -> Maybe Int -> Text -> Either Text Text
 paginate path offset limit content
   | begin > total = Left ("offset " <> int begin <> " exceeds " <> Text.pack path <> " line count " <> int total)
   | otherwise = Right (Text.intercalate "\n" window <> "\n(lines " <> int begin <> "-" <> int end <> " of " <> int total <> ")")
-  where
-    ls = Text.lines content
-    total = length ls
-    begin = max 1 (fromMaybe 1 offset)
-    count = max 1 (fromMaybe (total - begin + 1) limit)
-    window = take count (drop (begin - 1) ls)
-    end = begin + length window - 1
+ where
+  ls = Text.lines content
+  total = length ls
+  begin = max 1 (fromMaybe 1 offset)
+  count = max 1 (fromMaybe (total - begin + 1) limit)
+  window = take count (drop (begin - 1) ls)
+  end = begin + length window - 1
 
 runWrite :: Maybe ArtifactStore -> Ledger -> FilePath -> FsWrite -> IO (Either Text Text)
 runWrite store ledger root (FsWrite path content) =
   resolvePath root path >>=? write
-  where
-    write target =
-      readMaybe target >>= \old ->
-        createDirectoryIfMissing True (takeDirectory target)
-          *> TextIO.writeFile target content
-          *> stash store "fs_write" content
-          *> remember ledger target
-          $> Right (unified path (fromMaybe "" old) content)
+ where
+  write target =
+    readMaybe target >>= \old ->
+      createDirectoryIfMissing True (takeDirectory target)
+        *> TextIO.writeFile target content
+        *> stash store "fs_write" content
+        *> remember ledger target
+        $> Right (unified path (fromMaybe "" old) content)
 
 runEdit :: Maybe ArtifactStore -> Ledger -> FilePath -> FsEdit -> IO (Either Text Text)
 runEdit store ledger root (FsEdit path old new)
   | Text.null old = pure (Left "old must not be empty")
   | otherwise = resolvePath root path >>=? edit
-  where
-    edit target =
-      readIORef ledger >>= \known ->
-        stamp target >>= \current ->
-          case Map.lookup target known of
-            Nothing -> pure (Left "read the file before editing")
-            Just recorded
-              | current /= Just recorded -> pure (Left "file changed since last read; re-read it")
-              | otherwise -> replace
-      where
-        replace =
-          readMaybe target >>= maybe (pure (Left ("cannot read " <> Text.pack path))) cut
-          where
-            cut content = case Text.count old content of
-              0 -> pure (Left ("old text not found in " <> Text.pack path))
-              1 ->
-                TextIO.writeFile target updated
-                  *> stash store "fs_edit" updated
-                  *> remember ledger target
-                  $> Right (unified path content updated)
-                where
-                  updated = Text.replace old new content
-              n -> pure (Left ("old text occurs " <> int n <> " times in " <> Text.pack path <> "; provide more context"))
+ where
+  edit target =
+    readIORef ledger >>= \known ->
+      stamp target >>= \current ->
+        case Map.lookup target known of
+          Nothing -> pure (Left "read the file before editing")
+          Just recorded
+            | current /= Just recorded -> pure (Left "file changed since last read; re-read it")
+            | otherwise -> replace
+   where
+    replace =
+      readMaybe target >>= maybe (pure (Left ("cannot read " <> Text.pack path))) cut
+     where
+      cut content = case Text.count old content of
+        0 -> pure (Left ("old text not found in " <> Text.pack path))
+        1 ->
+          TextIO.writeFile target updated
+            *> stash store "fs_edit" updated
+            *> remember ledger target
+            $> Right (unified path content updated)
+         where
+          updated = Text.replace old new content
+        n -> pure (Left ("old text occurs " <> int n <> " times in " <> Text.pack path <> "; provide more context"))
 
 type Ledger = IORef (Map.Map FilePath (Integer, Integer))
 
@@ -405,28 +405,28 @@ remember ledger target = stamp target >>= traverse_ (modifyIORef' ledger . Map.i
 
 stamp :: FilePath -> IO (Maybe (Integer, Integer))
 stamp target = either (const Nothing) Just <$> (try snap :: IO (Either IOException (Integer, Integer)))
-  where
-    snap = (,) <$> (round . utcTimeToPOSIXSeconds <$> getModificationTime target) <*> getFileSize target
+ where
+  snap = (,) <$> (round . utcTimeToPOSIXSeconds <$> getModificationTime target) <*> getFileSize target
 
 runList :: FilePath -> FsList -> IO (Either Text Text)
 runList root (FsList path) =
   pathContainsSymlink root relative
     >>= bool (resolvePath root relative >>=? list) (pure (Left "refusing to list through a symbolic link"))
-  where
-    relative = fromMaybe "." path
-    list target =
-      doesDirectoryExist target
-        >>= bool (pure (Left ("not a directory: " <> Text.pack relative))) (Right <$> listing target)
+ where
+  relative = fromMaybe "." path
+  list target =
+    doesDirectoryExist target
+      >>= bool (pure (Left ("not a directory: " <> Text.pack relative))) (Right <$> listing target)
 
 pathContainsSymlink :: FilePath -> FilePath -> IO Bool
 pathContainsSymlink root = go root . filter relevant . splitDirectories
-  where
-    relevant part = part /= "." && part /= ""
-    go _ [] = pure False
-    go parent (part : rest) =
-      let current = parent </> part
-       in (try (pathIsSymbolicLink current) :: IO (Either IOException Bool))
-            >>= either (const (pure False)) (bool (go current rest) (pure True))
+ where
+  relevant part = part /= "." && part /= ""
+  go _ [] = pure False
+  go parent (part : rest) =
+    let current = parent </> part
+     in (try (pathIsSymbolicLink current) :: IO (Either IOException Bool))
+          >>= either (const (pure False)) (bool (go current rest) (pure True))
 
 listing :: FilePath -> IO Text
 listing target = Text.intercalate "\n" <$> listTree target 2
@@ -436,8 +436,8 @@ listTree target depth =
   sort <$> listDirectory target >>= \entries ->
     (<> note (length entries)) . concat
       <$> traverse (entry target depth) (take listingLimit entries)
-  where
-    note total = ["... " <> int (total - listingLimit) <> " more entries" | total > listingLimit]
+ where
+  note total = ["... " <> int (total - listingLimit) <> " more entries" | total > listingLimit]
 
 completePaths :: FilePath -> Text -> IO [Text]
 completePaths root raw
@@ -445,34 +445,34 @@ completePaths root raw
   | otherwise =
       pathContainsSymlink root directory
         >>= bool suggestions (pure [])
-  where
-    query = Text.unpack raw
-    trailing = hasTrailingPathSeparator query
-    directory
-      | trailing = query
-      | otherwise = takeDirectory query
-    prefixName
-      | trailing = ""
-      | otherwise = takeFileName query
-    renderedPrefix
-      | directory == "." || null directory = ""
-      | otherwise = addTrailingPathSeparator directory
-    suggestions =
-      resolvePath root directory >>= \case
-        Left _ -> pure []
-        Right base ->
-          doesDirectoryExist base >>= bool (pure []) (entries base)
-    entries base =
-      (try (sort <$> listDirectory base) :: IO (Either IOException [FilePath]))
-        >>= either (const (pure [])) (fmap (take 40 . concat) . traverse (candidate base) . filter (prefixName `isPrefixOf`))
-    candidate base name =
-      pathIsSymbolicLink (base </> name) >>= bool plain (pure [])
-      where
-        plain =
-          doesDirectoryExist (base </> name)
-            <&> \isDirectory ->
-              [Text.pack (renderedPrefix <> name <> [pathSeparator | isDirectory])]
-        pathSeparator = '/'
+ where
+  query = Text.unpack raw
+  trailing = hasTrailingPathSeparator query
+  directory
+    | trailing = query
+    | otherwise = takeDirectory query
+  prefixName
+    | trailing = ""
+    | otherwise = takeFileName query
+  renderedPrefix
+    | directory == "." || null directory = ""
+    | otherwise = addTrailingPathSeparator directory
+  suggestions =
+    resolvePath root directory >>= \case
+      Left _ -> pure []
+      Right base ->
+        doesDirectoryExist base >>= bool (pure []) (entries base)
+  entries base =
+    (try (sort <$> listDirectory base) :: IO (Either IOException [FilePath]))
+      >>= either (const (pure [])) (fmap (take 40 . concat) . traverse (candidate base) . filter (prefixName `isPrefixOf`))
+  candidate base name =
+    pathIsSymbolicLink (base </> name) >>= bool plain (pure [])
+   where
+    plain =
+      doesDirectoryExist (base </> name)
+        <&> \isDirectory ->
+          [Text.pack (renderedPrefix <> name <> [pathSeparator | isDirectory])]
+    pathSeparator = '/'
 
 listingLimit :: Int
 listingLimit = 100
@@ -480,31 +480,31 @@ listingLimit = 100
 entry :: FilePath -> Int -> FilePath -> IO [Text]
 entry dir depth name =
   pathIsSymbolicLink full >>= bool classify (pure [packed <> "@"])
-  where
-    full = dir </> name
-    packed = Text.pack name
-    classify = doesDirectoryExist full >>= bool (pure [packed]) expand
-    expand
-      | isNoiseDirectory name = pure [packed <> "/"]
-      | depth <= 1 = pure [packed <> "/"]
-      | otherwise =
-          sort <$> listDirectory full
-            >>= fmap (concatMap (fmap ("  " <>))) . traverse (entry full (depth - 1))
-            <&> (packed <> "/" :)
+ where
+  full = dir </> name
+  packed = Text.pack name
+  classify = doesDirectoryExist full >>= bool (pure [packed]) expand
+  expand
+    | isNoiseDirectory name = pure [packed <> "/"]
+    | depth <= 1 = pure [packed <> "/"]
+    | otherwise =
+        sort <$> listDirectory full
+          >>= fmap (concatMap (fmap ("  " <>))) . traverse (entry full (depth - 1))
+          <&> (packed <> "/" :)
 
 isNoiseDirectory :: FilePath -> Bool
 isNoiseDirectory name =
   name `elem` [".git", ".hg", ".svn", "node_modules", "dist", "dist-newstyle", ".yuki-n", "elm-stuff", ".elm-home"]
 
 runGlob :: Maybe ArtifactStore -> FilePath -> FsGlob -> IO (Either Text Text)
-runGlob store root (FsGlob pattern path) =
+runGlob store root (FsGlob globPattern path) =
   withSearchRoot root path $ \target ->
     walkFiles target >>= present store "fs_glob" (clipLines matchLimit) . render . sort . filter matches
-  where
-    matches = matchPath (Text.splitOn "/" pattern) . Text.splitOn "/" . Text.pack
-    render hits = Text.intercalate "\n" (fmap Text.pack (take matchLimit hits) <> overflow)
-      where
-        overflow = ["... " <> int (length hits - matchLimit) <> " more" | length hits > matchLimit]
+ where
+  matches = matchPath (Text.splitOn "/" globPattern) . Text.splitOn "/" . Text.pack
+  render hits = Text.intercalate "\n" (fmap Text.pack (take matchLimit hits) <> overflow)
+   where
+    overflow = ["... " <> int (length hits - matchLimit) <> " more" | length hits > matchLimit]
 
 runGrep :: Maybe ArtifactStore -> FilePath -> FsGrep -> IO (Either Text Text)
 runGrep store root (FsGrep needle path include)
@@ -514,33 +514,33 @@ runGrep store root (FsGrep needle path include)
         walkFiles target
           >>= fmap (take matchLimit . concat) . traverse (grepFile needle target) . filter wanted
           >>= present store "fs_grep" (clipLines matchLimit) . Text.intercalate "\n"
-  where
-    wanted file = maybe True (`matchSegment` Text.pack (takeFileName file)) include
+ where
+  wanted file = maybe True (`matchSegment` Text.pack (takeFileName file)) include
 
 withSearchRoot :: FilePath -> Maybe FilePath -> (FilePath -> IO Text) -> IO (Either Text Text)
 withSearchRoot root path action =
   resolvePath root relative >>=? search
-  where
-    relative = fromMaybe "." path
-    search target =
-      doesDirectoryExist target
-        >>= bool (pure (Left ("not a directory: " <> Text.pack relative))) (Right <$> action target)
+ where
+  relative = fromMaybe "." path
+  search target =
+    doesDirectoryExist target
+      >>= bool (pure (Left ("not a directory: " <> Text.pack relative))) (Right <$> action target)
 
 walkFiles :: FilePath -> IO [FilePath]
 walkFiles root = go ""
-  where
-    go dir =
-      sort <$> listDirectory (root </> dir) >>= fmap concat . traverse (visit dir)
-    visit dir name =
-      pathIsSymbolicLink (root </> relative)
-        >>= bool
-          (doesDirectoryExist (root </> relative) >>= bool (pure [relative]) descend)
-          (pure [])
-      where
-        relative = dir </> name
-        descend
-          | skippedDir name = pure []
-          | otherwise = go relative
+ where
+  go dir =
+    sort <$> listDirectory (root </> dir) >>= fmap concat . traverse (visit dir)
+  visit dir name =
+    pathIsSymbolicLink (root </> relative)
+      >>= bool
+        (doesDirectoryExist (root </> relative) >>= bool (pure [relative]) descend)
+        (pure [])
+   where
+    relative = dir </> name
+    descend
+      | skippedDir name = pure []
+      | otherwise = go relative
 
 skippedDir :: FilePath -> Bool
 skippedDir name = "." `isPrefixOf` name || name `elem` ["dist-newstyle", "node_modules", "dist", "elm-stuff"]
@@ -548,20 +548,20 @@ skippedDir name = "." `isPrefixOf` name || name `elem` ["dist-newstyle", "node_m
 grepFile :: Text -> FilePath -> FilePath -> IO [Text]
 grepFile needle root relative =
   getFileSize absolute >>= scan
-  where
-    absolute = root </> relative
-    scan size
-      | size > fileLimit = pure [Text.pack relative <> ": file exceeds 1MB, skipped"]
-      | otherwise =
-          (try (TextIO.readFile absolute) :: IO (Either IOException Text))
-            >>= either (const (pure [])) (pure . hits)
-    hits content
-      | "\NUL" `Text.isInfixOf` content = []
-      | otherwise =
-          [ Text.pack relative <> ":" <> int n <> ":" <> line
-            | (n, line) <- zip [1 ..] (Text.lines content),
-              needle `Text.isInfixOf` line
-          ]
+ where
+  absolute = root </> relative
+  scan size
+    | size > fileLimit = pure [Text.pack relative <> ": file exceeds 1MB, skipped"]
+    | otherwise =
+        (try (TextIO.readFile absolute) :: IO (Either IOException Text))
+          >>= either (const (pure [])) (pure . hits)
+  hits content
+    | "\NUL" `Text.isInfixOf` content = []
+    | otherwise =
+        [ Text.pack relative <> ":" <> int n <> ":" <> line
+        | (n, line) <- zip [1 ..] (Text.lines content),
+          needle `Text.isInfixOf` line
+        ]
 
 matchPath :: [Text] -> [Text] -> Bool
 matchPath ("**" : rest) segs = any (matchPath rest) (tails segs)
@@ -575,16 +575,16 @@ matchSegment pattern segment
   | Just ('?', rest) <- parts = maybe False (matchSegment rest . snd) piece
   | Just (c, rest) <- parts = maybe False (\(s, ss) -> c == s && matchSegment rest ss) piece
   | otherwise = Text.null segment
-  where
-    parts = Text.uncons pattern
-    piece = Text.uncons segment
+ where
+  parts = Text.uncons pattern
+  piece = Text.uncons segment
 
 clipLines :: Int -> Text -> Text
 clipLines count content
   | length ls <= 2 * count = content
   | otherwise = Text.intercalate "\n" (take count ls) <> "\n...\n" <> Text.intercalate "\n" (drop (length ls - count) ls)
-  where
-    ls = Text.lines content
+ where
+  ls = Text.lines content
 
 matchLimit :: Int
 matchLimit = 200
@@ -596,8 +596,8 @@ runShell :: ToolContext -> Maybe ArtifactStore -> FilePath -> ShellCall -> IO (E
 runShell context store root (ShellCall command timeoutSeconds) =
   runShellCommand (streamChunk context) root (clamp timeoutSeconds) (Text.unpack command)
     >>= fmap Right . present store "shell" clip
-  where
-    clip content = Text.take 200 content <> "\n...\n" <> Text.takeEnd 200 content
+ where
+  clip content = Text.take 200 content <> "\n...\n" <> Text.takeEnd 200 content
 
 streamChunk :: ToolContext -> Text -> Text -> IO ()
 streamChunk context stream delta =
@@ -616,9 +616,9 @@ streamChunk context stream delta =
 runPlan :: ToolContext -> IORef [PlanItem] -> PlanCall -> IO (Either Text Text)
 runPlan context plan call =
   atomicModifyIORef' plan (apply call) >>= traverse announce
-  where
-    announce items =
-      toolContextEmit context (Custom "plan" (planValue items)) $> renderPlan items
+ where
+  announce items =
+    toolContextEmit context (Custom "plan" (planValue items)) $> renderPlan items
 
 apply :: PlanCall -> [PlanItem] -> ([PlanItem], Either Text [PlanItem])
 apply (PlanSet seeds) _ = changed [PlanItem identifier title Pending | PlanSeed identifier title <- seeds]
@@ -626,8 +626,8 @@ apply PlanClear _ = changed []
 apply (PlanUpdate wanted status) items
   | any ((== wanted) . planId) items = changed (fmap step items)
   | otherwise = (items, Left ("unknown plan item: " <> wanted))
-  where
-    step item = bool item item {planStatus = status} (planId item == wanted)
+ where
+  step item = bool item item {planStatus = status} (planId item == wanted)
 
 changed :: [PlanItem] -> ([PlanItem], Either Text [PlanItem])
 changed items = (items, Right items)
@@ -635,8 +635,8 @@ changed items = (items, Right items)
 renderPlan :: [PlanItem] -> Text
 renderPlan [] = "(empty plan)"
 renderPlan items = Text.intercalate "\n" (fmap line items)
-  where
-    line item = planId item <> ". [" <> marker (planStatus item) <> "] " <> planTitle item
+ where
+  line item = planId item <> ". [" <> marker (planStatus item) <> "] " <> planTitle item
 
 marker :: PlanStatus -> Text
 marker Pending = " "
@@ -644,13 +644,13 @@ marker status = statusName status
 
 planValue :: [PlanItem] -> Value
 planValue items = object ["items" .= fmap itemValue items]
-  where
-    itemValue item =
-      object
-        [ "id" .= planId item,
-          "title" .= planTitle item,
-          "status" .= statusName (planStatus item)
-        ]
+ where
+  itemValue item =
+    object
+      [ "id" .= planId item,
+        "title" .= planTitle item,
+        "status" .= statusName (planStatus item)
+      ]
 
 statusName :: PlanStatus -> Text
 statusName Pending = "pending"
@@ -666,17 +666,17 @@ startBackground registry threadId root (ShellBg command) =
 pollBackgroundTask :: BackgroundRegistry -> Text -> ShellOutput -> IO (Either Text Value)
 pollBackgroundTask registry threadId (ShellOutput taskId waitSeconds) =
   snapshotBackground registry threadId taskId (clampWait <$> waitSeconds) <&> fmap render
-  where
-    clampWait = max 0 . min 30
-    render (BackgroundSnapshot running exitCode output truncated) =
-      object
-        ( [ "taskId" .= taskId,
-            "running" .= running,
-            "output" .= output,
-            "truncated" .= truncated
-          ]
-            <> ["exitCode" .= code | Just code <- [exitCode]]
-        )
+ where
+  clampWait = max 0 . min 30
+  render (BackgroundSnapshot running exitCode output truncated) =
+    object
+      ( [ "taskId" .= taskId,
+          "running" .= running,
+          "output" .= output,
+          "truncated" .= truncated
+        ]
+          <> ["exitCode" .= code | Just code <- [exitCode]]
+      )
 
 feedTask :: BackgroundRegistry -> Text -> ShellStdin -> IO (Either Text Value)
 feedTask registry threadId (ShellStdin taskId text eof) =
@@ -706,21 +706,21 @@ runShellCommand announce root seconds command =
                     *> cleanupProcess setup
                     *> (renderShell <$> ((<>) <$> readIORef outAcc <*> readIORef errAcc) <*> pure code)
     setup -> cleanupProcess setup $> renderShell "" (Just 127)
-  where
-    sh =
-      (shell command)
-        { cwd = Just root,
-          std_out = CreatePipe,
-          std_err = CreatePipe,
-          create_group = True
-        }
+ where
+  sh =
+    (shell command)
+      { cwd = Just root,
+        std_out = CreatePipe,
+        std_err = CreatePipe,
+        create_group = True
+      }
 
 pump :: (Text -> IO ()) -> Handle -> IORef Text -> IO ()
 pump announce handle sink = loop
-  where
-    loop =
-      TextIO.hGetChunk handle >>= \chunk ->
-        bool (announce chunk *> modifyIORef' sink (<> chunk) *> loop) (pure ()) (Text.null chunk)
+ where
+  loop =
+    TextIO.hGetChunk handle >>= \chunk ->
+      bool (announce chunk *> modifyIORef' sink (<> chunk) *> loop) (pure ()) (Text.null chunk)
 
 raceTimeout :: Int -> IO ExitCode -> IO (Maybe Int)
 raceTimeout micros action =
@@ -732,34 +732,34 @@ raceTimeout micros action =
 renderShell :: Text -> Maybe Int -> Text
 renderShell output Nothing =
   "exit timeout\n" <> lined output <> "hint: use shell_bg for long-running tasks, then shell_output to poll\n"
-  where
-    lined text
-      | Text.null text || Text.isSuffixOf "\n" text = text
-      | otherwise = text <> "\n"
+ where
+  lined text
+    | Text.null text || Text.isSuffixOf "\n" text = text
+    | otherwise = text <> "\n"
 renderShell output (Just code) = "exit " <> int code <> "\n" <> output
 
 resolvePath :: FilePath -> FilePath -> IO (Either Text FilePath)
 resolvePath root path =
   canonicalizeLenient root >>= \canonicalRoot ->
     inside canonicalRoot . squeezeDotDot <$> canonicalizeLenient (canonicalRoot </> path)
-  where
-    inside canonicalRoot canonical
-      | canonical == canonicalRoot || prefix canonicalRoot `isPrefixOf` canonical = Right canonical
-      | otherwise = Left "path escapes the work directory"
-    prefix = addTrailingPathSeparator
+ where
+  inside canonicalRoot canonical
+    | canonical == canonicalRoot || prefix canonicalRoot `isPrefixOf` canonical = Right canonical
+    | otherwise = Left "path escapes the work directory"
+  prefix = addTrailingPathSeparator
 
 squeezeDotDot :: FilePath -> FilePath
 squeezeDotDot = joinPath . foldl step [] . splitDirectories
-  where
-    step parts part
-      | name == "." = parts
-      | name /= ".." = parts <> [part]
-      | otherwise = pop parts
-      where
-        name = dropTrailingPathSeparator part
-    pop [] = [".."]
-    pop parts@[root] | isDrive root = parts
-    pop parts = init parts
+ where
+  step parts part
+    | name == "." = parts
+    | name /= ".." = parts <> [part]
+    | otherwise = pop parts
+   where
+    name = dropTrailingPathSeparator part
+  pop [] = [".."]
+  pop parts@[root] | isDrive root = parts
+  pop parts = init parts
 
 canonicalizeLenient :: FilePath -> IO FilePath
 canonicalizeLenient path =
@@ -768,8 +768,8 @@ canonicalizeLenient path =
     Left _
       | parent == path -> pure path
       | otherwise -> (</> takeFileName path) <$> canonicalizeLenient parent
-  where
-    parent = takeDirectory path
+ where
+  parent = takeDirectory path
 
 readMaybe :: FilePath -> IO (Maybe Text)
 readMaybe path = either (const Nothing) Just <$> (try (TextIO.readFile path) :: IO (Either IOException Text))
@@ -782,18 +782,18 @@ present :: Maybe ArtifactStore -> Text -> (Text -> Text) -> Text -> IO Text
 present store name clip content
   | Text.length content < stubThreshold = pure content
   | otherwise = maybe (pure content) (\s -> guided <$> artifactSave s name content) store
-  where
-    guided identifier =
-      clip content
-        <> "\n[artifact "
-        <> identifier
-        <> ": full "
-        <> name
-        <> " output, "
-        <> int (Text.length content)
-        <> " chars; call artifact_read with id \""
-        <> identifier
-        <> "\" for the complete text]"
+ where
+  guided identifier =
+    clip content
+      <> "\n[artifact "
+      <> identifier
+      <> ": full "
+      <> name
+      <> " output, "
+      <> int (Text.length content)
+      <> " chars; call artifact_read with id \""
+      <> identifier
+      <> "\" for the complete text]"
 
 int :: Int -> Text
 int = Text.pack . show

@@ -1,0 +1,25 @@
+# Keep the established two-space, trailing-comma style while making it deterministic.
+indentation: 2
+column-limit: none
+function-arrows: trailing
+comma-style: trailing
+record-style: aligned
+import-export-style: trailing
+import-grouping: legacy
+indent-wheres: false
+record-brace-space: true
+newlines-between-decls: 1
+haddock-style: single-line
+haddock-style-module: single-line
+haddock-location-signature: auto
+let-style: auto
+in-style: right-align
+if-style: indented
+single-constraint-parens: always
+single-deriving-parens: never
+sort-constraints: false
+sort-derived-classes: false
+sort-deriving-clauses: false
+trailing-section-operators: true
+unicode: never
+respectful: true

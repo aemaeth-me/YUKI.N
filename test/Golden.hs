@@ -9,18 +9,19 @@
 -- 变更记录：
 --   - 2026-08-01: 每个场景的 replay/deterministic 拆为具名测试声明并建立回归文档基线。
 module Golden (goldenTests, regenerateGoldens) where
+
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar
 import Control.Exception (SomeException, throwIO, try)
 import Data.Aeson
 import Data.Aeson.Types (Pair)
 import Data.Bool (bool)
-import qualified Data.ByteString.Lazy as LazyByteString
+import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Foldable (traverse_)
 import Data.IORef
 import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Text.Encoding as TextEncoding
+import Data.Text qualified as Text
+import Data.Text.Encoding qualified as TextEncoding
 import E2E
   ( FakeProvider (..),
     Reply (..),
@@ -56,7 +57,6 @@ import Yuki.N.Model
 import Yuki.N.Replay
 import Yuki.N.Runs (RunRegistry, newRunRegistry, steerRun)
 import Yuki.N.Server (application)
-
 
 goldenTests :: TestTree
 goldenTests = testGroup "golden journals" (fmap scenarioTests scenarios)
@@ -207,10 +207,10 @@ tool =
         ],
       scenarioCheck = hasKind "the fs_list outcome carrying the sandbox listing" listed
     }
-  where
-    listed (ToolCallEntry "call-fs" "fs_list" _ outcome) =
-      "marker.txt" `Text.isInfixOf` toolOutcomeContent outcome
-    listed _ = False
+ where
+  listed (ToolCallEntry "call-fs" "fs_list" _ outcome) =
+    "marker.txt" `Text.isInfixOf` toolOutcomeContent outcome
+  listed _ = False
 
 retry :: Scenario
 retry =
@@ -245,12 +245,12 @@ splice =
             hasKind "a stubbed model request" stubbed entries
           ]
     }
-  where
-    writeArgs = jsonArgs ["path" .= ("big.txt" :: Text), "content" .= bigWrite]
-    stubbed (ModelRequestEntry request) = any stubbedMessage (requestMessages request)
-    stubbed _ = False
-    stubbedMessage (ChatToolResult _ content) = isArtifactStub content
-    stubbedMessage _ = False
+ where
+  writeArgs = jsonArgs ["path" .= ("big.txt" :: Text), "content" .= bigWrite]
+  stubbed (ModelRequestEntry request) = any stubbedMessage (requestMessages request)
+  stubbed _ = False
+  stubbedMessage (ChatToolResult _ content) = isArtifactStub content
+  stubbedMessage _ = False
 
 bigWrite :: Text
 bigWrite = Text.replicate 30 "golden-line\n"
@@ -290,8 +290,8 @@ shell =
             hasKind "the shell tool call" (\case ToolCallEntry _ "shell" _ _ -> True; _ -> False) entries
           ]
     }
-  where
-    shellArgs = jsonArgs ["command" .= ("printf 'golden shell output'" :: Text)]
+ where
+  shellArgs = jsonArgs ["command" .= ("printf 'golden shell output'" :: Text)]
 
 jsonArgs :: [Pair] -> Text
 jsonArgs = TextEncoding.decodeUtf8 . LazyByteString.toStrict . encode . object
@@ -304,36 +304,36 @@ hasKind label match entries =
 -- 首个 provider 应答，插话落定后放行，保证 SteeringEntry 恒落于 step 2
 record :: Scenario -> IO [Entry]
 record scenario = withSandbox exercise
-  where
-    exercise workDir =
-      getTemporaryDirectory >>= \tmp ->
-        newId >>= \ident ->
-          let journalDir = tmp ++ "/" ++ Text.unpack ident
-           in newEmptyMVar >>= \gate ->
-                newFakeProvider (scenarioScript scenario) >>= \provider ->
-                  testWithApplication (pure (fakeProvider (gated gate provider))) (serve journalDir workDir gate provider)
-    gated gate provider =
-      maybe provider (const provider {providerGate = Just gate}) (scenarioSteer scenario)
-    serve journalDir workDir gate provider port =
-      newManager defaultManagerSettings >>= \manager ->
-        newFileJournal journalDir >>= \journal ->
-          newRunRegistry >>= \runs ->
-            newMemoryArtifactStore >>= \artifacts ->
-              wiredRuntime manager (Just artifacts) (e2eSettings port workDir (scenarioRetries scenario)) >>= \base ->
-                let resolved =
-                      base
-                        { runtimeJournal = Just journal,
-                          runtimeRuns = Just runs,
-                          runtimeArtifactStore = Just artifacts,
-                          runtimeSplice = scenarioSplice scenario
-                        }
-                    app = application Nothing Nothing Nothing (Just runs) (const (pure resolved))
-                 in drive app gate runs provider
-                      *> ( readJournal (journalFilePath journalDir)
-                             >>= either (assertFailure . Text.unpack) (pure . fmap stripTime)
-                         )
-    drive app gate runs provider =
-      maybe (plainDrive app) (steerDrive app gate runs provider) (scenarioSteer scenario)
+ where
+  exercise workDir =
+    getTemporaryDirectory >>= \tmp ->
+      newId >>= \ident ->
+        let journalDir = tmp ++ "/" ++ Text.unpack ident
+         in newEmptyMVar >>= \gate ->
+              newFakeProvider (scenarioScript scenario) >>= \provider ->
+                testWithApplication (pure (fakeProvider (gated gate provider))) (serve journalDir workDir gate provider)
+  gated gate provider =
+    maybe provider (const provider {providerGate = Just gate}) (scenarioSteer scenario)
+  serve journalDir workDir gate provider port =
+    newManager defaultManagerSettings >>= \manager ->
+      newFileJournal journalDir >>= \journal ->
+        newRunRegistry >>= \runs ->
+          newMemoryArtifactStore >>= \artifacts ->
+            wiredRuntime manager (Just artifacts) (e2eSettings port workDir (scenarioRetries scenario)) >>= \base ->
+              let resolved =
+                    base
+                      { runtimeJournal = Just journal,
+                        runtimeRuns = Just runs,
+                        runtimeArtifactStore = Just artifacts,
+                        runtimeSplice = scenarioSplice scenario
+                      }
+                  app = application Nothing Nothing Nothing (Just runs) (const (pure resolved))
+               in drive app gate runs provider
+                    *> ( readJournal (journalFilePath journalDir)
+                           >>= either (assertFailure . Text.unpack) (pure . fmap stripTime)
+                       )
+  drive app gate runs provider =
+    maybe (plainDrive app) (steerDrive app gate runs provider) (scenarioSteer scenario)
 
 plainDrive :: Application -> IO ()
 plainDrive app = runSession postAgent app >>= decodeEvents >>= finished
@@ -346,11 +346,11 @@ steerDrive app gate runs provider text =
       *> (steerRun runs (runId agentInput) (ChatUser text) >>= (@?= True))
       *> putMVar gate ()
       *> (timeout 10000000 (takeMVar result) >>= maybe (assertFailure "steered run did not finish") settled)
-  where
-    attempt :: MVar (Either SomeException [Event]) -> IO ()
-    attempt result = try (runSession postAgent app >>= decodeEvents) >>= putMVar result
-    requested = not . null <$> readIORef (providerBodies provider)
-    settled = either throwIO finished
+ where
+  attempt :: MVar (Either SomeException [Event]) -> IO ()
+  attempt result = try (runSession postAgent app >>= decodeEvents) >>= putMVar result
+  requested = not . null <$> readIORef (providerBodies provider)
+  settled = either throwIO finished
 
 finished :: [Event] -> IO ()
 finished events =
@@ -360,9 +360,9 @@ finished events =
 
 waitFor :: IO Bool -> IO Bool
 waitFor probe = go (200 :: Int)
-  where
-    go 0 = pure False
-    go n = probe >>= bool (threadDelay 25000 *> go (n - 1)) (pure True)
+ where
+  go 0 = pure False
+  go n = probe >>= bool (threadDelay 25000 *> go (n - 1)) (pure True)
 
 stripTime :: Entry -> Entry
 stripTime entry = entry {entryTime = Nothing}

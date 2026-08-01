@@ -8,11 +8,11 @@ where
 import Control.Applicative ((<|>))
 import Control.Monad ((>=>))
 import Data.Bool (bool)
-import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import qualified Data.Text as Text
+import Data.Text qualified as Text
 import System.Environment (getEnvironment)
 import Text.Read (readMaybe)
 import Yuki.N.Agent (ToolExecution (..))
@@ -61,33 +61,33 @@ resolveSettings environment =
     <*> positive "YUKI_CONTEXT_KEEP_UNITS" (value "YUKI_CONTEXT_KEEP_UNITS" `orElse` "12")
     <*> atLeast "YUKI_CONTEXT_SUMMARY_TOKENS" 96 (value "YUKI_CONTEXT_SUMMARY_TOKENS" `orElse` "2048")
     <*> parseFallbacks (Text.pack <$> Map.lookup "YUKI_FALLBACK_PROVIDERS" environment)
-  where
-    value key = Map.lookup key environment
-    make provider port maxTurns execution subAgentDepth providerRetries spliceChars spliceKeep reserveTokens keepUnits summaryTokens fallbacks =
-      Settings
-        { settingsHost = value "YUKI_HOST" `orElse` "127.0.0.1",
-          settingsPort = port,
-          settingsDataDir = value "YUKI_DATA_DIR" `orElse` maybe ".yuki-n" (++ "/.yuki-n") (value "HOME"),
-          settingsCorsOrigin = Text.pack <$> Map.lookup "YUKI_CORS_ORIGIN" environment,
-          settingsMaxTurns = maxTurns,
-          settingsToolExecution = execution,
-          settingsSystemPrompt = Text.pack (value "YUKI_SYSTEM_PROMPT" `orElse` ""),
-          settingsJournalDir = value "YUKI_JOURNAL_DIR",
-          settingsArtifactDir = value "YUKI_ARTIFACT_DIR",
-          settingsTranscriptDir = value "YUKI_TRANSCRIPT_DIR",
-          settingsWorkDir = value "YUKI_WORK_DIR",
-          settingsMemoryDir = value "YUKI_MEMORY_DIR",
-          settingsMemoryModel = Text.pack <$> value "YUKI_MEMORY_MODEL",
-          settingsSubAgentDepth = subAgentDepth,
-          settingsProviderRetries = providerRetries,
-          settingsSpliceChars = spliceChars,
-          settingsSpliceKeep = spliceKeep,
-          settingsContextReserveTokens = reserveTokens,
-          settingsContextKeepUnits = keepUnits,
-          settingsContextSummaryTokens = summaryTokens,
-          settingsProvider = provider,
-          settingsFallbackProviders = fallbacks
-        }
+ where
+  value key = Map.lookup key environment
+  make provider port maxTurns execution subAgentDepth providerRetries spliceChars spliceKeep reserveTokens keepUnits summaryTokens fallbacks =
+    Settings
+      { settingsHost = value "YUKI_HOST" `orElse` "127.0.0.1",
+        settingsPort = port,
+        settingsDataDir = value "YUKI_DATA_DIR" `orElse` maybe ".yuki-n" (++ "/.yuki-n") (value "HOME"),
+        settingsCorsOrigin = Text.pack <$> Map.lookup "YUKI_CORS_ORIGIN" environment,
+        settingsMaxTurns = maxTurns,
+        settingsToolExecution = execution,
+        settingsSystemPrompt = Text.pack (value "YUKI_SYSTEM_PROMPT" `orElse` ""),
+        settingsJournalDir = value "YUKI_JOURNAL_DIR",
+        settingsArtifactDir = value "YUKI_ARTIFACT_DIR",
+        settingsTranscriptDir = value "YUKI_TRANSCRIPT_DIR",
+        settingsWorkDir = value "YUKI_WORK_DIR",
+        settingsMemoryDir = value "YUKI_MEMORY_DIR",
+        settingsMemoryModel = Text.pack <$> value "YUKI_MEMORY_MODEL",
+        settingsSubAgentDepth = subAgentDepth,
+        settingsProviderRetries = providerRetries,
+        settingsSpliceChars = spliceChars,
+        settingsSpliceKeep = spliceKeep,
+        settingsContextReserveTokens = reserveTokens,
+        settingsContextKeepUnits = keepUnits,
+        settingsContextSummaryTokens = summaryTokens,
+        settingsProvider = provider,
+        settingsFallbackProviders = fallbacks
+      }
 
 providerSettings :: Map String String -> Either Text OpenAIConfig
 providerSettings environment =
@@ -98,26 +98,26 @@ providerSettings environment =
     <*> dialectSettings
     <*> traverse (positive "YUKI_MAX_TOKENS" . Text.unpack) (text "YUKI_MAX_TOKENS")
     <*> (Just <$> positive "YUKI_CONTEXT_TOKENS" (value "YUKI_CONTEXT_TOKENS" `orElse` "1000000"))
-  where
-    provider = text "YUKI_PROVIDER" `orElse` "deepseek"
-    preset = providerPreset provider
-    value key = Map.lookup key environment
-    text key = Text.pack <$> Map.lookup key environment
-    dialectSettings =
-      maybe (Right (presetDialect preset)) parseDialect (text "YUKI_API_DIALECT")
-        >>= \dialect ->
-          (,) dialect <$> parseThinking dialect (text "YUKI_THINKING") (text "YUKI_REASONING_EFFORT") preset
-    make model baseUrl apiKey (dialect, thinking) maxTokens contextTokens =
-      OpenAIConfig
-        { openAIProvider = provider,
-          openAIModelName = model,
-          openAIBaseUrl = baseUrl,
-          openAIApiKey = apiKey,
-          openAIDialect = dialect,
-          openAIThinking = thinking,
-          openAIMaxTokens = maxTokens,
-          openAIContextTokens = contextTokens
-        }
+ where
+  provider = text "YUKI_PROVIDER" `orElse` "deepseek"
+  preset = providerPreset provider
+  value key = Map.lookup key environment
+  text key = Text.pack <$> Map.lookup key environment
+  dialectSettings =
+    maybe (Right (presetDialect preset)) parseDialect (text "YUKI_API_DIALECT")
+      >>= \dialect ->
+        (,) dialect <$> parseThinking dialect (text "YUKI_THINKING") (text "YUKI_REASONING_EFFORT") preset
+  make model baseUrl apiKey (dialect, thinking) maxTokens contextTokens =
+    OpenAIConfig
+      { openAIProvider = provider,
+        openAIModelName = model,
+        openAIBaseUrl = baseUrl,
+        openAIApiKey = apiKey,
+        openAIDialect = dialect,
+        openAIThinking = thinking,
+        openAIMaxTokens = maxTokens,
+        openAIContextTokens = contextTokens
+      }
 
 data ProviderPreset = ProviderPreset
   { presetModel :: Maybe Text,
@@ -198,15 +198,15 @@ parseDialect = \case
 
 parseFallbacks :: Maybe Text -> Either Text [Text]
 parseFallbacks = maybe (Right []) names
-  where
-    names raw
-      | Text.null (Text.strip raw) = Right []
-      | otherwise = traverse nonEmpty (Text.splitOn "," raw)
-    nonEmpty name
-      | Text.null stripped = Left "YUKI_FALLBACK_PROVIDERS entries must be non-empty provider names"
-      | otherwise = Right stripped
-      where
-        stripped = Text.strip name
+ where
+  names raw
+    | Text.null (Text.strip raw) = Right []
+    | otherwise = traverse nonEmpty (Text.splitOn "," raw)
+  nonEmpty name
+    | Text.null stripped = Left "YUKI_FALLBACK_PROVIDERS entries must be non-empty provider names"
+    | otherwise = Right stripped
+   where
+    stripped = Text.strip name
 
 parseExecution :: String -> Either Text ToolExecution
 parseExecution = \case

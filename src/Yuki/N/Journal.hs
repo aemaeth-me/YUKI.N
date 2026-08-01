@@ -20,25 +20,25 @@ import Control.Concurrent.MVar
 import Control.Exception (IOException, displayException, try)
 import Data.Aeson
 import Data.Aeson.Types (Pair, Parser)
-import qualified Data.ByteString.Lazy as LazyByteString
 import Data.Bool (bool)
+import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Foldable (toList, traverse_)
 import Data.Functor ((<&>))
 import Data.IORef
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
-import qualified Data.Sequence as Seq
 import Data.Sequence ((|>))
-import qualified Data.Set as Set
+import Data.Sequence qualified as Seq
+import Data.Set qualified as Set
 import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Text.IO as TextIO
+import Data.Text qualified as Text
+import Data.Text.IO qualified as TextIO
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import System.Directory (createDirectoryIfMissing)
 import System.IO
 import System.IO.Error (isDoesNotExistError)
 import Yuki.N.AGUI.Event (Event)
-import qualified Yuki.N.AGUI.Types as AGUI
 import Yuki.N.AGUI.Types (RunAgentInput)
+import Yuki.N.AGUI.Types qualified as AGUI
 import Yuki.N.Artifact (SpliceConfig)
 import Yuki.N.AtomicFile (atomicWriteLazy)
 import Yuki.N.Context (ContextConfig)
@@ -196,10 +196,10 @@ parseKind fields = \case
 
 mkJournal :: MVar Int -> (Entry -> IO ()) -> IO [Entry] -> [Text] -> Journal
 mkJournal counter sink snapshot scope = Journal record scope snapshot
-  where
-    record scoped kind =
-      getPOSIXTime >>= \time ->
-        modifyMVar counter (\seqNo -> pure (seqNo + 1, Entry seqNo scoped (Just (round time)) kind)) >>= sink
+ where
+  record scoped kind =
+    getPOSIXTime >>= \time ->
+      modifyMVar counter (\seqNo -> pure (seqNo + 1, Entry seqNo scoped (Just (round time)) kind)) >>= sink
 
 journalFilePath :: FilePath -> FilePath
 journalFilePath dir = dir ++ "/journal.jsonl"
@@ -215,43 +215,46 @@ newFileJournalWithLimit requestedLimit dir =
   createDirectoryIfMissing True dir
     *> readJournalFile path
     >>= either (ioError . userError . Text.unpack) initialize
-  where
-    limit = max 1 requestedLimit
-    path = journalFilePath dir
-    initialize snapshot =
-      repair snapshot retained
-        *> newMVar (nextSeq (journalReadEntries snapshot)) >>= \counter ->
-          newMVar () >>= \lock ->
-            newIORef (Seq.fromList retained) >>= \cache ->
-              pure (mkJournal counter (sink lock cache) (toList <$> readIORef cache) [])
-      where
-        retained = retainRuns limit (journalReadEntries snapshot)
-    repair snapshot retained =
-      bool
-        (pure ())
-        ( atomicWriteLazy path (renderEntries retained)
-            *> traverse_
-              (TextIO.hPutStrLn stderr . ("YUKI.N journal recovery: " <>))
-              (journalReadWarning snapshot)
-        )
-        (isJust (journalReadWarning snapshot) || length retained /= length (journalReadEntries snapshot))
-    sink lock cache entry =
-      withMVar lock $ \_ ->
-        readIORef cache >>= \current ->
-          let expanded = current |> entry
-              retained = Seq.fromList (retainRuns limit (toList expanded))
-              compact = isRunBegin entry && Seq.length retained < Seq.length expanded
-              persist =
-                bool
-                  (append entry)
-                  (atomicWriteLazy path (renderEntries (toList retained)))
-                  compact
-           in persist *> writeIORef cache (bool expanded retained compact)
-    append entry =
-      withFile path AppendMode
-        (\handle -> LazyByteString.hPutStr handle (encode entry <> "\n") *> hFlush handle)
-    nextSeq entries = maximum (-1 : fmap entrySeq entries) + 1
-    renderEntries = LazyByteString.concat . fmap ((<> "\n") . encode)
+ where
+  limit = max 1 requestedLimit
+  path = journalFilePath dir
+  initialize snapshot =
+    repair snapshot retained
+      *> newMVar (nextSeq (journalReadEntries snapshot))
+      >>= \counter ->
+        newMVar () >>= \lock ->
+          newIORef (Seq.fromList retained) >>= \cache ->
+            pure (mkJournal counter (sink lock cache) (toList <$> readIORef cache) [])
+   where
+    retained = retainRuns limit (journalReadEntries snapshot)
+  repair snapshot retained =
+    bool
+      (pure ())
+      ( atomicWriteLazy path (renderEntries retained)
+          *> traverse_
+            (TextIO.hPutStrLn stderr . ("YUKI.N journal recovery: " <>))
+            (journalReadWarning snapshot)
+      )
+      (isJust (journalReadWarning snapshot) || length retained /= length (journalReadEntries snapshot))
+  sink lock cache entry =
+    withMVar lock $ \_ ->
+      readIORef cache >>= \current ->
+        let expanded = current |> entry
+            retained = Seq.fromList (retainRuns limit (toList expanded))
+            compact = isRunBegin entry && Seq.length retained < Seq.length expanded
+            persist =
+              bool
+                (append entry)
+                (atomicWriteLazy path (renderEntries (toList retained)))
+                compact
+         in persist *> writeIORef cache (bool expanded retained compact)
+  append entry =
+    withFile
+      path
+      AppendMode
+      (\handle -> LazyByteString.hPutStr handle (encode entry <> "\n") *> hFlush handle)
+  nextSeq entries = maximum (-1 : fmap entrySeq entries) + 1
+  renderEntries = LazyByteString.concat . fmap ((<> "\n") . encode)
 
 isRunBegin :: Entry -> Bool
 isRunBegin (Entry _ scope _ RunBegin {}) = length scope == 1
@@ -259,53 +262,53 @@ isRunBegin _ = False
 
 retainRuns :: Int -> [Entry] -> [Entry]
 retainRuns limit entries = filter keep entries
-  where
-    roots =
-      [ AGUI.runId input
-        | Entry _ scope _ (RunBegin input _) <- entries,
-          length scope == 1
-      ]
-    known = Set.fromList roots
-    retained = Set.fromList (takeEnd limit roots)
-    keep entry =
-      maybe True (\runId -> Set.notMember runId known || Set.member runId retained) (listToMaybe (entryScope entry))
-    takeEnd count values = drop (length values - count) values
+ where
+  roots =
+    [ AGUI.runId input
+    | Entry _ scope _ (RunBegin input _) <- entries,
+      length scope == 1
+    ]
+  known = Set.fromList roots
+  retained = Set.fromList (takeEnd limit roots)
+  keep entry =
+    maybe True (\runId -> Set.notMember runId known || Set.member runId retained) (listToMaybe (entryScope entry))
+  takeEnd count values = drop (length values - count) values
 
 readJournalFile :: FilePath -> IO (Either Text JournalRead)
 readJournalFile path =
   (try (LazyByteString.readFile path) :: IO (Either IOException LazyByteString.ByteString))
     <&> either absent parseBytes
-  where
-    absent failure
-      | isMissing failure = Right (JournalRead [] Nothing)
-      | otherwise = Left ("cannot read journal: " <> Text.pack (displayException failure))
-    isMissing = isDoesNotExistError
+ where
+  absent failure
+    | isMissing failure = Right (JournalRead [] Nothing)
+    | otherwise = Left ("cannot read journal: " <> Text.pack (displayException failure))
+  isMissing = isDoesNotExistError
 
 parseBytes :: LazyByteString.ByteString -> Either Text JournalRead
 parseBytes bytes = parseLines [] numbered
-  where
-    unterminated = not (LazyByteString.null bytes) && not ("\n" `LazyByteString.isSuffixOf` bytes)
-    chunks = LazyByteString.split 10 bytes
-    content = bool chunks (take (length chunks - 1) chunks) (not unterminated && not (LazyByteString.null bytes))
-    numbered = filter (not . LazyByteString.null . snd) (zip [1 ..] content)
-    parseLines entries [] =
-      Right
-        ( JournalRead
-            (reverse entries)
-            (bool Nothing (Just "accepted unterminated final record") unterminated)
-        )
-    parseLines entries ((lineNo, line) : rest) =
-      case eitherDecode line of
-        Right entry -> parseLines (entry : entries) rest
-        Left message
-          | unterminated && null rest ->
-              Right
-                ( JournalRead
-                    (reverse entries)
-                    (Just ("ignored incomplete final line " <> Text.pack (show (lineNo :: Int)) <> ": " <> Text.pack message))
-                )
-          | otherwise ->
-              Left ("journal line " <> Text.pack (show (lineNo :: Int)) <> ": " <> Text.pack message)
+ where
+  unterminated = not (LazyByteString.null bytes) && not ("\n" `LazyByteString.isSuffixOf` bytes)
+  chunks = LazyByteString.split 10 bytes
+  content = bool chunks (take (length chunks - 1) chunks) (not unterminated && not (LazyByteString.null bytes))
+  numbered = filter (not . LazyByteString.null . snd) (zip [1 ..] content)
+  parseLines entries [] =
+    Right
+      ( JournalRead
+          (reverse entries)
+          (bool Nothing (Just "accepted unterminated final record") unterminated)
+      )
+  parseLines entries ((lineNo, line) : rest) =
+    case eitherDecode line of
+      Right entry -> parseLines (entry : entries) rest
+      Left message
+        | unterminated && null rest ->
+            Right
+              ( JournalRead
+                  (reverse entries)
+                  (Just ("ignored incomplete final line " <> Text.pack (show (lineNo :: Int)) <> ": " <> Text.pack message))
+              )
+        | otherwise ->
+            Left ("journal line " <> Text.pack (show (lineNo :: Int)) <> ": " <> Text.pack message)
 
 newMemoryJournal :: IO (Journal, IO [Entry])
 newMemoryJournal =

@@ -19,13 +19,13 @@ import Data.Aeson
 import Data.Aeson.Key (fromText)
 import Data.Aeson.Types (parseMaybe)
 import Data.Bool (bool)
-import qualified Data.ByteString.Lazy as LazyByteString
-import qualified Data.Map.Strict as Map
-import Data.Map.Strict (Map)
+import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Functor ((<&>))
+import Data.Map.Strict (Map)
+import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, isJust, mapMaybe)
 import Data.Text (Text)
-import qualified Data.Text as Text
+import Data.Text qualified as Text
 import Network.HTTP.Client (Manager)
 import System.Directory (doesFileExist, getHomeDirectory)
 import System.FilePath ((</>))
@@ -87,34 +87,34 @@ defaultProviders =
 loadProviders :: Map String String -> IO ProviderRegistry
 loadProviders env =
   resolvePath >>= maybe (pure defaultProviders) loadFile
-  where
-    resolvePath =
-      maybe homeFile (pure . Just) (Map.lookup "YUKI_PROVIDERS_FILE" env)
-    homeFile = do
-      home <- getHomeDirectory
-      let path = home </> ".yuki-n" </> "providers.json"
-      bool Nothing (Just path) <$> doesFileExist path
-    loadFile path =
-      try (LazyByteString.readFile path) >>= \case
-        Left (_ :: IOException) -> pure defaultProviders
-        Right bytes -> pure (either (const defaultProviders) id (eitherDecode bytes))
+ where
+  resolvePath =
+    maybe homeFile (pure . Just) (Map.lookup "YUKI_PROVIDERS_FILE" env)
+  homeFile = do
+    home <- getHomeDirectory
+    let path = home </> ".yuki-n" </> "providers.json"
+    bool Nothing (Just path) <$> doesFileExist path
+  loadFile path =
+    try (LazyByteString.readFile path) >>= \case
+      Left (_ :: IOException) -> pure defaultProviders
+      Right bytes -> pure (either (const defaultProviders) id (eitherDecode bytes))
 
 loadAuthJson :: IO (Maybe Value)
 loadAuthJson =
   authPath >>= \path -> doesFileExist path >>= bool (pure Nothing) (readAuth path)
-  where
-    authPath = (</> ".pi/agent/auth.json") <$> getHomeDirectory
-    readAuth path =
-      try (LazyByteString.readFile path) >>= \case
-        Left (_ :: IOException) -> pure Nothing
-        Right bytes -> pure (either (const Nothing) Just (eitherDecode bytes))
+ where
+  authPath = (</> ".pi/agent/auth.json") <$> getHomeDirectory
+  readAuth path =
+    try (LazyByteString.readFile path) >>= \case
+      Left (_ :: IOException) -> pure Nothing
+      Right bytes -> pure (either (const Nothing) Just (eitherDecode bytes))
 
 resolveApiKey :: Map String String -> Maybe Value -> ProviderEntry -> Maybe Text
 resolveApiKey env auth entry =
   (Text.pack <$> (providerApiKeyEnv entry >>= flip Map.lookup env))
     <|> (providerPiAuth entry >>= authKey)
-  where
-    authKey name = auth >>= parseMaybe (withObject "auth.json" (.: fromText name) >=> withObject "auth entry" (.: "key"))
+ where
+  authKey name = auth >>= parseMaybe (withObject "auth.json" (.: fromText name) >=> withObject "auth entry" (.: "key"))
 
 providerConfig :: ProviderEntry -> Text -> Maybe Text -> OpenAIConfig
 providerConfig entry apiKey model =
@@ -128,8 +128,8 @@ providerConfig entry apiKey model =
       openAIMaxTokens = Nothing,
       openAIContextTokens = Just (providerContextTokens entry)
     }
-  where
-    dialect = providerDialect entry
+ where
+  dialect = providerDialect entry
 
 providerThinking :: ProviderEntry -> ThinkingMode
 providerThinking entry
@@ -141,8 +141,8 @@ providerThinking entry
 providerKeyMap :: Map String String -> Maybe Value -> ProviderRegistry -> Map String Text
 providerKeyMap env auth =
   Map.fromList . mapMaybe keep . Map.toList
-  where
-    keep (name, entry) = resolveApiKey env auth entry <&> \key -> (Text.unpack name, key)
+ where
+  keep (name, entry) = resolveApiKey env auth entry <&> \key -> (Text.unpack name, key)
 
 providerListing :: Manager -> ProviderRegistry -> Map String Text -> IO [Value]
 providerListing manager registry keyMap =
@@ -161,5 +161,5 @@ listEntry _ keyMap (name, entry) =
           "models" .= ([providerDefaultModel entry] :: [Text])
         ]
     )
-  where
-    key = Map.lookup (Text.unpack name) keyMap
+ where
+  key = Map.lookup (Text.unpack name) keyMap

@@ -1,0 +1,17 @@
+cradle:
+  multi:
+    - path: "./src"
+      config:
+        cradle:
+          cabal:
+            component: "lib:yuki-n"
+    - path: "./app"
+      config:
+        cradle:
+          cabal:
+            component: "exe:yuki-n"
+    - path: "./test"
+      config:
+        cradle:
+          cabal:
+            component: "test:yuki-n-test"

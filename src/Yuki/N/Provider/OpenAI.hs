@@ -26,16 +26,16 @@ import Data.Aeson
 import Data.Aeson.Types (Pair, parseMaybe)
 import Data.Bifunctor (first)
 import Data.Bool (bool)
-import qualified Data.ByteString as ByteString
 import Data.ByteString (ByteString)
-import qualified Data.ByteString.Char8 as Char8
-import qualified Data.ByteString.Lazy as LazyByteString
+import Data.ByteString qualified as ByteString
+import Data.ByteString.Char8 qualified as Char8
+import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Foldable (traverse_)
 import Data.Functor ((<&>))
 import Data.Maybe (fromMaybe, maybeToList)
 import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Text.Encoding as TextEncoding
+import Data.Text qualified as Text
+import Data.Text.Encoding qualified as TextEncoding
 import Data.Text.Encoding.Error (lenientDecode)
 import Network.HTTP.Client
 import Network.HTTP.Types.Header (hAccept, hAuthorization, hContentType)
@@ -94,9 +94,9 @@ streamProvider ::
   IO FinishReason
 streamProvider manager config modelRequest emit =
   action `catch` rethrowHttp
-  where
-    action = buildRequest config modelRequest >>= \request -> withResponse request manager (consumeResponse (openAIDialect config) emit)
-    rethrowHttp = throwIO . ProviderFailure . ("provider request failed: " <>) . httpError
+ where
+  action = buildRequest config modelRequest >>= \request -> withResponse request manager (consumeResponse (openAIDialect config) emit)
+  rethrowHttp = throwIO . ProviderFailure . ("provider request failed: " <>) . httpError
 
 buildRequest :: OpenAIConfig -> ModelRequest -> IO Request
 buildRequest config modelRequest =
@@ -123,24 +123,24 @@ apiEndpoint config =
 apiRoot :: Text -> Text
 apiRoot base =
   fromMaybe trimmed (Text.stripSuffix "/chat/completions" trimmed <|> Text.stripSuffix "/responses" trimmed <|> Text.stripSuffix "/models" trimmed)
-  where
-    trimmed = Text.dropWhileEnd (== '/') base
+ where
+  trimmed = Text.dropWhileEnd (== '/') base
 
 fetchModelIds :: Manager -> OpenAIConfig -> IO (Either Text [Text])
 fetchModelIds manager config =
   try request >>= either (pure . Left . Text.pack . showHttp) inspect
-  where
-    request =
-      parseRequest (Text.unpack (modelsEndpoint (openAIBaseUrl config)))
-        >>= \req ->
-          httpLbs req {requestHeaders = [(hAuthorization, "Bearer " <> TextEncoding.encodeUtf8 (openAIApiKey config))]} manager
-    showHttp (exception :: HttpException) = show exception
-    inspect response
-      | statusCode (responseStatus response) > 299 =
-          pure (Left ("provider returned HTTP " <> Text.pack (show (statusCode (responseStatus response)))))
-      | otherwise =
-          pure (maybe (Left "models payload unrecognized") Right (decode (responseBody response) >>= parseMaybe modelList))
-    modelList = withObject "ModelList" (\body -> body .: "data" >>= mapM (withObject "model" (.: "id")))
+ where
+  request =
+    parseRequest (Text.unpack (modelsEndpoint (openAIBaseUrl config)))
+      >>= \req ->
+        httpLbs req {requestHeaders = [(hAuthorization, "Bearer " <> TextEncoding.encodeUtf8 (openAIApiKey config))]} manager
+  showHttp (exception :: HttpException) = show exception
+  inspect response
+    | statusCode (responseStatus response) > 299 =
+        pure (Left ("provider returned HTTP " <> Text.pack (show (statusCode (responseStatus response)))))
+    | otherwise =
+        pure (maybe (Left "models payload unrecognized") Right (decode (responseBody response) >>= parseMaybe modelList))
+  modelList = withObject "ModelList" (\body -> body .: "data" >>= mapM (withObject "model" (.: "id")))
 
 modelsEndpoint :: Text -> Text
 modelsEndpoint = (<> "/models") . apiRoot
@@ -162,8 +162,8 @@ chatRequestValue config modelRequest =
       <> pair "tools" tools
       <> pair "max_tokens" (openAIMaxTokens config)
       <> thinkingFields config
-  where
-    tools = nonEmpty (toolValue <$> requestTools modelRequest)
+ where
+  tools = nonEmpty (toolValue <$> requestTools modelRequest)
 
 responsesRequestValue :: OpenAIConfig -> ModelRequest -> Value
 responsesRequestValue config modelRequest =
@@ -175,8 +175,8 @@ responsesRequestValue config modelRequest =
       <> pair "tools" tools
       <> pair "max_output_tokens" (openAIMaxTokens config)
       <> responseReasoningFields (openAIThinking config)
-  where
-    tools = nonEmpty (responseToolValue <$> requestTools modelRequest)
+ where
+  tools = nonEmpty (responseToolValue <$> requestTools modelRequest)
 
 responseReasoningFields :: ThinkingMode -> [Pair]
 responseReasoningFields ThinkingDisabled = []
@@ -319,19 +319,19 @@ consumeResponse dialect emit response
       brConsume (responseBody response)
         >>= throwIO . ProviderFailure . responseError status . ByteString.concat
   | otherwise = readBody emptySseDecoder Nothing
-  where
-    status = responseStatus response
-    reader = responseBody response
+ where
+  status = responseStatus response
+  reader = responseBody response
 
-    readBody decoder reason = brRead reader >>= consumeBody decoder reason
-    consumeBody decoder reason chunk
-      | ByteString.null chunk =
-          consumePayloads dialect emit reason (snd (finishSse decoder)) >>= requireFinish . fst
-      | otherwise =
-          let (decoder', payloads) = feedSse decoder chunk
-           in consumePayloads dialect emit reason payloads >>= continue decoder'
-    continue _ (reason, True) = requireFinish reason
-    continue decoder (reason, False) = readBody decoder reason
+  readBody decoder reason = brRead reader >>= consumeBody decoder reason
+  consumeBody decoder reason chunk
+    | ByteString.null chunk =
+        consumePayloads dialect emit reason (snd (finishSse decoder)) >>= requireFinish . fst
+    | otherwise =
+        let (decoder', payloads) = feedSse decoder chunk
+         in consumePayloads dialect emit reason payloads >>= continue decoder'
+  continue _ (reason, True) = requireFinish reason
+  continue decoder (reason, False) = readBody decoder reason
 
 consumePayloads ::
   ApiDialect ->
@@ -340,18 +340,18 @@ consumePayloads ::
   [ByteString] ->
   IO (Maybe FinishReason, Bool)
 consumePayloads dialect emit initial = foldM consume (initial, False)
-  where
-    consume result@(_, True) _ = pure result
-    consume (reason, False) payload
-      | payload == "[DONE]" = pure (reason, True)
-      | otherwise = either throwIO apply (providerPayload dialect payload)
-      where
-        apply (events, reason', done) =
-          traverse_ emit events
-            *> pure
-              ( reason' <|> reason <|> bool Nothing (Just Stop) (done && dialect == DeepSeek),
-                done
-              )
+ where
+  consume result@(_, True) _ = pure result
+  consume (reason, False) payload
+    | payload == "[DONE]" = pure (reason, True)
+    | otherwise = either throwIO apply (providerPayload dialect payload)
+   where
+    apply (events, reason', done) =
+      traverse_ emit events
+        *> pure
+          ( reason' <|> reason <|> bool Nothing (Just Stop) (done && dialect == DeepSeek),
+            done
+          )
 
 providerPayload :: ApiDialect -> ByteString -> Either ProviderFailure ([ModelEvent], Maybe FinishReason, Bool)
 providerPayload DeepSeek payload = decodeResponsesEvent payload >>= responseEvent
@@ -370,13 +370,13 @@ responseEvent event =
     "response.failed" -> Left (ProviderFailure ("provider response failed: " <> failure))
     "error" -> Left (ProviderFailure ("provider stream error: " <> failure))
     _ -> Right ([], Nothing, False)
-  where
-    textDelta constructor = maybeToList (constructor <$> mfilter (not . Text.null) (responsesEventDelta event))
-    argumentDelta = maybeToList (ModelToolCallDelta (responsesEventOutputIndex event) Nothing Nothing <$> responsesEventDelta event)
-    itemEvents = maybe [] (responseItemEvents (responsesEventOutputIndex event)) (responsesEventItem event)
-    itemFinish = bool Nothing (Just ToolUse) (maybe False ((== "function_call") . responseItemType) (responsesEventItem event))
-    usage = maybeToList (ModelUsage . responseUsageValue <$> responseUsage event)
-    failure = maybe "unknown response failure" compactValue (responseFailure event)
+ where
+  textDelta constructor = maybeToList (constructor <$> mfilter (not . Text.null) (responsesEventDelta event))
+  argumentDelta = maybeToList (ModelToolCallDelta (responsesEventOutputIndex event) Nothing Nothing <$> responsesEventDelta event)
+  itemEvents = maybe [] (responseItemEvents (responsesEventOutputIndex event)) (responsesEventItem event)
+  itemFinish = bool Nothing (Just ToolUse) (maybe False ((== "function_call") . responseItemType) (responsesEventItem event))
+  usage = maybeToList (ModelUsage . responseUsageValue <$> responseUsage event)
+  failure = maybe "unknown response failure" compactValue (responseFailure event)
 
 responseItemEvents :: Int -> ResponseItem -> [ModelEvent]
 responseItemEvents index item
@@ -432,16 +432,16 @@ choiceEvents choice =
   maybeToList (ModelReasoningDelta <$> mfilter (not . Text.null) (deltaReasoning delta))
     <> maybeToList (ModelTextDelta <$> mfilter (not . Text.null) (deltaContent delta))
     <> fmap toolDelta (deltaToolCalls delta)
-  where
-    delta = choiceDelta choice
+ where
+  delta = choiceDelta choice
 
-    toolDelta tool =
-      ModelToolCallDelta
-        { deltaToolIndex = deltaToolIndex' tool,
-          deltaToolId = deltaToolId' tool,
-          deltaToolName = deltaFunctionName =<< deltaToolFunction tool,
-          deltaToolArguments = fromMaybe "" (deltaFunctionArguments =<< deltaToolFunction tool)
-        }
+  toolDelta tool =
+    ModelToolCallDelta
+      { deltaToolIndex = deltaToolIndex' tool,
+        deltaToolId = deltaToolId' tool,
+        deltaToolName = deltaFunctionName =<< deltaToolFunction tool,
+        deltaToolArguments = fromMaybe "" (deltaFunctionArguments =<< deltaToolFunction tool)
+      }
 
 parseFinish :: Text -> Either ProviderFailure FinishReason
 parseFinish = \case
@@ -603,9 +603,9 @@ feedSse decoder chunk
   | otherwise =
       let (decoder', payloads) = foldLines decoder (init pieces)
        in (decoder' {sseBuffer = last pieces}, payloads)
-  where
-    combined = sseBuffer decoder <> chunk
-    pieces = Char8.split '\n' combined
+ where
+  combined = sseBuffer decoder <> chunk
+  pieces = Char8.split '\n' combined
 
 finishSse :: SseDecoder -> (SseDecoder, [ByteString])
 finishSse decoder =
@@ -621,10 +621,10 @@ drainBuffer decoder
 
 foldLines :: SseDecoder -> [ByteString] -> (SseDecoder, [ByteString])
 foldLines decoder = foldl consume (decoder, [])
-  where
-    consume (current, payloads) line =
-      let (decoder', emitted) = stepLine current line
-       in (decoder', payloads <> emitted)
+ where
+  consume (current, payloads) line =
+    let (decoder', emitted) = stepLine current line
+     in (decoder', payloads <> emitted)
 
 stepLine :: SseDecoder -> ByteString -> (SseDecoder, [ByteString])
 stepLine decoder rawLine
@@ -632,9 +632,9 @@ stepLine decoder rawLine
   | "data:" `ByteString.isPrefixOf` line =
       (decoder {sseDataLines = dropSpace (ByteString.drop 5 line) : sseDataLines decoder}, [])
   | otherwise = (decoder, [])
-  where
-    line = fromMaybe rawLine (ByteString.stripSuffix "\r" rawLine)
-    dropSpace value = fromMaybe value (ByteString.stripPrefix " " value)
+ where
+  line = fromMaybe rawLine (ByteString.stripSuffix "\r" rawLine)
+  dropSpace value = fromMaybe value (ByteString.stripPrefix " " value)
 
 flushEvent :: SseDecoder -> (SseDecoder, [ByteString])
 flushEvent decoder

@@ -18,58 +18,58 @@ module Yuki.N.AdversarialTest
     deadEntryNeverJams,
     binarySplits,
     randomSplits,
-    emptyChunks
+    emptyChunks,
   )
 where
-import Control.Concurrent (forkIO)
-import Data.Maybe (isJust)
-import System.Directory (doesFileExist)
-import System.Process (getProcessExitCode)
-import Data.Aeson.Types (parseEither, parseMaybe)
-import Data.Functor (($>))
-import Data.List (nub, sort, unfoldr)
+
 import Control.Applicative ()
+import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar
 import Control.Exception ()
 import Control.Monad ()
 import Data.Aeson
+import Data.Aeson.Types (parseEither, parseMaybe)
 import Data.Bool (bool)
 import Data.ByteString (ByteString)
-import qualified Data.ByteString as ByteString
-import qualified Data.ByteString.Builder as Builder
-import qualified Data.ByteString.Lazy as LazyByteString
+import Data.ByteString qualified as ByteString
+import Data.ByteString.Builder qualified as Builder
+import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Foldable (traverse_)
+import Data.Functor (($>))
 import Data.IORef
+import Data.List (nub, sort, unfoldr)
+import Data.Maybe (isJust)
 import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Text.IO as TextIO
+import Data.Text qualified as Text
+import Data.Text.IO qualified as TextIO
 import Network.HTTP.Client.TLS ()
 import Network.HTTP.Types
 import Network.Wai ()
 import Network.Wai.Handler.Warp ()
 import Network.Wai.Internal ()
 import Network.Wai.Test
+import System.Directory (doesFileExist)
 import System.FilePath (takeDirectory)
+import System.Process (getProcessExitCode)
 import System.Timeout (timeout)
 import Test.Tasty
 import Test.Tasty.HUnit
-import Yuki.N.Tools
-import Yuki.N.Background
-import Yuki.N.Agent
-import Yuki.N.Model
-import Yuki.N.Transcript
-import Yuki.N.Runs
-import Yuki.N.Provider.OpenAI
-import Yuki.N.Server
-import Yuki.N.AGUI.Types
 import Yuki.N.AGUI.Event
-import Yuki.N.ThreadConfig ()
+import Yuki.N.AGUI.Types
+import Yuki.N.Agent
+import Yuki.N.Background
+import Yuki.N.Model
+import Yuki.N.Provider.OpenAI
+import Yuki.N.Runs
+import Yuki.N.Server
 import Yuki.N.TestSupport
+import Yuki.N.ThreadConfig ()
+import Yuki.N.Tools
+import Yuki.N.Transcript
 
 pidOf :: ToolOutcome -> IO Int
 pidOf outcome =
   outcomeValue outcome >>= either assertFailure pure . parseEither (withObject "background" (.: "pid"))
-
 
 streamBegan :: IORef [Builder.Builder] -> IO Bool
 streamBegan ref =
@@ -110,121 +110,128 @@ assertEscape outcome =
     [ toolOutcomeError outcome @?= True,
       toolOutcomeContent outcome @?= "path escapes the work directory"
     ]
+
 -- | 规格：dotdot/嵌套 dotdot/绝对路径逃逸被每个 fs 工具一致拒绝。
 -- 背景：多个逃逸变体必须被所有入口一致拦截；单入口漏检就是可利用的沙箱洞。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 escapeFamily :: Assertion
 escapeFamily = withSandbox exercise
-  where
-    exercise root =
-      workTools Nothing root >>= \tools ->
-        traverse_ (fmap assertEscape . readAt tools) fileEscapes
-          *> traverse_ (fmap assertEscape . writeAt tools) fileEscapes
-          *> traverse_ (fmap assertEscape . editAt tools) fileEscapes
-          *> traverse_ (fmap assertEscape . globAt tools) dirEscapes
-          *> traverse_ (fmap assertEscape . grepAt tools) dirEscapes
-      where
-        absolute = Text.pack (takeDirectory root ++ "/outside")
-        fileEscapes =
-          [ "../outside/secret.txt",
-            "sub/../../outside/secret.txt",
-            "ghost/../../outside/secret.txt",
-            absolute <> "/secret.txt"
-          ]
-        dirEscapes = ["../outside", "ghost/../../outside", absolute]
-        readAt tools path = callTool tools "fs_read" (object ["path" .= path])
-        writeAt tools path = callTool tools "fs_write" (object ["path" .= path, "content" .= ("x" :: Text)])
-        editAt tools path = callTool tools "fs_edit" (object ["path" .= path, "old" .= ("o" :: Text), "new" .= ("n" :: Text)])
-        globAt tools path = callTool tools "fs_glob" (object ["pattern" .= ("*" :: Text), "path" .= path])
-        grepAt tools path = callTool tools "fs_grep" (object ["pattern" .= ("x" :: Text), "path" .= path])
+ where
+  exercise root =
+    workTools Nothing root >>= \tools ->
+      traverse_ (fmap assertEscape . readAt tools) fileEscapes
+        *> traverse_ (fmap assertEscape . writeAt tools) fileEscapes
+        *> traverse_ (fmap assertEscape . editAt tools) fileEscapes
+        *> traverse_ (fmap assertEscape . globAt tools) dirEscapes
+        *> traverse_ (fmap assertEscape . grepAt tools) dirEscapes
+   where
+    absolute = Text.pack (takeDirectory root ++ "/outside")
+    fileEscapes =
+      [ "../outside/secret.txt",
+        "sub/../../outside/secret.txt",
+        "ghost/../../outside/secret.txt",
+        absolute <> "/secret.txt"
+      ]
+    dirEscapes = ["../outside", "ghost/../../outside", absolute]
+    readAt tools path = callTool tools "fs_read" (object ["path" .= path])
+    writeAt tools path = callTool tools "fs_write" (object ["path" .= path, "content" .= ("x" :: Text)])
+    editAt tools path = callTool tools "fs_edit" (object ["path" .= path, "old" .= ("o" :: Text), "new" .= ("n" :: Text)])
+    globAt tools path = callTool tools "fs_glob" (object ["pattern" .= ("*" :: Text), "path" .= path])
+    grepAt tools path = callTool tools "fs_grep" (object ["pattern" .= ("x" :: Text), "path" .= path])
+
 -- | 规格：工作目录本身可读、可列、可 glob、可 grep，读目录报非逃逸错误。
 -- 背景：安全不能以功能瘫痪为代价；沙箱内操作必须保持可用。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 rootReachable :: Assertion
 rootReachable = withSandbox exercise
-  where
-    exercise root =
-      workTools Nothing root >>= \tools ->
-        callTool tools "fs_read" (object ["path" .= ("." :: Text)]) >>= \readRoot ->
-          callTool tools "fs_list" (object ["path" .= ("." :: Text)]) >>= \listRoot ->
-            callTool tools "fs_glob" (object ["pattern" .= ("**/*.txt" :: Text), "path" .= ("." :: Text)]) >>= \globRoot ->
-              callTool tools "fs_grep" (object ["pattern" .= ("fine" :: Text), "path" .= ("." :: Text)]) >>= \grepRoot ->
-                sequence_
-                  [ toolOutcomeError readRoot @?= True,
-                    assertBool "reading a directory is not an escape" (toolOutcomeContent readRoot /= "path escapes the work directory"),
-                    toolOutcomeError listRoot @?= False,
-                    assertBool "lists the sandbox" (Text.isInfixOf "sub/" (toolOutcomeContent listRoot)),
-                    toolOutcomeError globRoot @?= False,
-                    toolOutcomeContent globRoot @?= "sub/ok.txt",
-                    toolOutcomeError grepRoot @?= False,
-                    toolOutcomeContent grepRoot @?= "sub/ok.txt:1:fine"
-                  ]
+ where
+  exercise root =
+    workTools Nothing root >>= \tools ->
+      callTool tools "fs_read" (object ["path" .= ("." :: Text)]) >>= \readRoot ->
+        callTool tools "fs_list" (object ["path" .= ("." :: Text)]) >>= \listRoot ->
+          callTool tools "fs_glob" (object ["pattern" .= ("**/*.txt" :: Text), "path" .= ("." :: Text)]) >>= \globRoot ->
+            callTool tools "fs_grep" (object ["pattern" .= ("fine" :: Text), "path" .= ("." :: Text)]) >>= \grepRoot ->
+              sequence_
+                [ toolOutcomeError readRoot @?= True,
+                  assertBool "reading a directory is not an escape" (toolOutcomeContent readRoot /= "path escapes the work directory"),
+                  toolOutcomeError listRoot @?= False,
+                  assertBool "lists the sandbox" (Text.isInfixOf "sub/" (toolOutcomeContent listRoot)),
+                  toolOutcomeError globRoot @?= False,
+                  toolOutcomeContent globRoot @?= "sub/ok.txt",
+                  toolOutcomeError grepRoot @?= False,
+                  toolOutcomeContent grepRoot @?= "sub/ok.txt:1:fine"
+                ]
+
 -- | 规格：指向外部文件/链式/目录的符号链接在读写编辑下全部被拒，外部不被写。
 -- 背景：符号链接是经典逃逸向量；链式链接与目录链接都必须被拦截。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 symlinkEscape :: Assertion
 symlinkEscape = withSandbox exercise
-  where
-    exercise root =
-      workTools Nothing root >>= \tools ->
-        traverse_ (fmap assertEscape . readAt tools) ["linkfile.txt", "chain.txt", "linkdir/secret.txt"]
-          *> traverse_ (fmap assertEscape . writeAt tools) ["linkfile.txt", "linkdir/evil.txt"]
-          *> traverse_ (fmap assertEscape . editAt tools) ["linkfile.txt", "chain.txt"]
-          *> (TextIO.readFile (outside "secret.txt") >>= (@?= "TOP-SECRET\n"))
-          *> (doesFileExist (outside "evil.txt") >>= assertBool "nothing is written outside" . not)
-      where
-        outside name = takeDirectory root ++ "/outside/" ++ name
-        readAt tools path = callTool tools "fs_read" (object ["path" .= (path :: Text)])
-        writeAt tools path = callTool tools "fs_write" (object ["path" .= (path :: Text), "content" .= ("x" :: Text)])
-        editAt tools path = callTool tools "fs_edit" (object ["path" .= (path :: Text), "old" .= ("o" :: Text), "new" .= ("n" :: Text)])
+ where
+  exercise root =
+    workTools Nothing root >>= \tools ->
+      traverse_ (fmap assertEscape . readAt tools) ["linkfile.txt", "chain.txt", "linkdir/secret.txt"]
+        *> traverse_ (fmap assertEscape . writeAt tools) ["linkfile.txt", "linkdir/evil.txt"]
+        *> traverse_ (fmap assertEscape . editAt tools) ["linkfile.txt", "chain.txt"]
+        *> (TextIO.readFile (outside "secret.txt") >>= (@?= "TOP-SECRET\n"))
+        *> (doesFileExist (outside "evil.txt") >>= assertBool "nothing is written outside" . not)
+   where
+    outside name = takeDirectory root ++ "/outside/" ++ name
+    readAt tools path = callTool tools "fs_read" (object ["path" .= (path :: Text)])
+    writeAt tools path = callTool tools "fs_write" (object ["path" .= (path :: Text), "content" .= ("x" :: Text)])
+    editAt tools path = callTool tools "fs_edit" (object ["path" .= (path :: Text), "old" .= ("o" :: Text), "new" .= ("n" :: Text)])
+
 -- | 规格：沙箱内符号链接解析并正常工作。
 -- 背景：内部链接是合法用法；一律拒绝会破坏常见项目布局。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 symlinkInternal :: Assertion
 symlinkInternal = withSandbox exercise
-  where
-    exercise root =
-      workTools Nothing root >>= \tools ->
-        readAt tools "inner/ok.txt" >>= \readInner ->
-          writeAt tools "inner/new.txt" >>= \writeInner ->
-            editInner tools >>= \edited ->
-              (,) <$> TextIO.readFile (root ++ "/sub/ok.txt") <*> doesFileExist (root ++ "/sub/new.txt") >>= \(afterWrite, landed) ->
-                sequence_
-                  [ toolOutcomeError readInner @?= False,
-                    toolOutcomeContent readInner @?= "fine\n",
-                    toolOutcomeError writeInner @?= False,
-                    landed @?= True,
-                    toolOutcomeError edited @?= False,
-                    afterWrite @?= "great\n"
-                  ]
-      where
-        readAt tools path = callTool tools "fs_read" (object ["path" .= (path :: Text)])
-        writeAt tools path = callTool tools "fs_write" (object ["path" .= (path :: Text), "content" .= ("brand new\n" :: Text)])
-        editInner tools = callTool tools "fs_edit" (object ["path" .= ("inner/ok.txt" :: Text), "old" .= ("fine" :: Text), "new" .= ("great" :: Text)])
+ where
+  exercise root =
+    workTools Nothing root >>= \tools ->
+      readAt tools "inner/ok.txt" >>= \readInner ->
+        writeAt tools "inner/new.txt" >>= \writeInner ->
+          editInner tools >>= \edited ->
+            (,) <$> TextIO.readFile (root ++ "/sub/ok.txt") <*> doesFileExist (root ++ "/sub/new.txt") >>= \(afterWrite, landed) ->
+              sequence_
+                [ toolOutcomeError readInner @?= False,
+                  toolOutcomeContent readInner @?= "fine\n",
+                  toolOutcomeError writeInner @?= False,
+                  landed @?= True,
+                  toolOutcomeError edited @?= False,
+                  afterWrite @?= "great\n"
+                ]
+   where
+    readAt tools path = callTool tools "fs_read" (object ["path" .= (path :: Text)])
+    writeAt tools path = callTool tools "fs_write" (object ["path" .= (path :: Text), "content" .= ("brand new\n" :: Text)])
+    editInner tools = callTool tools "fs_edit" (object ["path" .= ("inner/ok.txt" :: Text), "old" .= ("fine" :: Text), "new" .= ("great" :: Text)])
+
 -- | 规格：glob/grep 遍历不跨符号链接、不因环挂起、不泄漏外部内容。
 -- 背景：遍历器面对环与外部链接必须终止且不泄漏；否则会挂死或泄密。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 walkerSymlinks :: Assertion
 walkerSymlinks = withSandbox exercise
-  where
-    exercise root =
-      workTools Nothing root >>= \tools ->
-        timeout 5000000 (probe tools) >>= maybe (assertFailure "the walker hung on a symlink cycle") verify
-      where
-        probe tools =
-          (,,)
-            <$> callTool tools "fs_glob" (object ["pattern" .= ("**/*.txt" :: Text)])
-            <*> callTool tools "fs_grep" (object ["pattern" .= ("TOP-SECRET" :: Text)])
-            <*> callTool tools "fs_grep" (object ["pattern" .= ("fine" :: Text)])
-        verify (names, leak, hits) =
-          sequence_
-            [ toolOutcomeContent names @?= "sub/ok.txt",
-              toolOutcomeContent leak @?= "",
-              toolOutcomeContent hits @?= "sub/ok.txt:1:fine"
-            ]
+ where
+  exercise root =
+    workTools Nothing root >>= \tools ->
+      timeout 5000000 (probe tools) >>= maybe (assertFailure "the walker hung on a symlink cycle") verify
+   where
+    probe tools =
+      (,,)
+        <$> callTool tools "fs_glob" (object ["pattern" .= ("**/*.txt" :: Text)])
+        <*> callTool tools "fs_grep" (object ["pattern" .= ("TOP-SECRET" :: Text)])
+        <*> callTool tools "fs_grep" (object ["pattern" .= ("fine" :: Text)])
+    verify (names, leak, hits) =
+      sequence_
+        [ toolOutcomeContent names @?= "sub/ok.txt",
+          toolOutcomeContent leak @?= "",
+          toolOutcomeContent hits @?= "sub/ok.txt:1:fine"
+        ]
+
 gatedModel :: MVar () -> Model
 gatedModel release =
   fakeModel $ \_ emit -> readMVar release *> emit (ModelTextDelta "ok") $> Stop
+
 -- | 规格：同一线程两个并发运行流互不串扰，取消只作用于目标运行，transcript 完整不撕裂。
 -- 背景：并发隔离是服务正确性底线；事件串扰会让前端显示对方运行的数据。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
@@ -250,7 +257,8 @@ concurrentRuns =
                             *> (timeout 5000000 (takeMVar doneA) >>= maybe (assertFailure "cancelled run did not finish") pure)
                             *> putMVar release ()
                             *> (timeout 5000000 (takeMVar doneB) >>= maybe (assertFailure "surviving run did not finish") pure)
-                            *> runSession (srequest (cancelRequest "run-b")) app >>= \lateCancel ->
+                            *> runSession (srequest (cancelRequest "run-b")) app
+                            >>= \lateCancel ->
                               decodeChunks chunksA >>= \eventsA ->
                                 decodeChunks chunksB >>= \eventsB ->
                                   transcriptLoad store "thread" >>= \saved ->
@@ -269,9 +277,10 @@ concurrentRuns =
                                           length captured @?= 2,
                                           assertBool "transcript is one whole history, not torn" (saved `elem` fmap Just captured)
                                         ]
-  where
-    inputA = (sampleInput []) {runId = "run-a", runMessages = [User (UserMessage "user-a" (UserText "hello-a") Nothing)]}
-    inputB = (sampleInput []) {runId = "run-b", runMessages = [User (UserMessage "user-b" (UserText "hello-b") Nothing)]}
+ where
+  inputA = (sampleInput []) {runId = "run-a", runMessages = [User (UserMessage "user-a" (UserText "hello-a") Nothing)]}
+  inputB = (sampleInput []) {runId = "run-b", runMessages = [User (UserMessage "user-b" (UserText "hello-b") Nothing)]}
+
 -- | 规格：重复 runId 取消竞态下两流都正常结束，后注册者收到 run.cancelled。
 -- 背景：重复 ID 竞态是取消实现的雷区；处理错误会让取消指向错误流。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
@@ -294,7 +303,8 @@ duplicateRunIdRace =
                       *> (timeout 5000000 (takeMVar doneB) >>= maybe (assertFailure "cancelled duplicate did not finish") pure)
                       *> putMVar gate ()
                       *> (timeout 5000000 (takeMVar doneA) >>= maybe (assertFailure "first run did not finish") pure)
-                      *> runSession (srequest (cancelRequest "run")) app >>= \lateCancel ->
+                      *> runSession (srequest (cancelRequest "run")) app
+                      >>= \lateCancel ->
                         decodeChunks chunksA >>= \eventsA ->
                           decodeChunks chunksB >>= \eventsB ->
                             sequence_
@@ -304,49 +314,51 @@ duplicateRunIdRace =
                                 eventType (last eventsA) @?= "RUN_FINISHED",
                                 eventType (last eventsB) @?= "RUN_FINISHED"
                               ]
-  where
-    same = sampleInput []
+ where
+  same = sampleInput []
+
 -- | 规格：shell_kill 回收进程（无僵尸）并从注册表移除。
 -- 背景：进程回收是资源管理底线；僵尸累积会耗尽系统句柄。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 killReaps :: Assertion
 killReaps = withWorkDir exercise
-  where
-    exercise dir =
-      newBackgroundRegistry >>= \registry ->
-        let tools = backgroundTools registry dir
-         in callTool tools "shell_bg" (object ["command" .= ("sleep 500" :: Text)]) >>= \started ->
-              taskIdOf started >>= \taskId ->
-                lookupBackground registry taskId >>= \found ->
-                  case found of
-                    Nothing -> assertFailure "task missing from the registry"
-                    Just task ->
-                      callTool tools "shell_kill" (object ["taskId" .= taskId]) >>= \killed ->
-                        outcomeValue killed >>= \result ->
-                          waitUntil (isJust <$> getProcessExitCode (backgroundProcess task)) >>= \reaped ->
-                            isJust <$> lookupBackground registry taskId >>= \registered ->
-                              sequence_
-                                [ parseMaybe (withObject "kill" (.: "killed")) result @?= Just True,
-                                  assertBool "the process is reaped, no zombie" reaped,
-                                  assertBool "the registry drops the task" (not registered)
-                                ]
+ where
+  exercise dir =
+    newBackgroundRegistry >>= \registry ->
+      let tools = backgroundTools registry dir
+       in callTool tools "shell_bg" (object ["command" .= ("sleep 500" :: Text)]) >>= \started ->
+            taskIdOf started >>= \taskId ->
+              lookupBackground registry taskId >>= \found ->
+                case found of
+                  Nothing -> assertFailure "task missing from the registry"
+                  Just task ->
+                    callTool tools "shell_kill" (object ["taskId" .= taskId]) >>= \killed ->
+                      outcomeValue killed >>= \result ->
+                        waitUntil (isJust <$> getProcessExitCode (backgroundProcess task)) >>= \reaped ->
+                          isJust <$> lookupBackground registry taskId >>= \registered ->
+                            sequence_
+                              [ parseMaybe (withObject "kill" (.: "killed")) result @?= Just True,
+                                assertBool "the process is reaped, no zombie" reaped,
+                                assertBool "the registry drops the task" (not registered)
+                              ]
+
 -- | 规格：外部 kill 的任务被 watcher 回收，轮询报告退出且不挂起，条目保留至 shell_kill。
 -- 背景：外部死亡是常态；watcher 必须回收而不挂起，条目保留便于事后查证。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 externalKill :: Assertion
 externalKill = withWorkDir exercise
-  where
-    exercise dir =
-      newBackgroundRegistry >>= \registry ->
-        let tools = backgroundTools registry dir
-         in callTool tools "shell_bg" (object ["command" .= ("sleep 500" :: Text)]) >>= \started ->
-              (,) <$> taskIdOf started <*> pidOf started >>= \(taskId, pid) ->
-                lookupBackground registry taskId >>= \found ->
-                  case found of
-                    Nothing -> assertFailure "task missing from the registry"
-                    Just task ->
-                      workTools Nothing dir >>= \shellTools ->
-                        callTool shellTools "shell" (object ["command" .= ("kill -9 " <> Text.pack (show pid) :: Text)]) >>= \sigkill ->
+ where
+  exercise dir =
+    newBackgroundRegistry >>= \registry ->
+      let tools = backgroundTools registry dir
+       in callTool tools "shell_bg" (object ["command" .= ("sleep 500" :: Text)]) >>= \started ->
+            (,) <$> taskIdOf started <*> pidOf started >>= \(taskId, pid) ->
+              lookupBackground registry taskId >>= \found ->
+                case found of
+                  Nothing -> assertFailure "task missing from the registry"
+                  Just task ->
+                    workTools Nothing dir >>= \shellTools ->
+                      callTool shellTools "shell" (object ["command" .= ("kill -9 " <> Text.pack (show pid) :: Text)]) >>= \sigkill ->
                         callTool tools "shell_output" (object ["taskId" .= taskId, "waitSeconds" .= (5 :: Int)]) >>= \polled ->
                           pollOf polled >>= \(running, exitCode, _, _) ->
                             waitUntil (isJust <$> getProcessExitCode (backgroundProcess task)) >>= \reaped ->
@@ -361,37 +373,39 @@ externalKill = withWorkDir exercise
                                         assertBool "a dead task lingers until shell_kill reaps it" registered,
                                         parseMaybe (withObject "kill" (.: "killed")) result @?= Just True
                                       ]
+
 -- | 规格：死亡条目不阻塞后续任务 spawn/轮询。
 -- 背景：注册表条目故障必须隔离；单条目卡死会拖垮整个后台工具。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 deadEntryNeverJams :: Assertion
 deadEntryNeverJams = withWorkDir exercise
-  where
-    exercise dir =
-      newBackgroundRegistry >>= \registry ->
-        exerciseWith registry (backgroundTools registry dir)
-    exerciseWith _registry tools =
-      callTool tools "shell_bg" (object ["command" .= ("true" :: Text)]) >>= \first ->
-              taskIdOf first >>= \firstId ->
-                callTool tools "shell_output" (object ["taskId" .= firstId, "waitSeconds" .= (5 :: Int)]) >>= \polledFirst ->
-                  callTool tools "shell_bg" (object ["command" .= ("echo second" :: Text)]) >>= \second ->
-                    taskIdOf second >>= \secondId ->
-                      callTool tools "shell_output" (object ["taskId" .= secondId, "waitSeconds" .= (5 :: Int)]) >>= \polledSecond ->
-                        pollOf polledFirst >>= \(_, firstExit, _, _) ->
-                          pollOf polledSecond >>= \(running, exitCode, output, _) ->
-                            (,) <$> reap tools firstId <*> reap tools secondId >>= \(firstKilled, secondKilled) ->
-                              sequence_
-                                [ assertBool "the first task died on its own" (isJust firstExit),
-                                  assertBool "task ids are distinct" (firstId /= secondId),
-                                  running @?= False,
-                                  exitCode @?= Just 0,
-                                  output @?= "second\n",
-                                  firstKilled @?= Just True,
-                                  secondKilled @?= Just True
-                                ]
-    reap tools taskId =
-      callTool tools "shell_kill" (object ["taskId" .= taskId])
-        >>= fmap (parseMaybe (withObject "kill" (.: "killed"))) . outcomeValue
+ where
+  exercise dir =
+    newBackgroundRegistry >>= \registry ->
+      exerciseWith registry (backgroundTools registry dir)
+  exerciseWith _registry tools =
+    callTool tools "shell_bg" (object ["command" .= ("true" :: Text)]) >>= \first ->
+      taskIdOf first >>= \firstId ->
+        callTool tools "shell_output" (object ["taskId" .= firstId, "waitSeconds" .= (5 :: Int)]) >>= \polledFirst ->
+          callTool tools "shell_bg" (object ["command" .= ("echo second" :: Text)]) >>= \second ->
+            taskIdOf second >>= \secondId ->
+              callTool tools "shell_output" (object ["taskId" .= secondId, "waitSeconds" .= (5 :: Int)]) >>= \polledSecond ->
+                pollOf polledFirst >>= \(_, firstExit, _, _) ->
+                  pollOf polledSecond >>= \(running, exitCode, output, _) ->
+                    (,) <$> reap tools firstId <*> reap tools secondId >>= \(firstKilled, secondKilled) ->
+                      sequence_
+                        [ assertBool "the first task died on its own" (isJust firstExit),
+                          assertBool "task ids are distinct" (firstId /= secondId),
+                          running @?= False,
+                          exitCode @?= Just 0,
+                          output @?= "second\n",
+                          firstKilled @?= Just True,
+                          secondKilled @?= Just True
+                        ]
+  reap tools taskId =
+    callTool tools "shell_kill" (object ["taskId" .= taskId])
+      >>= fmap (parseMaybe (withObject "kill" (.: "killed"))) . outcomeValue
+
 sseSpecimen :: ByteString
 sseSpecimen =
   ByteString.concat
@@ -412,12 +426,13 @@ sseExpected :: [ByteString]
 sseExpected = ["{\"a\":1}", "one\ntwo", "[DONE]", "tail"]
 sseCollect :: [ByteString] -> [ByteString]
 sseCollect chunks = payloads <> trailing
-  where
-    (decoder, payloads) = foldl feed (emptySseDecoder, []) chunks
-    feed (current, acc) chunk = (next, acc <> emitted)
-      where
-        (next, emitted) = feedSse current chunk
-    (_, trailing) = finishSse decoder
+ where
+  (decoder, payloads) = foldl feed (emptySseDecoder, []) chunks
+  feed (current, acc) chunk = (next, acc <> emitted)
+   where
+    (next, emitted) = feedSse current chunk
+  (_, trailing) = finishSse decoder
+
 -- | 规格：SSE 字节流在每个二进制切点切分都能复现一次性解码结果。
 -- 背景：任意网络分块是现实约束；切点敏感说明解码器有状态错误。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
@@ -425,32 +440,35 @@ binarySplits :: Assertion
 binarySplits =
   (sseCollect [sseSpecimen] @?= sseExpected)
     *> traverse_ splitAtEvery [0 .. ByteString.length sseSpecimen]
-  where
-    splitAtEvery point =
-      sseCollect [ByteString.take point sseSpecimen, ByteString.drop point sseSpecimen] @?= sseExpected
+ where
+  splitAtEvery point =
+    sseCollect [ByteString.take point sseSpecimen, ByteString.drop point sseSpecimen] @?= sseExpected
+
 -- | 规格：200 组伪随机 n-ary 切分都能复现一次性解码结果。
 -- 背景：随机切分覆盖单切点测不到的组合；失败说明解码器状态机存在隐蔽 bug。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 randomSplits :: Assertion
 randomSplits = traverse_ check [1 .. 200]
-  where
-    check seed = sseCollect (chopAt (splitPoints seed) sseSpecimen) @?= sseExpected
+ where
+  check seed = sseCollect (chopAt (splitPoints seed) sseSpecimen) @?= sseExpected
+
 splitPoints :: Int -> [Int]
 splitPoints seed = sort (nub (take (1 + seed `mod` 7) (fmap (`mod` (size + 1)) (lcg seed))))
-  where
-    size = ByteString.length sseSpecimen
+ where
+  size = ByteString.length sseSpecimen
 lcg :: Int -> [Int]
 lcg seed = unfoldr step (seed * 2654435761 + 1)
-  where
-    step x = Just (x, (x * 1103515245 + 12345) `mod` 2147483648)
+ where
+  step x = Just (x, (x * 1103515245 + 12345) `mod` 2147483648)
 chopAt :: [Int] -> ByteString -> [ByteString]
 chopAt points bytes = go 0 points bytes
-  where
-    go _ [] rest = [rest]
-    go offset (point : rest) chunk =
-      piece : go point rest remainder
-      where
-        (piece, remainder) = ByteString.splitAt (point - offset) chunk
+ where
+  go _ [] rest = [rest]
+  go offset (point : rest) chunk =
+    piece : go point rest remainder
+   where
+    (piece, remainder) = ByteString.splitAt (point - offset) chunk
+
 -- | 规格：空块、尾块缺失 CRLF 等边界输入被正确解码。
 -- 背景：空块与残缺尾帧是真实网络常态；处理错误会丢事件或挂起。
 -- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。

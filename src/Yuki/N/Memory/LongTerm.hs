@@ -26,20 +26,20 @@ import Control.Exception (IOException, displayException, try)
 import Control.Monad (foldM, (>=>))
 import Data.Aeson
 import Data.Bool (bool)
-import qualified Data.Char as Char
+import Data.Char qualified as Char
 import Data.Foldable (traverse_)
 import Data.Function ((&))
 import Data.Functor ((<&>))
 import Data.List (sortOn)
 import Data.Map.Strict (Map)
-import qualified Data.Map.Strict as Map
+import Data.Map.Strict qualified as Map
 import Data.Maybe (listToMaybe, mapMaybe)
 import Data.Ord (Down (..))
 import Data.Set (Set)
-import qualified Data.Set as Set
+import Data.Set qualified as Set
 import Data.Text (Text)
-import qualified Data.Text as Text
-import qualified Data.Text.Encoding as TextEncoding
+import Data.Text qualified as Text
+import Data.Text.Encoding qualified as TextEncoding
 import Data.Time.Clock.POSIX (POSIXTime, getPOSIXTime)
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
@@ -474,8 +474,8 @@ newLongTermStore dir =
     >>= either
       (pure . Left)
       (const (loadState path >>= traverse (newMVar >=> pure . makeStore (persistState path))))
-  where
-    path = dir </> "long-term.json"
+ where
+  path = dir </> "long-term.json"
 
 newMemoryLongTermStore :: IO LongTermStore
 newMemoryLongTermStore =
@@ -492,17 +492,21 @@ makeStore persist lock =
       longTermCatalog = catalog lock,
       longTermReceipts = receipts lock,
       longTermDelete = \incarnation ->
-        () <$ modifyMVar lock (\state ->
-              let changed =
-                    state
-                      { stateSpaces = Map.filter ((/= incarnation) . memorySpaceOwner) (stateSpaces state),
-                        stateMemories =
-                          Map.filter (not . Map.null)
-                            . Map.map (Map.filter ((/= incarnation) . longMemoryOwner))
-                            $ stateMemories state,
-                        stateReceipts = Map.filter ((/= incarnation) . memoryReadReceiptIncarnationId) (stateReceipts state)
-                      }
-               in persist changed *> pure (changed, ()))
+        ()
+          <$ modifyMVar
+            lock
+            ( \state ->
+                let changed =
+                      state
+                        { stateSpaces = Map.filter ((/= incarnation) . memorySpaceOwner) (stateSpaces state),
+                          stateMemories =
+                            Map.filter (not . Map.null)
+                              . Map.map (Map.filter ((/= incarnation) . longMemoryOwner))
+                              $ stateMemories state,
+                          stateReceipts = Map.filter ((/= incarnation) . memoryReadReceiptIncarnationId) (stateReceipts state)
+                        }
+                 in persist changed *> pure (changed, ())
+            )
     }
 
 prepareDirectory :: FilePath -> IO (Either Text ())
@@ -534,7 +538,8 @@ stateToStored state =
   StoredState
     storeVersion
     (sortOn memorySpaceId (Map.elems (stateSpaces state)))
-    ( sortOn ((,) <$> longMemoryId <*> longMemoryRevision)
+    ( sortOn
+        ((,) <$> longMemoryId <*> longMemoryRevision)
         (concatMap Map.elems (Map.elems (stateMemories state)))
     )
     (sortOn ((,) <$> memoryReadReceiptCreated <*> memoryReadReceiptId) (Map.elems (stateReceipts state)))
@@ -556,8 +561,8 @@ insertSpace spaces space =
     *> case Map.lookup key spaces of
       Nothing -> Right (Map.insert key space spaces)
       Just _ -> Left ("duplicate memory space: " <> memorySpaceId space)
-  where
-    key = spaceKey (memorySpaceOwner space) (memorySpaceVisibility space)
+ where
+  key = spaceKey (memorySpaceOwner space) (memorySpaceVisibility space)
 
 validateSpace :: MemorySpace -> Either Text ()
 validateSpace space
@@ -588,8 +593,8 @@ insertMemory spaces memories memory =
               <> "@"
               <> Text.pack (show (longMemoryRevision memory))
           )
-  where
-    history = Map.findWithDefault Map.empty (longMemoryId memory) memories
+ where
+  history = Map.findWithDefault Map.empty (longMemoryId memory) memories
 
 validateMemory :: Map Text MemorySpace -> LongMemory -> Either Text ()
 validateMemory spaces memory
@@ -602,8 +607,8 @@ validateMemory spaces memory
       Left ("invalid long-term memory timestamps: " <> longMemoryId memory)
   | Map.notMember key spaces = Left ("missing memory space for: " <> longMemoryId memory)
   | otherwise = Right ()
-  where
-    key = spaceKey (longMemoryOwner memory) (longMemoryVisibility memory)
+ where
+  key = spaceKey (longMemoryOwner memory) (longMemoryVisibility memory)
 
 validateHistories :: Map Text (Map Int LongMemory) -> Either Text ()
 validateHistories = traverse_ validateHistory
@@ -618,8 +623,8 @@ insertReceipt memories stored receipt =
     *> case Map.lookup identifier stored of
       Nothing -> Right (Map.insert identifier receipt stored)
       Just _ -> Left ("duplicate long-term memory receipt: " <> identifier)
-  where
-    identifier = memoryReadReceiptId receipt
+ where
+  identifier = memoryReadReceiptId receipt
 
 validateReceipt :: Map Text (Map Int LongMemory) -> MemoryReadReceipt -> Either Text ()
 validateReceipt memories receipt =
@@ -631,12 +636,12 @@ validateReceipt memories receipt =
       traverse_ validateSpace (memoryReadReceiptSpaces receipt),
       traverse_ knownRef (memoryReadReceiptRecords receipt)
     ]
-  where
-    knownRef ref =
-      bool
-        (Left ("unknown memory receipt record: " <> memoryRefId ref <> "@" <> Text.pack (show (memoryRefRevision ref))))
-        (Right ())
-        (maybe False (Map.member (memoryRefRevision ref)) (Map.lookup (memoryRefId ref) memories))
+ where
+  knownRef ref =
+    bool
+      (Left ("unknown memory receipt record: " <> memoryRefId ref <> "@" <> Text.pack (show (memoryRefRevision ref))))
+      (Right ())
+      (maybe False (Map.member (memoryRefRevision ref)) (Map.lookup (memoryRefId ref) memories))
 
 validateHistory :: Map Int LongMemory -> Either Text ()
 validateHistory history =
@@ -719,14 +724,14 @@ reviseMemory now request state current
                 longMemoryStatus = MemoryActive
               }
        in Right (commitRevision revised state, revised)
-  where
-    keywords = mergeTexts (longMemoryKeywords current) (rememberKeywords request)
-    sources = mergeTexts (longMemorySourceRefs current) (rememberSourceRefs request)
-    unchanged =
-      longMemoryKind current == rememberKind request
-        && longMemoryKeywords current == keywords
-        && longMemorySourceRefs current == sources
-        && longMemoryStatus current == MemoryActive
+ where
+  keywords = mergeTexts (longMemoryKeywords current) (rememberKeywords request)
+  sources = mergeTexts (longMemorySourceRefs current) (rememberSourceRefs request)
+  unchanged =
+    longMemoryKind current == rememberKind request
+      && longMemoryKeywords current == keywords
+      && longMemorySourceRefs current == sources
+      && longMemoryStatus current == MemoryActive
 
 cleanRemember :: RememberRequest -> Either Text RememberRequest
 cleanRemember request
@@ -742,10 +747,10 @@ cleanRemember request
             rememberKeywords = cleanTexts (rememberKeywords request),
             rememberSourceRefs = cleanTexts (rememberSourceRefs request)
           }
-  where
-    owner = Text.strip (rememberOwner request)
-    kind = Text.strip (rememberKind request)
-    content = Text.strip (rememberContent request)
+ where
+  owner = Text.strip (rememberOwner request)
+  kind = Text.strip (rememberKind request)
+  content = Text.strip (rememberContent request)
 
 duplicateOf :: RememberRequest -> LongTermState -> Maybe LongMemory
 duplicateOf request =
@@ -753,8 +758,8 @@ duplicateOf request =
     . filter ((== canonicalContent (rememberContent request)) . canonicalContent . longMemoryContent)
     . filter ((== scope) . memoryScope)
     . latestMemories
-  where
-    scope = (rememberOwner request, rememberVisibility request)
+ where
+  scope = (rememberOwner request, rememberVisibility request)
 
 latestMemories :: LongTermState -> [LongMemory]
 latestMemories = mapMaybe (fmap snd . Map.lookupMax) . Map.elems . stateMemories
@@ -778,11 +783,11 @@ commitRevision memory state =
           (Map.insert (longMemoryRevision memory) memory history)
           (stateMemories state)
     }
-  where
-    key = spaceKey (longMemoryOwner memory) (longMemoryVisibility memory)
-    space = spaceAt state (longMemoryOwner memory) (longMemoryVisibility memory)
-    revisedSpace = space {memorySpaceRevision = memorySpaceRevision space + 1}
-    history = Map.findWithDefault Map.empty (longMemoryId memory) (stateMemories state)
+ where
+  key = spaceKey (longMemoryOwner memory) (longMemoryVisibility memory)
+  space = spaceAt state (longMemoryOwner memory) (longMemoryVisibility memory)
+  revisedSpace = space {memorySpaceRevision = memorySpaceRevision space + 1}
+  history = Map.findWithDefault Map.empty (longMemoryId memory) (stateMemories state)
 
 grep ::
   (LongTermState -> IO (Either Text ())) ->
@@ -825,9 +830,9 @@ cleanGrep request
       Left ("memory grep limit exceeds " <> Text.pack (show maximumGrepLimit))
   | otherwise =
       Right request {grepIncarnationId = incarnation, grepQuery = query}
-  where
-    incarnation = Text.strip (grepIncarnationId request)
-    query = Text.strip (grepQuery request)
+ where
+  incarnation = Text.strip (grepIncarnationId request)
+  query = Text.strip (grepQuery request)
 
 grepVisible :: GrepRequest -> LongMemory -> Bool
 grepVisible request memory =
@@ -850,11 +855,11 @@ queryTerms :: Text -> Either Text QueryTerms
 queryTerms query
   | Set.null ascii && null unicode = Left "memory grep query has no searchable terms"
   | otherwise = Right (QueryTerms ascii unicode (canonicalContent query))
-  where
-    ascii = Set.fromList (tokensBy asciiToken query)
-    unicode = cleanTexts (tokensBy unicodeToken query)
-    asciiToken char = Char.isAscii char && (Char.isAlphaNum char || char == '_')
-    unicodeToken char = not (Char.isAscii char) && (Char.isLetter char || Char.isNumber char)
+ where
+  ascii = Set.fromList (tokensBy asciiToken query)
+  unicode = cleanTexts (tokensBy unicodeToken query)
+  asciiToken char = Char.isAscii char && (Char.isAlphaNum char || char == '_')
+  unicodeToken char = not (Char.isAscii char) && (Char.isLetter char || Char.isNumber char)
 
 tokensBy :: (Char -> Bool) -> Text -> [Text]
 tokensBy wanted =
@@ -866,25 +871,25 @@ matched :: QueryTerms -> LongMemory -> Maybe (Int, LongMemory, [Text])
 matched terms memory
   | score == 0 = Nothing
   | otherwise = Just (score, memory, matches)
-  where
-    content = longMemoryContent memory
-    keywords = longMemoryKeywords memory
-    haystack = Text.toCaseFold (content <> "\n" <> Text.unwords keywords)
-    asciiHaystack = Set.fromList (tokensBy (\char -> Char.isAscii char && (Char.isAlphaNum char || char == '_')) haystack)
-    asciiMatches = Set.toList (Set.intersection (queryAscii terms) asciiHaystack)
-    unicodeMatches = filter (`Text.isInfixOf` haystack) (queryUnicode terms)
-    matches = unicodeMatches <> asciiMatches
-    keywordHaystack = Text.toCaseFold (Text.unwords keywords)
-    keywordHits = length (filter (`Text.isInfixOf` keywordHaystack) matches)
-    wholeHit =
-      not (null matches)
-        && not (Text.null (queryWhole terms))
-        && queryWhole terms `Text.isInfixOf` haystack
-    score =
-      16 * fromEnum wholeHit
-        + 8 * length unicodeMatches
-        + 4 * length asciiMatches
-        + 3 * keywordHits
+ where
+  content = longMemoryContent memory
+  keywords = longMemoryKeywords memory
+  haystack = Text.toCaseFold (content <> "\n" <> Text.unwords keywords)
+  asciiHaystack = Set.fromList (tokensBy (\char -> Char.isAscii char && (Char.isAlphaNum char || char == '_')) haystack)
+  asciiMatches = Set.toList (Set.intersection (queryAscii terms) asciiHaystack)
+  unicodeMatches = filter (`Text.isInfixOf` haystack) (queryUnicode terms)
+  matches = unicodeMatches <> asciiMatches
+  keywordHaystack = Text.toCaseFold (Text.unwords keywords)
+  keywordHits = length (filter (`Text.isInfixOf` keywordHaystack) matches)
+  wholeHit =
+    not (null matches)
+      && not (Text.null (queryWhole terms))
+      && queryWhole terms `Text.isInfixOf` haystack
+  score =
+    16 * fromEnum wholeHit
+      + 8 * length unicodeMatches
+      + 4 * length asciiMatches
+      + 3 * keywordHits
 
 rankKey :: (Int, LongMemory, [Text]) -> (Int, Integer, Int)
 rankKey (score, memory, _) =
@@ -906,24 +911,24 @@ snippetFor memory matches =
 snippetAround :: [Text] -> Text -> Text
 snippetAround matches content =
   prefix <> Text.take snippetLength (Text.drop start content) <> suffix
-  where
-    folded = Text.toCaseFold content
-    position =
-      mapMaybe
-        (\needle -> nonEmptyPosition (Text.breakOn needle folded))
-        matches
-        & minimumMaybe
-        & maybe 0 id
-    start = max 0 (position - snippetLead)
-    prefix = bool "" "…" (start > 0)
-    suffix = bool "" "…" (start + snippetLength < Text.length content)
+ where
+  folded = Text.toCaseFold content
+  position =
+    mapMaybe
+      (\needle -> nonEmptyPosition (Text.breakOn needle folded))
+      matches
+      & minimumMaybe
+      & maybe 0 id
+  start = max 0 (position - snippetLead)
+  prefix = bool "" "…" (start > 0)
+  suffix = bool "" "…" (start + snippetLength < Text.length content)
 
 nonEmptyPosition :: (Text, Text) -> Maybe Int
 nonEmptyPosition (before, after)
   | Text.null after = Nothing
   | otherwise = Just (Text.length before)
 
-minimumMaybe :: Ord value => [value] -> Maybe value
+minimumMaybe :: (Ord value) => [value] -> Maybe value
 minimumMaybe = \case
   [] -> Nothing
   values -> Just (minimum values)
@@ -949,23 +954,23 @@ readAt now request state =
   cleanRead request >>= \clean ->
     findRevision clean state >>= \memory ->
       visibleResult clean memory
-  where
-    visibleResult clean memory
-      | not (visibleTo (readIncarnationId clean) memory) =
-          Left ("long-term memory is not visible to incarnation: " <> readMemoryId clean)
-      | otherwise =
-          Right
-            ( MemoryReadResult
-                memory
-                ( makeReceipt
-                    now
-                    "read"
-                    (readIncarnationId clean)
-                    Nothing
-                    [spaceAt state (longMemoryOwner memory) (longMemoryVisibility memory)]
-                    [memoryRef memory]
-                )
-            )
+ where
+  visibleResult clean memory
+    | not (visibleTo (readIncarnationId clean) memory) =
+        Left ("long-term memory is not visible to incarnation: " <> readMemoryId clean)
+    | otherwise =
+        Right
+          ( MemoryReadResult
+              memory
+              ( makeReceipt
+                  now
+                  "read"
+                  (readIncarnationId clean)
+                  Nothing
+                  [spaceAt state (longMemoryOwner memory) (longMemoryVisibility memory)]
+                  [memoryRef memory]
+              )
+          )
 
 cleanRead :: ReadRequest -> Either Text ReadRequest
 cleanRead request
@@ -974,9 +979,9 @@ cleanRead request
   | maybe False (< 1) (readMemoryRevision request) = Left "memory revision must be positive"
   | otherwise =
       Right request {readIncarnationId = incarnation, readMemoryId = identifier}
-  where
-    incarnation = Text.strip (readIncarnationId request)
-    identifier = Text.strip (readMemoryId request)
+ where
+  incarnation = Text.strip (readIncarnationId request)
+  identifier = Text.strip (readMemoryId request)
 
 findRevision :: ReadRequest -> LongTermState -> Either Text LongMemory
 findRevision request state =
@@ -984,19 +989,19 @@ findRevision request state =
     (Left ("unknown long-term memory: " <> readMemoryId request))
     select
     (Map.lookup (readMemoryId request) (stateMemories state))
-  where
-    select history =
-      case readMemoryRevision request of
-        Nothing ->
-          maybe
-            (Left ("empty long-term memory history: " <> readMemoryId request))
-            (Right . snd)
-            (Map.lookupMax history)
-        Just revision ->
-          maybe
-            (Left ("unknown long-term memory revision: " <> readMemoryId request <> "@" <> Text.pack (show revision)))
-            Right
-            (Map.lookup revision history)
+ where
+  select history =
+    case readMemoryRevision request of
+      Nothing ->
+        maybe
+          (Left ("empty long-term memory history: " <> readMemoryId request))
+          (Right . snd)
+          (Map.lookupMax history)
+      Just revision ->
+        maybe
+          (Left ("unknown long-term memory revision: " <> readMemoryId request <> "@" <> Text.pack (show revision)))
+          Right
+          (Map.lookup revision history)
 
 void ::
   (LongTermState -> IO (Either Text ())) ->
@@ -1014,28 +1019,28 @@ voidAt now request state =
   latestById (voidMemoryId request) state >>= \current ->
     owned current >>= \memory ->
       Right (commitRevision memory state, memory)
-  where
-    owned current
-      | longMemoryOwner current /= voidIncarnationId request =
-          Left ("only the owning incarnation may void memory: " <> voidMemoryId request)
-      | otherwise = compareRevision current
-    compareRevision current
-      | longMemoryRevision current /= voidExpectedRevision request =
-          Left
-            ( "long-term memory revision conflict: expected "
-                <> Text.pack (show (voidExpectedRevision request))
-                <> ", current "
-                <> Text.pack (show (longMemoryRevision current))
-            )
-      | longMemoryStatus current == MemoryVoid =
-          Left ("long-term memory is already void: " <> voidMemoryId request)
-      | otherwise =
-          Right
-            current
-              { longMemoryRevision = longMemoryRevision current + 1,
-                longMemoryRevised = now,
-                longMemoryStatus = MemoryVoid
-              }
+ where
+  owned current
+    | longMemoryOwner current /= voidIncarnationId request =
+        Left ("only the owning incarnation may void memory: " <> voidMemoryId request)
+    | otherwise = compareRevision current
+  compareRevision current
+    | longMemoryRevision current /= voidExpectedRevision request =
+        Left
+          ( "long-term memory revision conflict: expected "
+              <> Text.pack (show (voidExpectedRevision request))
+              <> ", current "
+              <> Text.pack (show (longMemoryRevision current))
+          )
+    | longMemoryStatus current == MemoryVoid =
+        Left ("long-term memory is already void: " <> voidMemoryId request)
+    | otherwise =
+        Right
+          current
+            { longMemoryRevision = longMemoryRevision current + 1,
+              longMemoryRevised = now,
+              longMemoryStatus = MemoryVoid
+            }
 
 cleanVoid :: VoidRequest -> Either Text VoidRequest
 cleanVoid request
@@ -1044,9 +1049,9 @@ cleanVoid request
   | voidExpectedRevision request < 1 = Left "expected memory revision must be positive"
   | otherwise =
       Right request {voidIncarnationId = incarnation, voidMemoryId = identifier}
-  where
-    incarnation = Text.strip (voidIncarnationId request)
-    identifier = Text.strip (voidMemoryId request)
+ where
+  incarnation = Text.strip (voidIncarnationId request)
+  identifier = Text.strip (voidMemoryId request)
 
 latestById :: Text -> LongTermState -> Either Text LongMemory
 latestById identifier state =
@@ -1063,8 +1068,8 @@ inspectSpace :: MVar LongTermState -> Text -> MemoryVisibility -> IO (Either Tex
 inspectSpace lock rawOwner visibility
   | Text.null owner = pure (Left "memory space owner must not be empty")
   | otherwise = readMVar lock <&> Right . (\state -> spaceAt state owner visibility)
-  where
-    owner = Text.strip rawOwner
+ where
+  owner = Text.strip rawOwner
 
 catalog :: MVar LongTermState -> Text -> Int -> IO [MemoryCatalogItem]
 catalog lock rawIncarnation requested
@@ -1076,8 +1081,8 @@ catalog lock rawIncarnation requested
           . sortOn (Down . catalogOrder)
           . filter ((&&) <$> ((== MemoryActive) . longMemoryStatus) <*> visibleTo incarnation)
           . latestMemories
-  where
-    incarnation = Text.strip rawIncarnation
+ where
+  incarnation = Text.strip rawIncarnation
 
 catalogOrder :: LongMemory -> (Integer, Int, Text)
 catalogOrder memory =
@@ -1106,8 +1111,8 @@ receipts lock rawIncarnation
           . filter ((== incarnation) . memoryReadReceiptIncarnationId)
           . Map.elems
           . stateReceipts
-  where
-    incarnation = Text.strip rawIncarnation
+ where
+  incarnation = Text.strip rawIncarnation
 
 receiptOrder :: MemoryReadReceipt -> (Integer, Text)
 receiptOrder receipt =
@@ -1183,25 +1188,25 @@ grepSpaces request state =
     . filter allowed
     . Map.elems
     $ withPrivate
-  where
-    private = spaceAt state (grepIncarnationId request) MemoryPrivate
-    withPrivate =
-      Map.insert
-        (spaceKey (memorySpaceOwner private) MemoryPrivate)
-        private
-        (stateSpaces state)
-    allowed space =
-      case grepVisibility request of
-        Just MemoryPrivate ->
-          memorySpaceVisibility space == MemoryPrivate
-            && memorySpaceOwner space == grepIncarnationId request
-        Just MemoryShared ->
-          memorySpaceVisibility space == MemoryShared
-        Nothing ->
-          memorySpaceVisibility space == MemoryShared
-            || ( memorySpaceVisibility space == MemoryPrivate
-                   && memorySpaceOwner space == grepIncarnationId request
-               )
+ where
+  private = spaceAt state (grepIncarnationId request) MemoryPrivate
+  withPrivate =
+    Map.insert
+      (spaceKey (memorySpaceOwner private) MemoryPrivate)
+      private
+      (stateSpaces state)
+  allowed space =
+    case grepVisibility request of
+      Just MemoryPrivate ->
+        memorySpaceVisibility space == MemoryPrivate
+          && memorySpaceOwner space == grepIncarnationId request
+      Just MemoryShared ->
+        memorySpaceVisibility space == MemoryShared
+      Nothing ->
+        memorySpaceVisibility space == MemoryShared
+          || ( memorySpaceVisibility space == MemoryPrivate
+                 && memorySpaceOwner space == grepIncarnationId request
+             )
 
 makeReceipt ::
   POSIXTime ->
@@ -1229,9 +1234,9 @@ makeReceipt now action incarnation query spaces refs =
       memoryReadReceiptRecords = refs,
       memoryReadReceiptCreated = round now
     }
-  where
-    renderRef ref =
-      memoryRefId ref <> "@" <> Text.pack (show (memoryRefRevision ref))
+ where
+  renderRef ref =
+    memoryRefId ref <> "@" <> Text.pack (show (memoryRefRevision ref))
 
 digestText :: [Text] -> Text
 digestText = sha256 . TextEncoding.encodeUtf8 . Text.intercalate "\NUL"
@@ -1252,10 +1257,10 @@ uniqueTexts =
     . foldl'
       insert
       (Set.empty, [])
-  where
-    insert current@(seen, _) value
-      | Set.member value seen = current
-    insert (seen, values) value = (Set.insert value seen, value : values)
+ where
+  insert current@(seen, _) value
+    | Set.member value seen = current
+  insert (seen, values) value = (Set.insert value seen, value : values)
 
 nonEmpty :: Text -> Text -> Either Text ()
 nonEmpty label =
