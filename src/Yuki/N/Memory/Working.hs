@@ -16,9 +16,10 @@ module Yuki.N.Memory.Working
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Concurrent.MVar
 import Control.Exception (IOException, displayException, try)
-import Control.Monad ((>=>))
+import Control.Monad (void, (>=>))
 import Data.Aeson
 import Data.Bool (bool)
 import Data.Foldable (traverse_)
@@ -26,7 +27,7 @@ import Data.Functor (($>), (<&>))
 import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (listToMaybe)
+import Data.Maybe (isJust, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Time.Clock.POSIX (getPOSIXTime)
@@ -510,19 +511,20 @@ mkStore persist lock =
           <$> readMVar lock,
       workingRecover = recover,
       workingDelete = \incarnation ->
-        ()
-          <$ modifyMVar
-            lock
-            ( \state ->
-                let changed =
-                      state
-                        { stateHeads = Map.delete incarnation (stateHeads state),
-                          stateCheckpoints = Map.filter ((/= incarnation) . workingCheckpointIncarnationId) (stateCheckpoints state),
-                          stateWakePackets = Map.filter ((/= incarnation) . wakePacketIncarnationId) (stateWakePackets state),
-                          stateSleepCycles = Map.filter ((/= incarnation) . sleepCycleIncarnationId) (stateSleepCycles state)
-                        }
-                 in persist changed *> pure (changed, ())
-            )
+        void
+          ( modifyMVar
+              lock
+              ( \state ->
+                  let changed =
+                        state
+                          { stateHeads = Map.delete incarnation (stateHeads state),
+                            stateCheckpoints = Map.filter ((/= incarnation) . workingCheckpointIncarnationId) (stateCheckpoints state),
+                            stateWakePackets = Map.filter ((/= incarnation) . wakePacketIncarnationId) (stateWakePackets state),
+                            stateSleepCycles = Map.filter ((/= incarnation) . sleepCycleIncarnationId) (stateSleepCycles state)
+                          }
+                   in persist changed $> (changed, ())
+              )
+          )
     }
  where
   create incarnation cursor
@@ -863,8 +865,8 @@ recoveryCursor head' replayed
   current = workingMemoryCursor head'
 
 recoveryFailure :: WorkingMemoryHead -> Maybe SleepCycle -> Maybe Text -> Maybe Text
-recoveryFailure head' cycle' cursorFailure =
-  combine transitionFailure cursorFailure
+recoveryFailure head' cycle' =
+  combine transitionFailure
  where
   transitionFailure =
     case (workingMemoryStatus head', sleepCycleStatus <$> cycle') of
@@ -885,7 +887,7 @@ recoveryFailure head' cycle' cursorFailure =
   combine (Just left) (Just right) = Just (left <> "; " <> right)
 
 preferCycle :: (SleepCycle -> Maybe value) -> Maybe value -> Maybe SleepCycle -> Maybe value
-preferCycle field existing = maybe existing (\sleepCycle -> maybe existing Just (field sleepCycle))
+preferCycle field existing = maybe existing (\sleepCycle -> field sleepCycle <|> existing)
 
 recoveredCycle :: Integer -> ExperienceCursor -> Maybe Text -> WorkingMemoryHead -> SleepCycle -> SleepCycle
 recoveredCycle stamp cursor failure head' sleepCycle =
@@ -897,7 +899,7 @@ recoveredCycle stamp cursor failure head' sleepCycle =
       sleepCycleUpdated = stamp
     }
  where
-  aborted = maybe False (const True) failure
+  aborted = isJust failure
   status = bool CycleAwake CycleDegraded aborted
   replay = bool (Just cursor) (sleepCycleReplayCursor sleepCycle) aborted
   cycleFailure = bool (sleepCycleFailure sleepCycle) failure aborted

@@ -26,6 +26,7 @@ import Data.Aeson.Types (parseMaybe)
 import Data.Bool (bool)
 import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Char qualified as Char
+import Data.Either (fromRight)
 import Data.Foldable (traverse_)
 import Data.Functor (($>), (<&>))
 import Data.IORef
@@ -136,7 +137,7 @@ memoryHooks model store facts journal state =
 
 watcherStep :: Model -> FactStore -> Maybe Journal -> IORef MemoryState -> AGUI.RunAgentInput -> [ChatMessage] -> IO ()
 watcherStep model facts journal state input messages =
-  Map.findWithDefault emptyWatcher threadId . memoryWatchers <$> readIORef state >>= refresh
+  readIORef state >>= refresh . Map.findWithDefault emptyWatcher threadId . memoryWatchers
  where
   threadId = AGUI.runThreadId input
   runId = AGUI.runId input
@@ -195,7 +196,7 @@ insertWatcher threadId seen state = state {memoryWatchers = Map.insert threadId 
 
 closeEpisode :: ThreadStore -> IORef MemoryState -> AGUI.RunAgentInput -> IO ()
 closeEpisode store state input =
-  Map.lookup threadId . memoryWatchers <$> readIORef state >>= traverse_ save
+  readIORef state >>= traverse_ save . Map.lookup threadId . memoryWatchers
  where
   threadId = AGUI.runThreadId input
   save seen =
@@ -208,7 +209,7 @@ injectBriefing store journal state input messages
   | otherwise = cached >>= maybe (pure messages) (pure . (: messages) . ChatSystem)
  where
   runId = AGUI.runId input
-  cached = Map.lookup runId . memoryBriefings <$> readIORef state >>= maybe render pure
+  cached = readIORef state >>= maybe render pure . Map.lookup runId . memoryBriefings
   render =
     threadBrief store (AGUI.runThreadId input)
       >>= \brief ->
@@ -224,13 +225,13 @@ injectCandidates :: FactStore -> IORef MemoryState -> AGUI.RunAgentInput -> [Cha
 injectCandidates facts state input messages
   | any (markedWith candidatesMarker) messages = pure messages
   | otherwise =
-      Map.lookup (AGUI.runId input) . memoryCandidates <$> readIORef state
-        >>= maybe (pure messages) materialize
+      readIORef state
+        >>= maybe (pure messages) materialize . Map.lookup (AGUI.runId input) . memoryCandidates
  where
   materialize hits = case renderCandidates hits of
     ([], _) -> pure messages
     (included, block) ->
-      factTouch facts included *> pure (slotAfterBriefing (ChatSystem block) messages)
+      factTouch facts included $> slotAfterBriefing (ChatSystem block) messages
 
 slotAfterBriefing :: ChatMessage -> [ChatMessage] -> [ChatMessage]
 slotAfterBriefing slot messages = case messages of
@@ -426,7 +427,7 @@ persist dir threadId episode =
 
 readBrief :: FilePath -> Text -> IO (Maybe ThreadBrief)
 readBrief dir threadId =
-  either (const Nothing) id
+  fromRight Nothing
     <$> (try (decodeFileStrict (threadPath dir threadId)) :: IO (Either IOException (Maybe ThreadBrief)))
 
 newMemoryThreadStore :: IO ThreadStore

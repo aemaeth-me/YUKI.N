@@ -48,6 +48,14 @@ Composition -> Interface / Infrastructure / Application / Domain
 - 组合风格服从领域不变量和可审查性，不机械追求 point-free 或最少字符。
 - 新增或迁移的模块不得增加 HLint warning；现有 warning 按模块逐步清理，不借机机械改写无关代码。
 
+### 测试中的 do 记法
+
+- 测试明确允许在「准备 → 动作 → 断言」的顺序流程中优先使用 `do` 记法。
+- 存在多个依赖绑定、资源/setup 生命周期或嵌套续延缩进时，可读性优先于
+  Applicative/组合子风格。
+- 不要机械改写一、两步的简单表达式；相互独立的计算仍可保持 Applicative。
+- 测试中避免 point-free/Kleisli 改写；具名中间值更清晰时优先具名绑定。
+
 ## 验证
 
 架构改动至少运行 Fourmolu、HLint、`cabal build all`、完整测试和 HLS 三个 component 的 typecheck。迁移旧模块时保留已有持久化、并发、HTTP 与 golden 行为测试。

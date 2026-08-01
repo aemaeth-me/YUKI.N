@@ -21,7 +21,7 @@ where
 
 import Control.Applicative ((<|>))
 import Control.Exception (catch, throwIO, try)
-import Control.Monad (foldM, mfilter)
+import Control.Monad (foldM, join, mfilter, (=<<))
 import Data.Aeson
 import Data.Aeson.Types (Pair, parseMaybe)
 import Data.Bifunctor (first)
@@ -31,7 +31,7 @@ import Data.ByteString qualified as ByteString
 import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Foldable (traverse_)
-import Data.Functor ((<&>))
+import Data.Functor (($>), (<&>))
 import Data.Maybe (fromMaybe, maybeToList)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -348,10 +348,9 @@ consumePayloads dialect emit initial = foldM consume (initial, False)
    where
     apply (events, reason', done) =
       traverse_ emit events
-        *> pure
-          ( reason' <|> reason <|> bool Nothing (Just Stop) (done && dialect == DeepSeek),
-            done
-          )
+        $> ( reason' <|> reason <|> bool Nothing (Just Stop) (done && dialect == DeepSeek),
+             done
+           )
 
 providerPayload :: ApiDialect -> ByteString -> Either ProviderFailure ([ModelEvent], Maybe FinishReason, Bool)
 providerPayload DeepSeek payload = decodeResponsesEvent payload >>= responseEvent
@@ -391,17 +390,12 @@ responseItemEvents index item
 
 responseUsage :: ResponsesEvent -> Maybe ResponseUsage
 responseUsage event =
-  responsesEventResponse event
-    >>= parseMaybe (withObject "response" (.:? "usage"))
-    >>= id
+  join (parseMaybe (withObject "response" (.:? "usage")) =<< responsesEventResponse event)
 
 responseFailure :: ResponsesEvent -> Maybe Value
 responseFailure event =
   responsesEventError event
-    <|> ( responsesEventResponse event
-            >>= parseMaybe (withObject "response" (.:? "error"))
-            >>= id
-        )
+    <|> join (parseMaybe (withObject "response" (.:? "error")) =<< responsesEventResponse event)
 
 responseUsageValue :: ResponseUsage -> Usage
 responseUsageValue usage =

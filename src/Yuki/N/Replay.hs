@@ -14,9 +14,9 @@ import Data.Aeson (Result (Success), ToJSON (..), Value, fromJSON, object, withO
 import Data.Aeson.Types (parseMaybe)
 import Data.Bool (bool)
 import Data.Foldable (traverse_)
-import Data.Functor ((<&>))
+import Data.Functor (($>), (<&>))
 import Data.IORef
-import Data.List (nub)
+import Data.List (find, nub)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (listToMaybe)
 import Data.Text (Text)
@@ -190,7 +190,7 @@ watcherReplayModel runId entries =
 
 select :: Maybe Text -> [(AGUI.RunAgentInput, RunSettings)] -> Maybe (AGUI.RunAgentInput, RunSettings)
 select Nothing = listToMaybe . reverse
-select (Just runId) = listToMaybe . filter ((== runId) . AGUI.runId . fst)
+select (Just runId) = find ((== runId) . AGUI.runId . fst)
 
 replay :: AgentHooks -> AGUI.RunAgentInput -> RunSettings -> Text -> [Entry] -> IO (Either Text ReplayReport)
 replay hooks input settings runId runEntries =
@@ -270,9 +270,11 @@ replay hooks input settings runId runEntries =
     ]
 
   report actual note =
-    reverse <$> readIORef actual
-      >>= \events ->
-        pure (Right (ReplayReport runId (length events) (firstDivergence note expected (filter (not . operational) events))))
+    readIORef actual
+      >>= ( \events ->
+              pure (Right (ReplayReport runId (length events) (firstDivergence note expected (filter (not . operational) events))))
+          )
+        . reverse
 
   showReplay (ReplayFailure message) = message
 
@@ -372,7 +374,7 @@ replayTools subEvents entries toolSpecs =
       Just (recorded, outcome)
         | recorded == name ->
             traverse_ (toolContextEmit context) (Map.findWithDefault [] (toolContextCallId context) subEvents)
-              *> pure outcome
+              $> outcome
       _ -> throwIO (ReplayFailure ("unexpected tool call " <> toolContextCallId context))
 
 replayNewId :: IORef [Text] -> IO Text

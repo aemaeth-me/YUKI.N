@@ -406,7 +406,7 @@ remember ledger target = stamp target >>= traverse_ (modifyIORef' ledger . Map.i
 stamp :: FilePath -> IO (Maybe (Integer, Integer))
 stamp target = either (const Nothing) Just <$> (try snap :: IO (Either IOException (Integer, Integer)))
  where
-  snap = (,) <$> (round . utcTimeToPOSIXSeconds <$> getModificationTime target) <*> getFileSize target
+  snap = ((,) . round . utcTimeToPOSIXSeconds <$> getModificationTime target) <*> getFileSize target
 
 runList :: FilePath -> FsList -> IO (Either Text Text)
 runList root (FsList path) =
@@ -433,9 +433,12 @@ listing target = Text.intercalate "\n" <$> listTree target 2
 
 listTree :: FilePath -> Int -> IO [Text]
 listTree target depth =
-  sort <$> listDirectory target >>= \entries ->
-    (<> note (length entries)) . concat
-      <$> traverse (entry target depth) (take listingLimit entries)
+  listDirectory target
+    >>= ( \entries ->
+            (<> note (length entries)) . concat
+              <$> traverse (entry target depth) (take listingLimit entries)
+        )
+      . sort
  where
   note total = ["... " <> int (total - listingLimit) <> " more entries" | total > listingLimit]
 
@@ -488,8 +491,9 @@ entry dir depth name =
     | isNoiseDirectory name = pure [packed <> "/"]
     | depth <= 1 = pure [packed <> "/"]
     | otherwise =
-        sort <$> listDirectory full
-          >>= fmap (concatMap (fmap ("  " <>))) . traverse (entry full (depth - 1))
+        listDirectory full
+          >>= (fmap (concatMap (fmap ("  " <>))) . traverse (entry full (depth - 1)))
+            . sort
           <&> (packed <> "/" :)
 
 isNoiseDirectory :: FilePath -> Bool
@@ -530,7 +534,8 @@ walkFiles :: FilePath -> IO [FilePath]
 walkFiles root = go ""
  where
   go dir =
-    sort <$> listDirectory (root </> dir) >>= fmap concat . traverse (visit dir)
+    listDirectory (root </> dir)
+      >>= (fmap concat . traverse (visit dir)) . sort
   visit dir name =
     pathIsSymbolicLink (root </> relative)
       >>= bool

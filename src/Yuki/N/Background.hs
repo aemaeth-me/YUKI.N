@@ -26,7 +26,7 @@ import Data.IORef
 import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (isJust, isNothing, mapMaybe)
+import Data.Maybe (catMaybes, isJust, isNothing)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as TextIO
@@ -219,7 +219,7 @@ pruneCompleted registry =
   readIORef (registryProcesses registry)
     >>= traverse completed . Map.toList
     >>= \states ->
-      let done = sortOn (backgroundStarted . snd) (mapMaybe id states)
+      let done = sortOn (backgroundStarted . snd) (catMaybes states)
           excess = max 0 (length done - registryCompletedLimit registry)
           expired = Map.fromList [(taskId, ()) | (taskId, _) <- take excess done]
        in atomicModifyIORef'

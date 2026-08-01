@@ -19,6 +19,7 @@ where
 import Data.Aeson (ToJSON (..), Value, object, withObject, (.:?), (.=))
 import Data.Aeson.Types (Parser, parseMaybe, (.!=))
 import Data.Bool (bool)
+import Data.Char (isAsciiLower, isAsciiUpper, isDigit)
 import Data.Functor ((<&>))
 import Data.List (nub, sortOn)
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
@@ -264,8 +265,8 @@ inputStep :: Entry -> AGUI.RunAgentInput -> RunTraceStep
 inputStep entry input = step entry "user" "用户请求" (Text.take 1200 (lastUserText (AGUI.runMessages input))) "completed" Nothing []
 
 step :: Entry -> Text -> Text -> Text -> Text -> Maybe Text -> [Text] -> RunTraceStep
-step entry kind label detail status callId artifacts =
-  RunTraceStep (entrySeq entry) (entryTime entry) kind label detail status callId artifacts
+step entry =
+  RunTraceStep (entrySeq entry) (entryTime entry)
 
 lastUserText :: [AGUI.Message] -> Text
 lastUserText =
@@ -320,13 +321,13 @@ artifactIds = nub . unfold
             let identifier = Text.takeWhile artifactChar suffix
              in identifier : unfold (Text.drop (Text.length identifier) suffix)
   artifactChar character =
-    ('a' <= character && character <= 'z')
-      || ('A' <= character && character <= 'Z')
-      || ('0' <= character && character <= '9')
+    isAsciiLower character
+      || isAsciiUpper character
+      || isDigit character
       || character `elem` ("-_" :: String)
 
 usageOf :: Entry -> UsageSum
-usageOf = maybe mempty id . usageValue . entryKind
+usageOf = fromMaybe mempty . usageValue . entryKind
  where
   usageValue (AgentEventEntry (Custom "usage" value)) = parseMaybe usageParser value
   usageValue _ = Nothing

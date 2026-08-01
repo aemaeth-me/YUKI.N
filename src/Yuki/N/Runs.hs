@@ -15,7 +15,7 @@ module Yuki.N.Runs
 where
 
 import Control.Concurrent (ThreadId, myThreadId, throwTo)
-import Control.Exception (Exception, bracket)
+import Control.Exception (Exception, bracket_)
 import Data.Functor (($>))
 import Data.IORef
 import Data.Map.Strict (Map)
@@ -41,8 +41,8 @@ withRunRegistration registry runId =
   withRunRegistrationFor registry runId runId
 
 withRunRegistrationFor :: RunRegistry -> Text -> Text -> IO a -> IO a
-withRunRegistrationFor (RunRegistry ref) runId taskId action =
-  bracket acquire (const release) (const action)
+withRunRegistrationFor (RunRegistry ref) runId taskId =
+  bracket_ acquire release
  where
   acquire =
     myThreadId >>= \thread ->
@@ -63,12 +63,12 @@ cancelRun (RunRegistry ref) runId =
       . Map.lookup runId
 
 steerRun :: RunRegistry -> Text -> ChatMessage -> IO Bool
-steerRun (RunRegistry ref) runId message =
-  queueRun runHandleSteer ref runId message
+steerRun (RunRegistry ref) =
+  queueRun runHandleSteer ref
 
 followUpRun :: RunRegistry -> Text -> ChatMessage -> IO Bool
-followUpRun (RunRegistry ref) runId message =
-  queueRun runHandleFollowUp ref runId message
+followUpRun (RunRegistry ref) =
+  queueRun runHandleFollowUp ref
 
 queueRun :: (RunHandle -> IORef [ChatMessage]) -> IORef (Map Text RunHandle) -> Text -> ChatMessage -> IO Bool
 queueRun field ref runId message =
@@ -77,12 +77,12 @@ queueRun field ref runId message =
   push handle = atomicModifyIORef' (field handle) (\queued -> (message : queued, ())) $> True
 
 drainSteering :: RunRegistry -> Text -> IO [ChatMessage]
-drainSteering (RunRegistry ref) runId =
-  drainRun runHandleSteer ref runId
+drainSteering (RunRegistry ref) =
+  drainRun runHandleSteer ref
 
 drainFollowUps :: RunRegistry -> Text -> IO [ChatMessage]
-drainFollowUps (RunRegistry ref) runId =
-  drainRun runHandleFollowUp ref runId
+drainFollowUps (RunRegistry ref) =
+  drainRun runHandleFollowUp ref
 
 drainRun :: (RunHandle -> IORef [ChatMessage]) -> IORef (Map Text RunHandle) -> Text -> IO [ChatMessage]
 drainRun field ref runId =

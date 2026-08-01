@@ -1,11 +1,3 @@
--- | AG-UI 协议边界测试
---
--- 覆盖：AG-UI 输入别名解析、TOOL_CALL_RESULT 事件编码，以及全部公开事件构造器的
--- JSON 契约（type 字段 + decode . encode round-trip）与受控生成器属性。
--- 边界：只覆盖协议层纯函数；不涉及 agent 运行时。
--- 变更记录：
---   - 2026-08-01: 从集中式 test/Main.hs 拆出；测试语义、标题、数量与组顺序保持原样。
---   - 2026-08-01: 补充全部公开事件构造器 JSON 契约与 round-trip 属性的回归覆盖。
 module Yuki.N.AGUITest
   ( protocolTests,
     eventJsonTests,
@@ -63,9 +55,6 @@ eventJsonTests =
       testProperty "decode . encode == Right for generated events" eventJsonRoundTrip
     ]
 
--- | 规格：AG-UI 边界接受 snake_case 别名并保持 JSON round-trip 等价。
--- 背景：HTTP 客户（前端、脚本）与 AG-UI 规范通常混用 snake_case 与 camelCase；边界若拒绝别名，既有调用方会整体失效。该用例失败代表协议解析层收缩，而非测试环境问题。
--- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 aliases :: Assertion
 aliases =
   either assertFailure verify . eitherDecode $
@@ -79,9 +68,6 @@ verify input =
       runMessages input @?= [User (UserMessage "user" (UserText "hello") Nothing)]
     ]
 
--- | 规格：TOOL_CALL_RESULT 事件按规范化字段（type/messageId/toolCallId/content/role）编码。
--- 背景：前端依赖该事件的固定 JSON 形状渲染工具结果；字段漂移会造成前端静默丢失结果。该用例失败代表事件编码契约被破坏。
--- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 normalizedToolResultEvent :: Assertion
 normalizedToolResultEvent =
   toJSON (ToolCallResult "message" "call" "ok")
@@ -93,9 +79,6 @@ normalizedToolResultEvent =
         "role" .= ("tool" :: Text)
       ]
 
--- | 规格：全部 26 个公开事件构造器的 JSON 携带稳定 type 字段且 decode . encode 恒等。
--- 背景：事件流是前端与审计的唯一通道；任一构造器的字段漂移都会造成消费端静默丢失。
--- 变更记录：- 2026-08-01: 补充事件 JSON 契约表驱动覆盖。
 eventJsonContract :: Assertion
 eventJsonContract =
   sequence_ [assertRoundTrip event expectedType | (event, expectedType) <- contractRows]
@@ -152,9 +135,6 @@ sampleAssistant = Assistant (AssistantMessage "a" (Just "answer") Nothing [])
 sampleUser :: Message
 sampleUser = User (UserMessage "u" (UserText "hello") Nothing)
 
--- | 规格：受控生成器产生的任意事件 decode . encode == Right（与表驱动用例互补）。
--- 背景：表驱动覆盖固定样本，属性覆盖构造器组合的任意取值，防止可选字段回归。
--- 变更记录：- 2026-08-01: 补充事件 JSON round-trip 属性覆盖。
 eventJsonRoundTrip :: Property
 eventJsonRoundTrip =
   forAll genEvent $ \event ->

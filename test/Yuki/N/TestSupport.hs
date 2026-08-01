@@ -1,9 +1,3 @@
--- | 测试共享支持（仅确定性工具）
---
--- 覆盖：共享的运行时/内存 store/HTTP/临时目录构造与确定性断言辅助。
--- 边界：不包含 testCase/testGroup、golden 写入或领域逻辑；仅供至少两个测试模块复用的 helper 迁入。
--- 变更记录：
---   - 2026-08-01: 从集中式 test/Main.hs 拆出；测试语义、标题、数量与组顺序保持原样。
 module Yuki.N.TestSupport
   ( afterSpy,
     waitUntil,
@@ -21,7 +15,7 @@ module Yuki.N.TestSupport
     staticTool,
     promptCaptureModel,
     jsonText,
-    withTextRight,
+    expectTextRight,
     retrieveWatcher,
     httpGet,
     withWorkDir,
@@ -48,18 +42,14 @@ module Yuki.N.TestSupport
   )
 where
 
-import Control.Applicative ()
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.MVar
-import Control.Exception ()
-import Control.Monad ()
 import Data.Aeson
 import Data.Aeson.Types (parseEither)
 import Data.Bool (bool)
 import Data.ByteString (ByteString)
 import Data.ByteString.Builder qualified as Builder
 import Data.ByteString.Lazy qualified as LazyByteString
-import Data.Foldable ()
 import Data.Functor (($>), (<&>))
 import Data.IORef
 import Data.List (find)
@@ -69,53 +59,23 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as TextEncoding
 import Data.Text.IO qualified as TextIO
-import Network.HTTP.Client ()
-import Network.HTTP.Client.TLS ()
 import Network.HTTP.Types
 import Network.Wai (Application, Request, pathInfo, requestHeaders, requestMethod, responseToStream, setRequestBodyChunks)
-import Network.Wai.Handler.Warp ()
 import Network.Wai.Internal (ResponseReceived (..))
 import Network.Wai.Test
 import System.Directory (createDirectoryIfMissing, createDirectoryLink, createFileLink, getTemporaryDirectory)
-import System.Exit ()
-import System.FilePath ()
-import System.Process ()
-import System.Timeout ()
-import Test.Tasty ()
 import Test.Tasty.HUnit
 import Yuki.N.AGUI.Event
 import Yuki.N.AGUI.Types
 import Yuki.N.Agent
-import Yuki.N.AgentsMd ()
-import Yuki.N.Anatomy ()
-import Yuki.N.Artifact ()
 import Yuki.N.Background
-import Yuki.N.Blob ()
-import Yuki.N.Cognition ()
 import Yuki.N.Config
 import Yuki.N.Context
-import Yuki.N.ContextEpoch ()
-import Yuki.N.Diff ()
-import Yuki.N.Experience ()
-import Yuki.N.Facts ()
-import Yuki.N.Incarnation ()
-import Yuki.N.Inspect ()
-import Yuki.N.Journal ()
-import Yuki.N.Memory ()
-import Yuki.N.Memory.Archive ()
-import Yuki.N.Memory.Impression ()
-import Yuki.N.Memory.LongTerm ()
-import Yuki.N.Memory.Working ()
 import Yuki.N.Model
 import Yuki.N.Provider.OpenAI
-import Yuki.N.Providers ()
-import Yuki.N.Replay ()
-import Yuki.N.Runs ()
 import Yuki.N.Server
 import Yuki.N.Sessions
-import Yuki.N.SubAgent ()
 import Yuki.N.ThreadConfig
-import Yuki.N.Tools ()
 import Yuki.N.Transcript
 
 afterSpy :: IORef [[ChatMessage]] -> AgentHooks
@@ -157,7 +117,7 @@ cancelRequest run =
     }
 decodeChunks :: IORef [Builder.Builder] -> IO [Event]
 decodeChunks ref =
-  reverse <$> readIORef ref >>= decodeAll . foldl feed (emptySseDecoder, []) . fmap bytes
+  readIORef ref >>= decodeAll . foldl feed (emptySseDecoder, []) . fmap bytes . reverse
  where
   bytes = LazyByteString.toStrict . Builder.toLazyByteString
   feed (decoder, acc) chunk =
@@ -211,8 +171,8 @@ promptCaptureModel captured =
       $> Stop
 jsonText :: (ToJSON value) => value -> Text
 jsonText = TextEncoding.decodeUtf8 . LazyByteString.toStrict . encode
-withTextRight :: (value -> Assertion) -> Either Text value -> Assertion
-withTextRight use = either (assertFailure . Text.unpack) use
+expectTextRight :: Either Text value -> IO value
+expectTextRight = either (assertFailure . Text.unpack) pure
 retrieveWatcher :: Model
 retrieveWatcher =
   fakeModel $ \_ emit ->
@@ -224,11 +184,13 @@ retrieveWatcher =
 httpGet :: [Text] -> Request
 httpGet path = defaultRequest {requestMethod = methodGet, pathInfo = path}
 withWorkDir :: (FilePath -> Assertion) -> Assertion
-withWorkDir action =
-  getTemporaryDirectory >>= \tmp ->
-    newId >>= \identifier ->
-      let dir = tmp ++ "/" ++ Text.unpack identifier
-       in createDirectoryIfMissing True dir *> action dir
+withWorkDir action = do
+  tmp <- getTemporaryDirectory
+  identifier <- newId
+  let dir = tmp ++ "/" ++ Text.unpack identifier
+  createDirectoryIfMissing True dir
+  action dir
+
 callTool :: [BackendTool] -> Text -> Value -> IO ToolOutcome
 callTool tools name arguments =
   maybe (assertFailure ("missing tool: " <> Text.unpack name)) pure (find (named . backendToolSpec) tools)
@@ -248,22 +210,22 @@ pollOf outcome =
     withObject "poll" $ \fields ->
       (,,,) <$> fields .: "running" <*> fields .:? "exitCode" <*> fields .: "output" <*> fields .: "truncated"
 withSandbox :: (FilePath -> Assertion) -> Assertion
-withSandbox action =
-  getTemporaryDirectory >>= \tmp ->
-    newId >>= \identifier ->
-      let base = tmp ++ "/" ++ Text.unpack identifier
-          root = base ++ "/work"
-          outside = base ++ "/outside"
-       in createDirectoryIfMissing True (root ++ "/sub")
-            *> createDirectoryIfMissing True outside
-            *> TextIO.writeFile (outside ++ "/secret.txt") "TOP-SECRET\n"
-            *> TextIO.writeFile (root ++ "/sub/ok.txt") "fine\n"
-            *> createFileLink (outside ++ "/secret.txt") (root ++ "/linkfile.txt")
-            *> createFileLink "linkfile.txt" (root ++ "/chain.txt")
-            *> createDirectoryLink outside (root ++ "/linkdir")
-            *> createDirectoryLink "sub" (root ++ "/inner")
-            *> createDirectoryLink ".." (root ++ "/sub/up")
-            *> action root
+withSandbox action = do
+  tmp <- getTemporaryDirectory
+  identifier <- newId
+  let base = tmp ++ "/" ++ Text.unpack identifier
+      root = base ++ "/work"
+      outside = base ++ "/outside"
+  createDirectoryIfMissing True (root ++ "/sub")
+  createDirectoryIfMissing True outside
+  TextIO.writeFile (outside ++ "/secret.txt") "TOP-SECRET\n"
+  TextIO.writeFile (root ++ "/sub/ok.txt") "fine\n"
+  createFileLink (outside ++ "/secret.txt") (root ++ "/linkfile.txt")
+  createFileLink "linkfile.txt" (root ++ "/chain.txt")
+  createDirectoryLink outside (root ++ "/linkdir")
+  createDirectoryLink "sub" (root ++ "/inner")
+  createDirectoryLink ".." (root ++ "/sub/up")
+  action root
 sessionServiceAt :: FilePath -> (Text -> IO ()) -> IO SessionService
 sessionServiceAt dir cleanup =
   SessionService

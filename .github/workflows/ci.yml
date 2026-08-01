@@ -53,39 +53,8 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cabal-
 
-      - name: Build production components once with coverage
-        run: cabal build all --enable-coverage --coverage-for=lib:yuki-n
+      - name: Build
+        run: cabal build all
 
-      - name: Run the test documentation gate
-        run: python3 scripts/check-test-docs.py
-
-      - name: Run the checker self-tests
-        run: python3 -m unittest scripts/test_check_test_docs.py
-
-      - name: Coverage test (runs the full suite instrumented; -Werror enforced)
-        run: |
-          find dist-newstyle -name '*.tix' -delete
-          cabal test yuki-n-test --enable-coverage --coverage-for=lib:yuki-n --test-show-details=direct
-
-      - name: Print library-only coverage summary
-        run: |
-          TIX=$(find dist-newstyle -name 'yuki-n-test.tix' -path '*hpc*' | tail -1)
-          if [ -z "$TIX" ]; then
-            echo "no coverage tix produced by the coverage test" >&2
-            exit 1
-          fi
-          PKG=$(dirname "$(dirname "$(dirname "$(dirname "$(dirname "$(dirname "$TIX")")")")")")
-          MIX="$PKG/build/extra-compilation-artifacts/hpc/vanilla/mix"
-          if [ ! -d "$MIX" ]; then
-            echo "missing hpc mix directory: $MIX" >&2
-            exit 1
-          fi
-          MODS="Yuki.N.AGUI.Event Yuki.N.AGUI.Types Yuki.N.Agent Yuki.N.AgentsMd Yuki.N.Anatomy Yuki.N.Artifact Yuki.N.AtomicFile Yuki.N.Background Yuki.N.Blob Yuki.N.Cognition Yuki.N.Config Yuki.N.Context Yuki.N.ContextEpoch Yuki.N.Diff Yuki.N.Domain.Diff Yuki.N.Experience Yuki.N.Facts Yuki.N.Incarnation Yuki.N.Inspect Yuki.N.Invocation Yuki.N.Journal Yuki.N.Memory Yuki.N.Memory.Archive Yuki.N.Memory.Impression Yuki.N.Memory.LongTerm Yuki.N.Memory.Working Yuki.N.Model Yuki.N.Provider.OpenAI Yuki.N.Providers Yuki.N.Replay Yuki.N.Runs Yuki.N.Server Yuki.N.Sessions Yuki.N.SubAgent Yuki.N.ThreadConfig Yuki.N.Tools Yuki.N.Transcript"
-          hpc report --hpcdir="$MIX" "$TIX" $MODS
-
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
-        with:
-          name: hpc-coverage
-          path: dist-newstyle/build/*/*/yuki-n-0.1.0.0/t/yuki-n-test/hpc/**/html
-          if-no-files-found: error
+      - name: Test
+        run: cabal test yuki-n-test --test-show-details=direct

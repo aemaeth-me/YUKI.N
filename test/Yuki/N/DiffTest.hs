@@ -1,13 +1,9 @@
--- | unified diff 生成器测试
---
--- 覆盖：相同输入的空输出、追加-only 补丁的加法单调性、中段替换的对称行，以及三条可证明的
--- QuickCheck 不变量（相同输入为空、追加不产生删除行、存在差异则输出非空）。
--- 边界：不覆盖真实文件系统；全部为内存文本。
--- 变更记录：
---   - 2026-08-01: 新增 Diff 不变量与基础形状的回归覆盖。
 module Yuki.N.DiffTest
   ( diffTests,
-    unifiedReplacesMiddle,
+    diffMiddle,
+    diffEnds,
+    diffAll,
+    diffSame,
     unifiedIdenticalInput,
     unifiedAppendOnly,
     unifiedDifferenceNonEmpty,
@@ -37,36 +33,69 @@ diffTests :: TestTree
 diffTests =
   testGroup
     "unified diff"
-    [ testCase "replaces a changed middle line with -/+ pairs" unifiedReplacesMiddle,
+    [ testCase "rewrites the middle with three lines of context" diffMiddle,
+      testCase "splits far-apart changes into two hunks" diffEnds,
+      testCase "replaces everything" diffAll,
+      testCase "identical files produce an empty diff" diffSame,
       testProperty "same input produces an empty diff" unifiedIdenticalInput,
       testProperty "append-only changes add lines and never delete" unifiedAppendOnly,
       testProperty "different inputs always produce a non-empty diff" unifiedDifferenceNonEmpty
     ]
 
--- | 规格：中段单行替换产生包含 "-b" 与 "+x" 内容行的补丁。
--- 背景：unified 输出被审计/展示消费；替换行形状错误会让人类与工具都读错变更。
--- 变更记录：- 2026-08-01: 补充 Diff 基础替换形状的回归覆盖。
-unifiedReplacesMiddle :: Assertion
-unifiedReplacesMiddle =
-  let output = unified "note.md" "a\nb\nc" "a\nx\nc"
-      contentLines = drop 1 (Text.lines output)
-   in sequence_
-        [ assertBool "replacement must not be empty" (not (Text.null output)),
-          assertBool "removed line is marked with -" (any (Text.isPrefixOf "-b") contentLines),
-          assertBool "added line is marked with +" (any (Text.isPrefixOf "+x") contentLines)
-        ]
+diffMiddle :: Assertion
+diffMiddle =
+  unified "f.txt" (numbered "l5") (numbered "X") @?= Text.unlines expected
+ where
+  numbered replacement = Text.unlines (["l1", "l2", "l3", "l4", replacement, "l6", "l7", "l8", "l9", "l10"] :: [Text])
+  expected =
+    [ "--- a/f.txt",
+      "+++ b/f.txt",
+      "@@ -2,7 +2,7 @@",
+      " l2",
+      " l3",
+      " l4",
+      "-l5",
+      "+X",
+      " l6",
+      " l7",
+      " l8"
+    ]
 
--- | 规格：任意输入与自身比较时 unified 输出为空串。
--- 背景：相同输入的零 hunk 是 diff 的根基契约；非空输出会污染审计差异。
--- 变更记录：- 2026-08-01: 补充 Diff 相同输入不变量的属性覆盖。
+diffEnds :: Assertion
+diffEnds =
+  unified "f.txt" (numbered "l1" "l10") (numbered "X" "Y") @?= Text.unlines expected
+ where
+  numbered head' last' = Text.unlines ([head', "l2", "l3", "l4", "l5", "l6", "l7", "l8", "l9", last'] :: [Text])
+  expected =
+    [ "--- a/f.txt",
+      "+++ b/f.txt",
+      "@@ -1,4 +1,4 @@",
+      "-l1",
+      "+X",
+      " l2",
+      " l3",
+      " l4",
+      "@@ -7,4 +7,4 @@",
+      " l7",
+      " l8",
+      " l9",
+      "-l10",
+      "+Y"
+    ]
+
+diffAll :: Assertion
+diffAll =
+  unified "f.txt" "a\nb\n" "x\ny\nz\n"
+    @?= Text.unlines ["--- a/f.txt", "+++ b/f.txt", "@@ -1,2 +1,3 @@", "-a", "-b", "+x", "+y", "+z"]
+
+diffSame :: Assertion
+diffSame = unified "f.txt" "same\nfile\n" "same\nfile\n" @?= ""
+
 unifiedIdenticalInput :: Property
 unifiedIdenticalInput =
   forAll genText $ \content ->
     unified "note.md" content content === ""
 
--- | 规格：旧文本是新文本的前缀时，补丁只含 ' ' 与 '+' 行，且 '+' 行数等于追加行数。
--- 背景：追加-only 是日志/档案追加写入的常见形态；出现 '-' 行代表前缀匹配被破坏。
--- 变更记录：- 2026-08-01: 补充 Diff 追加单调性的属性覆盖。
 unifiedAppendOnly :: Property
 unifiedAppendOnly =
   forAll genText $ \old ->
@@ -92,16 +121,12 @@ unifiedAppendOnly =
             if null appended
               then output === ""
               else
-                ( all
-                    (\line -> Text.isPrefixOf " " line || Text.isPrefixOf "+" line)
-                    contentLines
-                )
+                all
+                  (\line -> Text.isPrefixOf " " line || Text.isPrefixOf "+" line)
+                  contentLines
                   .&&. removals === 0
                   .&&. additions === length appended
 
--- | 规格：行序列不同时输出必然非空。
--- 背景：hunk 折叠可能把可见变更压没；空输出会掩盖真实差异（仅尾随换行差异不在行序列中体现，属行级 diff 的既有语义）。
--- 变更记录：- 2026-08-01: 补充 Diff 差异非空的属性覆盖。
 unifiedDifferenceNonEmpty :: Property
 unifiedDifferenceNonEmpty =
   forAll genText $ \old ->

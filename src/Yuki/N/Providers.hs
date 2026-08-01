@@ -20,6 +20,7 @@ import Data.Aeson.Key (fromText)
 import Data.Aeson.Types (parseMaybe)
 import Data.Bool (bool)
 import Data.ByteString.Lazy qualified as LazyByteString
+import Data.Either (fromRight)
 import Data.Functor ((<&>))
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
@@ -97,7 +98,7 @@ loadProviders env =
   loadFile path =
     try (LazyByteString.readFile path) >>= \case
       Left (_ :: IOException) -> pure defaultProviders
-      Right bytes -> pure (either (const defaultProviders) id (eitherDecode bytes))
+      Right bytes -> pure (fromRight defaultProviders (eitherDecode bytes))
 
 loadAuthJson :: IO (Maybe Value)
 loadAuthJson =

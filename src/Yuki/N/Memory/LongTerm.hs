@@ -30,10 +30,10 @@ import Data.Char qualified as Char
 import Data.Foldable (traverse_)
 import Data.Function ((&))
 import Data.Functor ((<&>))
-import Data.List (sortOn)
+import Data.List (find, sortOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (listToMaybe, mapMaybe)
+import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import Data.Ord (Down (..))
 import Data.Set (Set)
 import Data.Set qualified as Set
@@ -491,23 +491,34 @@ makeStore persist lock =
       longTermSpace = inspectSpace lock,
       longTermCatalog = catalog lock,
       longTermReceipts = receipts lock,
-      longTermDelete = \incarnation ->
-        ()
-          <$ modifyMVar
-            lock
-            ( \state ->
-                let changed =
-                      state
-                        { stateSpaces = Map.filter ((/= incarnation) . memorySpaceOwner) (stateSpaces state),
-                          stateMemories =
-                            Map.filter (not . Map.null)
-                              . Map.map (Map.filter ((/= incarnation) . longMemoryOwner))
-                              $ stateMemories state,
-                          stateReceipts = Map.filter ((/= incarnation) . memoryReadReceiptIncarnationId) (stateReceipts state)
-                        }
-                 in persist changed *> pure (changed, ())
-            )
+      longTermDelete = deleteCheckedOrThrow (deleteIncarnation persist lock)
     }
+
+-- | 删除分身全部长期记忆。持久化失败时保留旧内存状态并把 `Left` 上抛；
+-- `longTermDelete` 兼容字段把失败转成异常（与其它 `IO ()` store 的异常语义一致）。
+deleteIncarnation :: (LongTermState -> IO (Either Text ())) -> MVar LongTermState -> Text -> IO (Either Text ())
+deleteIncarnation persist lock incarnation =
+  modifyMVar lock $ \state ->
+    let changed =
+          state
+            { stateSpaces = Map.filter ((/= incarnation) . memorySpaceOwner) (stateSpaces state),
+              stateMemories =
+                Map.filter (not . Map.null)
+                  . Map.map (Map.filter ((/= incarnation) . longMemoryOwner))
+                  $ stateMemories state,
+              stateReceipts = Map.filter ((/= incarnation) . memoryReadReceiptIncarnationId) (stateReceipts state)
+            }
+     in persist changed
+          <&> either
+            ((state,) . Left)
+            (const (changed, Right ()))
+
+-- | 检查式删除失败时转为异常抛出（与其它 `IO ()` store 的异常语义一致）。
+deleteCheckedOrThrow :: (Text -> IO (Either Text ())) -> Text -> IO ()
+deleteCheckedOrThrow delete incarnation =
+  delete incarnation >>= \case
+    Left failure -> ioError (userError (Text.unpack failure))
+    Right () -> pure ()
 
 prepareDirectory :: FilePath -> IO (Either Text ())
 prepareDirectory dir =
@@ -650,7 +661,7 @@ validateHistory history =
     first : rest
       | fmap longMemoryRevision (first : rest) /= [1 .. Map.size history] ->
           Left ("non-contiguous long-term memory history: " <> longMemoryId first)
-      | any (not . sameIdentity first) rest ->
+      | not (all (sameIdentity first) rest) ->
           Left ("inconsistent long-term memory history: " <> longMemoryId first)
       | not (voidIsFinal (fmap longMemoryStatus (first : rest))) ->
           Left ("long-term memory revived after void: " <> longMemoryId first)
@@ -754,8 +765,8 @@ cleanRemember request
 
 duplicateOf :: RememberRequest -> LongTermState -> Maybe LongMemory
 duplicateOf request =
-  listToMaybe
-    . filter ((== canonicalContent (rememberContent request)) . canonicalContent . longMemoryContent)
+  find
+    ((== canonicalContent (rememberContent request)) . canonicalContent . longMemoryContent)
     . filter ((== scope) . memoryScope)
     . latestMemories
  where
@@ -918,7 +929,7 @@ snippetAround matches content =
       (\needle -> nonEmptyPosition (Text.breakOn needle folded))
       matches
       & minimumMaybe
-      & maybe 0 id
+      & fromMaybe 0
   start = max 0 (position - snippetLead)
   prefix = bool "" "…" (start > 0)
   suffix = bool "" "…" (start + snippetLength < Text.length content)
@@ -1223,7 +1234,7 @@ makeReceipt now action incarnation query spaces refs =
           <> digestText
             [ action,
               incarnation,
-              maybe "" id query,
+              fromMaybe "" query,
               Text.pack (show now),
               Text.intercalate "\US" (fmap renderRef refs)
             ],

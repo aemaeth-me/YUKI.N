@@ -1,18 +1,14 @@
--- Golden journals：每核心场景一份录制入库的 journal，CI 回放恒定绿。
---
--- 再生成：删除 test/golden/*.jsonl 后跑 cabal test（golden 缺失即自动录制，
--- 不落败），或 GHCi 中 regenerateGoldens。录制锚在 withSandbox 临时 cwd，
--- journal 内只出现相对路径，时间戳入库前剥除，故 golden 与机器、目录无关；
--- determinism 测试（同场景录两遍逐条对账）锁住 journalNewId/注册表/队列的
--- 确定性，并把新鲜录制与已提交 golden 对账。
---
--- 变更记录：
---   - 2026-08-01: 每个场景的 replay/deterministic 拆为具名测试声明并建立回归文档基线。
+-- Golden journals：每核心场景一份录制入库的 journal，回放恒定绿。
+-- 再生成：删除 test/golden/*.jsonl 后跑测试（golden 缺失即自动录制），
+-- 或 GHCi 中 regenerateGoldens。录制锚在 withSandbox 临时 cwd，journal 内只出现
+-- 相对路径，时间戳入库前剥除；determinism 测试（同场景录两遍逐条对账）锁住
+-- journalNewId/注册表/队列的确定性，并把新鲜录制与已提交 golden 对账。
 module Golden (goldenTests, regenerateGoldens) where
 
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar
 import Control.Exception (SomeException, throwIO, try)
+import Control.Monad (unless)
 import Data.Aeson
 import Data.Aeson.Types (Pair)
 import Data.Bool (bool)
@@ -61,107 +57,13 @@ import Yuki.N.Server (application)
 goldenTests :: TestTree
 goldenTests = testGroup "golden journals" (fmap scenarioTests scenarios)
 
--- 场景树的每个实际测试都指向具名声明（replayOf/deterministicOf 按场景分派），
--- 保证 12 个测试各有一份带文档的具名实现。
 scenarioTests :: Scenario -> TestTree
 scenarioTests scenario =
   testGroup
     (scenarioName scenario)
-    [ testCase "the golden replays without divergence" (replayOf scenario),
-      testCase "two recordings agree with the golden modulo timestamps" (deterministicOf scenario)
+    [ testCase "the golden replays without divergence" (replayGolden scenario),
+      testCase "two recordings agree with the golden modulo timestamps" (deterministicScenario scenario)
     ]
-
-replayOf :: Scenario -> Assertion
-replayOf scenario = case scenarioName scenario of
-  "plain" -> replayPlain
-  "tool" -> replayTool
-  "retry" -> replayRetry
-  "splice" -> replaySplice
-  "steer" -> replaySteer
-  "shell" -> replayShell
-  other -> error ("unknown golden scenario: " <> other)
-
-deterministicOf :: Scenario -> Assertion
-deterministicOf scenario = case scenarioName scenario of
-  "plain" -> deterministicPlain
-  "tool" -> deterministicTool
-  "retry" -> deterministicRetry
-  "splice" -> deterministicSplice
-  "steer" -> deterministicSteer
-  "shell" -> deterministicShell
-  other -> error ("unknown golden scenario: " <> other)
-
--- | 规格：plain 场景的已提交 golden journal 回放无分歧且满足场景断言。
--- 背景：plain 是最小端到端基线；回放分歧意味着事件管线相对已承诺基线漂移。
--- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
-replayPlain :: Assertion
-replayPlain = replayGolden plain
-
--- | 规格：tool 场景（fs_list 工具往返）的 golden 回放无分歧。
--- 背景：工具往返是最常用路径；其结果留存（含沙箱 listing）是 golden 的核心锚点。
--- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
-replayTool :: Assertion
-replayTool = replayGolden tool
-
--- | 规格：retry 场景（两次 429 后成功）的 golden 回放无分歧。
--- 背景：重试事件的 journal 形态决定回放是否复现真实执行；分歧会让审计失真。
--- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
-replayRetry :: Assertion
-replayRetry = replayGolden retry
-
--- | 规格：splice 场景（context splice 触发）的 golden 回放无分歧。
--- 背景：splice 改写上下文并落 stub；回放必须复现同一 stub 视图。
--- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
-replaySplice :: Assertion
-replaySplice = replayGolden splice
-
--- | 规格：steer 场景（运行中注入 steer）的 golden 回放无分歧。
--- 背景：steer 注入的时序与落点（step 2）是回放一致性的关键。
--- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
-replaySteer :: Assertion
-replaySteer = replayGolden steer
-
--- | 规格：shell 场景（shell 工具执行）的 golden 回放无分歧。
--- 背景：shell 输出流与工具调用条目必须稳定入 journal；波动会破坏回放可比性。
--- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
-replayShell :: Assertion
-replayShell = replayGolden shell
-
--- | 规格：plain 场景两次录制逐条对账且与已提交 golden 一致。
--- 背景：确定性锁住 journalNewId/注册表/队列；不确定会让审计与回放不可比。
--- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
-deterministicPlain :: Assertion
-deterministicPlain = deterministicScenario plain
-
--- | 规格：tool 场景两次录制逐条对账且与已提交 golden 一致。
--- 背景：工具调用 id 与结果内容必须稳定复现，否则回放基线失效。
--- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
-deterministicTool :: Assertion
-deterministicTool = deterministicScenario tool
-
--- | 规格：retry 场景两次录制逐条对账且与已提交 golden 一致。
--- 背景：重试次数与事件顺序的确定性决定回放事件数。
--- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
-deterministicRetry :: Assertion
-deterministicRetry = deterministicScenario retry
-
--- | 规格：splice 场景两次录制逐条对账且与已提交 golden 一致。
--- 背景：stub 化边界与工件 id 必须确定，否则 golden 不可比。
--- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
-deterministicSplice :: Assertion
-deterministicSplice = deterministicScenario splice
-
--- | 规格：steer 场景两次录制逐条对账且与已提交 golden 一致。
--- 背景：steer 落点依赖闸门时序；录制必须稳定复现 step 2 注入。
--- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
-deterministicSteer :: Assertion
-deterministicSteer = deterministicScenario steer
-
--- | 规格：shell 场景两次录制逐条对账且与已提交 golden 一致。
--- 背景：shell 输出与条目序列的确定性是 golden 可比性的前提。
--- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
-deterministicShell :: Assertion
-deterministicShell = deterministicScenario shell
 
 -- 手动再生成全部 golden（等价于删文件后跑测试）
 regenerateGoldens :: IO ()
@@ -305,33 +207,32 @@ hasKind label match entries =
 record :: Scenario -> IO [Entry]
 record scenario = withSandbox exercise
  where
-  exercise workDir =
-    getTemporaryDirectory >>= \tmp ->
-      newId >>= \ident ->
-        let journalDir = tmp ++ "/" ++ Text.unpack ident
-         in newEmptyMVar >>= \gate ->
-              newFakeProvider (scenarioScript scenario) >>= \provider ->
-                testWithApplication (pure (fakeProvider (gated gate provider))) (serve journalDir workDir gate provider)
+  exercise workDir = do
+    tmp <- getTemporaryDirectory
+    ident <- newId
+    let journalDir = tmp ++ "/" ++ Text.unpack ident
+    gate <- newEmptyMVar
+    provider <- newFakeProvider (scenarioScript scenario)
+    testWithApplication (pure (fakeProvider (gated gate provider))) (serve journalDir workDir gate provider)
   gated gate provider =
     maybe provider (const provider {providerGate = Just gate}) (scenarioSteer scenario)
-  serve journalDir workDir gate provider port =
-    newManager defaultManagerSettings >>= \manager ->
-      newFileJournal journalDir >>= \journal ->
-        newRunRegistry >>= \runs ->
-          newMemoryArtifactStore >>= \artifacts ->
-            wiredRuntime manager (Just artifacts) (e2eSettings port workDir (scenarioRetries scenario)) >>= \base ->
-              let resolved =
-                    base
-                      { runtimeJournal = Just journal,
-                        runtimeRuns = Just runs,
-                        runtimeArtifactStore = Just artifacts,
-                        runtimeSplice = scenarioSplice scenario
-                      }
-                  app = application Nothing Nothing Nothing (Just runs) (const (pure resolved))
-               in drive app gate runs provider
-                    *> ( readJournal (journalFilePath journalDir)
-                           >>= either (assertFailure . Text.unpack) (pure . fmap stripTime)
-                       )
+  serve journalDir workDir gate provider port = do
+    manager <- newManager defaultManagerSettings
+    journal <- newFileJournal journalDir
+    runs <- newRunRegistry
+    artifacts <- newMemoryArtifactStore
+    base <- wiredRuntime manager (Just artifacts) (e2eSettings port workDir (scenarioRetries scenario))
+    let resolved =
+          base
+            { runtimeJournal = Just journal,
+              runtimeRuns = Just runs,
+              runtimeArtifactStore = Just artifacts,
+              runtimeSplice = scenarioSplice scenario
+            }
+        app = application Nothing Nothing Nothing (Just runs) (const (pure resolved))
+    drive app gate runs provider
+    entries <- readJournal (journalFilePath journalDir) >>= either (assertFailure . Text.unpack) pure
+    pure (fmap stripTime entries)
   drive app gate runs provider =
     maybe (plainDrive app) (steerDrive app gate runs provider) (scenarioSteer scenario)
 
@@ -339,13 +240,16 @@ plainDrive :: Application -> IO ()
 plainDrive app = runSession postAgent app >>= decodeEvents >>= finished
 
 steerDrive :: Application -> MVar () -> RunRegistry -> FakeProvider -> Text -> IO ()
-steerDrive app gate runs provider text =
-  newEmptyMVar >>= \result ->
-    forkIO (attempt result)
-      *> (waitFor requested >>= bool (assertFailure "provider never received the first request") (pure ()))
-      *> (steerRun runs (runId agentInput) (ChatUser text) >>= (@?= True))
-      *> putMVar gate ()
-      *> (timeout 10000000 (takeMVar result) >>= maybe (assertFailure "steered run did not finish") settled)
+steerDrive app gate runs provider text = do
+  result <- newEmptyMVar
+  _ <- forkIO (attempt result)
+  requestedOk <- waitFor requested
+  unless requestedOk (assertFailure "provider never received the first request")
+  steered <- steerRun runs (runId agentInput) (ChatUser text)
+  steered @?= True
+  putMVar gate ()
+  outcome <- timeout 10000000 (takeMVar result)
+  maybe (assertFailure "steered run did not finish") settled outcome
  where
   attempt :: MVar (Either SomeException [Event]) -> IO ()
   attempt result = try (runSession postAgent app >>= decodeEvents) >>= putMVar result
@@ -388,18 +292,16 @@ ensureGolden scenario =
     >>= bool (record scenario >>= \entries -> entries <$ writeGolden scenario entries) (readGolden scenario)
 
 replayGolden :: Scenario -> Assertion
-replayGolden scenario =
-  ensureGolden scenario >>= \entries ->
-    replayFile defaultHooks (goldenPath scenario) Nothing >>= \report ->
-      scenarioCheck scenario entries
-        *> either (assertFailure . Text.unpack) ((@?= Nothing) . reportDivergence) report
+replayGolden scenario = do
+  entries <- ensureGolden scenario
+  report <- replayFile defaultHooks (goldenPath scenario) Nothing
+  scenarioCheck scenario entries
+  either (assertFailure . Text.unpack) ((@?= Nothing) . reportDivergence) report
 
 deterministicScenario :: Scenario -> Assertion
-deterministicScenario scenario =
-  record scenario >>= \first ->
-    record scenario >>= \second ->
-      ensureGolden scenario >>= \golden ->
-        sequence_
-          [ first @?= second,
-            first @?= golden
-          ]
+deterministicScenario scenario = do
+  first <- record scenario
+  second <- record scenario
+  golden <- ensureGolden scenario
+  first @?= second
+  first @?= golden

@@ -120,7 +120,7 @@ instance ToJSON Entry where
     object (["seq" .= seqNo, "scope" .= scope] <> timePair time <> kindPairs kind)
 
 timePair :: Maybe Integer -> [Pair]
-timePair = fromMaybe [] . fmap (\time -> ["time" .= time])
+timePair = maybe [] (\time -> ["time" .= time])
 
 instance FromJSON Entry where
   parseJSON = withObject "Entry" $ \fields ->

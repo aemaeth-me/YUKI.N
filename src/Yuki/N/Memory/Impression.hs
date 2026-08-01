@@ -24,7 +24,7 @@ import Control.Exception (IOException, displayException, try)
 import Data.Aeson
 import Data.Bool (bool)
 import Data.ByteString.Lazy qualified as LazyByteString
-import Data.Functor ((<&>))
+import Data.Functor (($>), (<&>))
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
@@ -381,7 +381,7 @@ mkStore persist lock =
                       { storeStates = Map.insert incarnation state (storeStates stored),
                         storeRevisions = takeEnd 256 (storeRevisions stored <> [revision])
                       }
-               in persist changed *> pure (changed, Right state)
+               in persist changed $> (changed, Right state)
 
 activationPromptRevision, consolidationPromptRevision :: Text
 activationPromptRevision = "impression-activation/v2"

@@ -1,9 +1,3 @@
--- | token 解剖报告测试
---
--- 覆盖：跨请求聚合 token 类别与空 journal 零报告。
--- 边界：覆盖 Yuki.N.Anatomy。
--- 变更记录：
---   - 2026-08-01: 从集中式 test/Main.hs 拆出；测试语义、标题、数量与组顺序保持原样。
 module Yuki.N.AnatomyTest
   ( anatomyTests,
     aggregates,
@@ -11,43 +5,16 @@ module Yuki.N.AnatomyTest
   )
 where
 
-import Control.Applicative ()
-import Control.Concurrent ()
-import Control.Concurrent.MVar ()
-import Control.Exception ()
-import Control.Monad ()
 import Data.Aeson
-import Data.Aeson.Types ()
-import Data.Bool ()
-import Data.ByteString ()
 import Data.ByteString.Lazy qualified as LazyByteString
-import Data.Foldable ()
-import Data.Functor ()
-import Data.IORef ()
-import Data.List ()
-import Data.Maybe ()
 import Data.Text (Text)
 import Data.Text qualified as Text
-import Network.HTTP.Client ()
-import Network.HTTP.Client.TLS ()
-import Network.HTTP.Types ()
-import Network.Wai ()
-import Network.Wai.Handler.Warp ()
-import Network.Wai.Internal ()
-import Network.Wai.Test ()
-import System.Directory ()
-import System.Exit ()
-import System.FilePath ()
-import System.Process ()
-import System.Timeout ()
 import Test.Tasty
 import Test.Tasty.HUnit
 import Yuki.N.AGUI.Types
-import Yuki.N.Agent ()
 import Yuki.N.Anatomy
 import Yuki.N.Journal
 import Yuki.N.Model
-import Yuki.N.TestSupport ()
 
 anatomyTests :: TestTree
 anatomyTests =
@@ -57,9 +24,6 @@ anatomyTests =
       testCase "treats an empty journal as zero" emptyJournal
     ]
 
--- | 规格：anatomyEntries 跨多个模型请求聚合 token 类别，并区分总览与最近请求。
--- 背景：token 解剖是成本与上下文预算诊断的输入；聚合错误会误导优化决策。
--- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 aggregates :: Assertion
 aggregates =
   anatomyEntries specimen
@@ -68,9 +32,6 @@ aggregates =
       (Anatomy 8 (2 * specimenSize) 20 36 8 32)
       (Just (Anatomy 4 specimenSize 12 24 4 16))
 
--- | 规格：空 journal 的解剖报告为零值。
--- 背景：空输入必须得到确定的零报告；否则诊断视图出现幽灵数据。
--- 变更记录：- 2026-08-01: 从集中式测试套件迁移并建立回归文档基线。
 emptyJournal :: Assertion
 emptyJournal = anatomyEntries [] @?= AnatomyReport 0 mempty Nothing
 

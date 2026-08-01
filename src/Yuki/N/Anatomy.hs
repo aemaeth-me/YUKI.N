@@ -60,7 +60,7 @@ dissect (ModelRequest messages tools) =
     ChatToolResult _ content -> toolResult content
   assistant (AssistantTurn _ text reasoning calls) =
     foldMap body text
-      <> foldMap body (modelToolArguments <$> calls)
+      <> foldMap (body . modelToolArguments) calls
       <> foldMap reasoningOf reasoning
   system content = mempty {anatomySystem = Text.length content}
   user content = mempty {anatomyUser = Text.length content}

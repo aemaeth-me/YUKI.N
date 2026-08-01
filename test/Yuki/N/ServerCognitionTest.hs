@@ -1,11 +1,3 @@
--- | 分身/记忆/线程 HTTP 路由测试
---
--- 覆盖：incarnation create/read/update/archive/restore/delete 生命周期、
--- 长期记忆 list/detail/search/void/receipts、working-memory/sleep-cycles/experiences/
--- impression 路由、context-epochs，以及线程 sleep/import/fork/export 传输路由。
--- 边界：使用内存认知与内存会话 store 的完整应用装配；真实 socket 见 E2E。
--- 变更记录：
---   - 2026-08-01: 新增 Server 高价值路由（分身/记忆/线程）的回归覆盖。
 module Yuki.N.ServerCognitionTest
   ( serverCognitionTests,
     incarnationLifecycleOverHttp,
@@ -47,9 +39,6 @@ serverCognitionTests =
       testCase "thread sleep/import/fork/export transfer over HTTP" threadTransferOverHttp
     ]
 
--- | 规格：分身创建→列表→读取→改名→归档→恢复→删除全生命周期，响应状态与 JSON 形状逐段校验。
--- 背景：分身生命周期是认知界面的核心；任一环节的 4xx/5xx 或形状漂移都会让界面失效。
--- 变更记录：- 2026-08-01: 补充 incarnation 生命周期路由的回归覆盖。
 incarnationLifecycleOverHttp :: Assertion
 incarnationLifecycleOverHttp =
   cognitionFixture $ \app _ _ -> do
@@ -93,9 +82,6 @@ incarnationLifecycleOverHttp =
     afterDelete <- get app ["incarnations"]
     assertBool "list no longer includes the deleted incarnation" (not (listHas "north" (simpleBody afterDelete)))
 
--- | 规格：长期记忆 remember→catalog→detail→search→void→receipts 全流程，含 404 与形状断言。
--- 背景：长期记忆路由是记忆治理界面的数据源；void 语义错误会让不可用记忆继续浮现。
--- 变更记录：- 2026-08-01: 补充记忆生命周期路由的回归覆盖。
 memoryLifecycleOverHttp :: Assertion
 memoryLifecycleOverHttp =
   cognitionFixture $ \app _ _ -> do
@@ -124,9 +110,6 @@ memoryLifecycleOverHttp =
     simpleStatus receipts @?= status200
     assertBool "memory receipts recorded" (lengthOf (simpleBody receipts) >= 1)
 
--- | 规格：working-memory 初始 404；睡眠后 head/sleep-cycles/experiences/impression/context-epochs 全部可达。
--- 背景：睡眠是工作记忆的唯一写入路径；路由形状错误会让睡眠结果不可见。
--- 变更记录：- 2026-08-01: 补充工作记忆与睡眠路由的回归覆盖。
 workingRoutesOverHttp :: Assertion
 workingRoutesOverHttp =
   cognitionFixture $ \app _ service -> do
@@ -158,9 +141,6 @@ workingRoutesOverHttp =
     simpleStatus epochs @?= status200
     assertBool "sleep committed a context epoch" (lengthOf (simpleBody epochs) >= 1)
 
--- | 规格：线程创建→fork→export→import（含重复 import 409）→sleep→未知线程 404。
--- 背景：线程传输是任务可迁移性的契约；409 语义错误会让重复导入破坏数据。
--- 变更记录：- 2026-08-01: 补充线程传输路由的回归覆盖。
 threadTransferOverHttp :: Assertion
 threadTransferOverHttp =
   cognitionFixture $ \app _ service -> do
@@ -288,7 +268,7 @@ decodeInt selector body =
         _ -> assertFailure ("missing or non-numeric field " <> selector) $> 0
 
 fieldPath :: Text -> Value -> Maybe Value
-fieldPath selector value = go (Text.splitOn "." selector) value
+fieldPath selector = go (Text.splitOn "." selector)
  where
   go [] _ = Nothing
   go [key] (Object fields) = KeyMap.lookup (Key.fromText key) fields
@@ -301,9 +281,8 @@ listHas needle body =
     Right items -> any hasNeedle items
     Left _ -> False
  where
-  hasNeedle value = case value of
-    Object fields -> KeyMap.lookup "id" fields == Just (String needle)
-    _ -> False
+  hasNeedle (Object fields) = KeyMap.lookup "id" fields == Just (String needle)
+  hasNeedle _ = False
 
 snippetsHave :: Text -> LazyByteString.ByteString -> Bool
 snippetsHave needle body =
@@ -315,14 +294,10 @@ snippetsHave needle body =
     withObject "search" $ \fields -> do
       snippets <- fields .: "snippets"
       mapM snippetRef (snippets :: [Value])
-  snippetRef snippet =
+  snippetRef =
     withObject
       "snippet"
-      ( \s -> do
-          ref <- s .: "ref"
-          withObject "ref" (.: "id") ref
-      )
-      snippet
+      (\s -> s .: "ref" >>= withObject "ref" (.: "id"))
 
 lengthOf :: LazyByteString.ByteString -> Int
 lengthOf body =

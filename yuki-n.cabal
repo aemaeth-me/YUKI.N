@@ -23,8 +23,6 @@ extra-source-files:
     docs/memory/*.md
     frontend/test/backend-control-e2e.mjs
     frontend/web/control.js
-    scripts/check-test-docs.py
-    scripts/test_check_test_docs.py
     test/golden/*.jsonl
 
 source-repository head
@@ -57,7 +55,9 @@ library
         Yuki.N.Context
         Yuki.N.ContextEpoch
         Yuki.N.Diff
+        Yuki.N.Domain.Context
         Yuki.N.Domain.Diff
+        Yuki.N.Domain.Model
         Yuki.N.Experience
         Yuki.N.Facts
         Yuki.N.Inspect

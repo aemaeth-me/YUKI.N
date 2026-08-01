@@ -15,7 +15,7 @@ import Data.Aeson
 import Data.Bits
 import Data.ByteString qualified as ByteString
 import Data.ByteString.Lazy qualified as LazyByteString
-import Data.Functor ((<&>))
+import Data.Functor (($>), (<&>))
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Text (Text)
@@ -168,7 +168,7 @@ store persist write fetch lock =
               Nothing ->
                 write identifier bytes
                   *> let updated = index {indexMetas = Map.insert identifier meta (indexMetas index)}
-                      in persist updated *> pure (updated, meta)
+                      in persist updated $> (updated, meta)
   attach refId identifier incarnation purpose source =
     getPOSIXTime >>= \now ->
       modifyMVar lock $ \index ->
@@ -177,7 +177,7 @@ store persist write fetch lock =
           Just _ ->
             let ref = BlobRef refId identifier incarnation purpose source (round now)
                 updated = index {indexRefs = Map.insert refId ref (indexRefs index)}
-             in persist updated *> pure (updated, Right ref)
+             in persist updated $> (updated, Right ref)
 
 loadIndex :: FilePath -> IO (Either Text BlobIndex)
 loadIndex path =

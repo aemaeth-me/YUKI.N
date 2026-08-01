@@ -1,2 +1,27 @@
 # Parse files with the same language edition used by the Cabal components.
 - arguments: [-XGHC2024]
+
+# 仓库级 HLint 策略：只忽略以下明确类别；其余提示应在代码中修复。
+# 规则依据 AGENTS.md：不为消除提示而机械 point-free 或牺牲可读性。
+
+# Use >=> / Use <=<：Kleisli 组合会把顺序流程压成合成链，审查难度大于
+# 显式 >>= 步骤；AGENTS.md 明确禁止机械套用该提示。
+- ignore: {name: "Use >=>"}
+- ignore: {name: "Use <=<"}
+
+# Avoid lambda / Avoid lambda using `infix`：这些 lambda 绑定领域参数名，
+# 改写为组合/中缀会失去可读的参数命名。
+- ignore: {name: "Avoid lambda"}
+- ignore: {name: "Avoid lambda using `infix`"}
+
+# Use tuple-section：需要 TupleSections 扩展，且 `\x -> (a, x)` 比 `(a,)`
+# 更明确地展示元组角色。
+- ignore: {name: "Use tuple-section"}
+
+# Avoid reverse：HLint 自身标注改写会改变稳定排序语义；仓库依赖
+# sortOn + reverse 的稳定序，保持原样。
+- ignore: {name: "Avoid reverse"}
+
+# Use fmap：剩余案例都是 `<&>` 链 + 嵌套 lambda 的组合改写，点自由形式
+# 比具名 lambda 更难审查。
+- ignore: {name: "Use fmap"}

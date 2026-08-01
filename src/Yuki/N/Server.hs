@@ -13,7 +13,7 @@ import Data.Bool (bool)
 import Data.ByteString qualified as ByteString
 import Data.ByteString.Builder qualified as Builder
 import Data.ByteString.Lazy qualified as LazyByteString
-import Data.Functor ((<&>))
+import Data.Functor (($>), (<&>))
 import Data.List (sortOn)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, listToMaybe)
@@ -450,7 +450,7 @@ application cors inspection configs runs runtimeFor request respond =
     go archived [] = pure (Right (reverse archived))
     go archived (task : rest) =
       archiveSession service (sessionId task) >>= \case
-        Left failure -> rollbackTasks service archived *> pure (Left failure)
+        Left failure -> rollbackTasks service archived $> Left failure
         Right changed -> go (changed : archived) rest
   rollbackTasks service =
     mapM_ (restoreSession service . sessionId)
@@ -1095,7 +1095,7 @@ validateCwd = maybe (pure (Right ())) check . cwdPath . configCwd
   check dir = bool (Left ("not a directory: " <> fromString dir)) (Right ()) <$> doesDirectoryExist dir
 
 validateConfig :: ThreadConfig -> IO (Either Text ())
-validateConfig config = validateCwd config >>= pure . (>> validateContextConfig config)
+validateConfig config = validateCwd config <&> (>> validateContextConfig config)
 
 validateContextConfig :: ThreadConfig -> Either Text ()
 validateContextConfig config =

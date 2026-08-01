@@ -12,6 +12,7 @@ import Control.Concurrent.MVar (newMVar, withMVar)
 import Control.Exception (IOException, try)
 import Control.Monad (when)
 import Data.Aeson (Value, decodeFileStrict, object, (.=))
+import Data.Either (fromRight)
 import Data.Functor ((<&>))
 import Data.IORef (modifyIORef', newIORef, readIORef)
 import Data.Map.Strict qualified as Map
@@ -42,7 +43,7 @@ newTranscriptStore dir =
   save lock threadId messages =
     withMVar lock (const (atomicEncodeFile (transcriptPath dir threadId) (withoutSystem messages)))
   load threadId =
-    either (const Nothing) id
+    fromRight Nothing
       <$> (try (decodeFileStrict (transcriptPath dir threadId)) :: IO (Either IOException (Maybe [ChatMessage])))
   delete lock threadId =
     withMVar lock (const (removeIfExists (transcriptPath dir threadId)))
@@ -67,7 +68,7 @@ transcriptHooks store = defaultHooks {afterRun = persist}
     | otherwise = ignoringIO (transcriptSave store (AGUI.runThreadId input) messages)
 
 ignoringIO :: IO () -> IO ()
-ignoringIO action = either (const ()) id <$> (try action :: IO (Either IOException ()))
+ignoringIO action = fromRight () <$> (try action :: IO (Either IOException ()))
 
 toAguiMessages :: [ChatMessage] -> [AGUI.Message]
 toAguiMessages = concatMap (uncurry render) . zip [0 ..] . withoutSystem

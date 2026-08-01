@@ -18,7 +18,7 @@ import Control.Concurrent.MVar
 import Control.Exception (IOException, try)
 import Data.Aeson
 import Data.ByteString.Lazy qualified as LazyByteString
-import Data.Functor ((<&>))
+import Data.Functor (($>), (<&>))
 import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
@@ -130,21 +130,21 @@ mkFactStore limit lock persist = FactStore add search touch list archive invalid
           getPOSIXTime >>= \now ->
             let fact = Fact (factIdFor content) content kind source (round now) 0 0 False False
                 updated = retainFacts limit (Just content) (Map.insert content fact facts)
-             in persist updated *> pure (updated, fact)
+             in persist updated $> (updated, fact)
   search query = rank query <$> list
   touch hits =
     getPOSIXTime >>= \now ->
       modifyMVar lock $ \facts ->
         let bumped = fmap (bump (round now)) hits
             updated = merge facts bumped
-         in persist updated *> pure (updated, ())
+         in persist updated $> (updated, ())
   bump now fact = fact {factLastUsed = now, factUseCount = factUseCount fact + 1}
   list = Map.elems <$> readMVar lock
   archive cutoff =
     modifyMVar lock $ \facts ->
       let doomed = [fact {factArchived = True} | fact <- Map.elems facts, stale fact]
           updated = merge facts doomed
-       in persist updated *> pure (updated, length doomed)
+       in persist updated $> (updated, length doomed)
    where
     stale fact = not (factArchived fact) && factUseCount fact == 0 && factCreated fact < cutoff
   invalidate content =
@@ -154,7 +154,7 @@ mkFactStore limit lock persist = FactStore add search touch list archive invalid
         Just fact ->
           let voided = fact {factVoid = True}
               updated = Map.insert content voided facts
-           in persist updated *> pure (updated, True)
+           in persist updated $> (updated, True)
   merge = foldl' (\facts fact -> Map.insert (factContent fact) fact facts)
 
 rank :: Text -> [Fact] -> [Fact]

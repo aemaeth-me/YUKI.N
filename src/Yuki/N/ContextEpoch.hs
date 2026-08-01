@@ -14,11 +14,11 @@ where
 
 import Control.Concurrent.MVar
 import Control.Exception (IOException, displayException, try)
-import Control.Monad ((>=>))
+import Control.Monad (void, (>=>))
 import Data.Aeson
 import Data.Bool (bool)
 import Data.ByteString.Lazy qualified as LazyByteString
-import Data.Functor ((<&>))
+import Data.Functor (($>), (<&>))
 import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
@@ -278,7 +278,7 @@ mkStore persist blobs lock =
                             stateSegments = foldr (\segment -> Map.insert (contextSegmentId segment) segment) (stateSegments state) segments,
                             stateHeads = Map.insert scope identifier (stateHeads state)
                           }
-                   in persist changed *> pure (changed, Right epoch)
+                   in persist changed $> (changed, Right epoch)
   project identifier =
     readMVar lock >>= \state ->
       case Map.lookup identifier (stateEpochs state) of
@@ -338,26 +338,27 @@ materializeSegments blobs incarnation task =
 
 deleteIncarnation :: (ContextState -> IO ()) -> MVar ContextState -> Text -> IO ()
 deleteIncarnation persist lock incarnation =
-  ()
-    <$ modifyMVar
-      lock
-      ( \state ->
-          let owned = Map.filter ((== incarnation) . contextEpochIncarnationId) (stateEpochs state)
-              segmentIds = Set.fromList (concatMap contextEpochSegmentIds (Map.elems owned))
-              keptEpochs = Map.filter ((/= incarnation) . contextEpochIncarnationId) (stateEpochs state)
-              keptSegments = Map.filterWithKey (\key _ -> Set.notMember key segmentIds) (stateSegments state)
-              keptHeads =
-                Map.filterWithKey
-                  (\_ epochId -> maybe True ((/= incarnation) . contextEpochIncarnationId) (Map.lookup epochId (stateEpochs state)))
-                  (stateHeads state)
-              changed =
-                state
-                  { stateEpochs = keptEpochs,
-                    stateSegments = keptSegments,
-                    stateHeads = keptHeads
-                  }
-           in persist changed *> pure (changed, ())
-      )
+  void
+    ( modifyMVar
+        lock
+        ( \state ->
+            let owned = Map.filter ((== incarnation) . contextEpochIncarnationId) (stateEpochs state)
+                segmentIds = Set.fromList (concatMap contextEpochSegmentIds (Map.elems owned))
+                keptEpochs = Map.filter ((/= incarnation) . contextEpochIncarnationId) (stateEpochs state)
+                keptSegments = Map.filterWithKey (\key _ -> Set.notMember key segmentIds) (stateSegments state)
+                keptHeads =
+                  Map.filterWithKey
+                    (\_ epochId -> maybe True ((/= incarnation) . contextEpochIncarnationId) (Map.lookup epochId (stateEpochs state)))
+                    (stateHeads state)
+                changed =
+                  state
+                    { stateEpochs = keptEpochs,
+                      stateSegments = keptSegments,
+                      stateHeads = keptHeads
+                    }
+             in persist changed $> (changed, ())
+        )
+    )
 
 epochHash :: Text -> Text -> Int -> [Text] -> Maybe Text -> Text
 epochHash incarnation task revision segments wake =

@@ -2,6 +2,7 @@ module Yuki.N (runFromEnvironment) where
 
 import Control.Applicative ((<|>))
 import Control.Exception (bracket)
+import Control.Monad (join)
 import Data.Aeson (toJSON)
 import Data.Foldable (traverse_)
 import Data.Functor ((<&>))
@@ -41,8 +42,9 @@ import Yuki.N.Transcript (TranscriptStore (..), newTranscriptStore, transcriptHo
 
 runFromEnvironment :: IO ()
 runFromEnvironment =
-  getEnvironment <&> Map.fromList >>= \env ->
-    either (die . Text.unpack) (boot env) (resolveSettings env)
+  getEnvironment
+    >>= (\env -> either (die . Text.unpack) (boot env) (resolveSettings env))
+      . Map.fromList
 
 boot :: Map.Map String String -> Settings -> IO ()
 boot env settings =
@@ -231,7 +233,7 @@ migrateLegacy cognition legacy transcripts sessions defaults =
               fallback <$ traverse_ (transcriptSave transcripts task) fallback
   loadBrief task =
     traverse (flip threadBrief task . fst) legacy >>= \current ->
-      case current >>= id of
+      case join current of
         Just brief -> pure (Just brief)
         Nothing
           | legacyTaskId task == task -> pure Nothing

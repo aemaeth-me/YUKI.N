@@ -52,7 +52,7 @@ import Data.IORef
 import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (catMaybes, fromMaybe, isJust, maybeToList)
+import Data.Maybe (catMaybes, fromMaybe, isJust, mapMaybe, maybeToList)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
@@ -626,7 +626,7 @@ emitContextStatus runtime tools emergency messages emit =
 
 runtimeContextWindow :: Runtime -> Maybe Int
 runtimeContextWindow runtime =
-  case catMaybes (modelContextTokens <$> runtimeModel runtime : runtimeFallbacks runtime) of
+  case mapMaybe modelContextTokens (runtimeModel runtime : runtimeFallbacks runtime) of
     [] -> Nothing
     windows -> Just (minimum windows)
 
@@ -805,7 +805,7 @@ streamTurn runtime messages tools emit =
     recordMaybe journal (ModelFinishEntry reason)
       *> (readIORef stateRef >>= either throwIO commit . closeModelTurn messageId reasoningId)
    where
-    commit (events, turn) = traverse_ emit events *> pure (reason, turn)
+    commit (events, turn) = traverse_ emit events $> (reason, turn)
 
 stepModelEvent ::
   Text ->

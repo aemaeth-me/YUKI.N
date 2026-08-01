@@ -23,7 +23,7 @@ import Data.Bool (bool)
 import Data.Functor ((<&>))
 import Data.IORef (modifyIORef', newIORef, readIORef)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Network.HTTP.Client (Manager)
@@ -211,7 +211,7 @@ resolveRuntime manager provider artifacts base config registry keyMap =
         Map.lookup (Text.unpack name) keyMap <&> \key ->
           applyEffort (providerConfig entry key (configModel config <|> Just (providerDefaultModel entry)))
   fallbackModel source
-    | configModel config == Nothing && configReasoningEffort config == Nothing = runtimeModel source
+    | isNothing (configModel config) && isNothing (configReasoningEffort config) = runtimeModel source
     | otherwise = openAIModel manager (applyEffort provider) {openAIModelName = fromMaybe (openAIModelName provider) (configModel config)}
   applyEffort cfg = maybe cfg (\effort -> cfg {openAIThinking = ThinkingEnabled effort}) (configReasoningEffort config)
   artifactTools = maybe Map.empty (Map.singleton artifactReadToolName . artifactReadTool) artifacts

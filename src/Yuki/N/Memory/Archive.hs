@@ -564,7 +564,10 @@ deleteIncarnation persist lock incarnation =
               stateEntries = keptEntries,
               stateHeads = keptHeads
             }
-     in persist changed <&> (changed,)
+     in persist changed
+          <&> either
+            ((state,) . Left)
+            (const (changed, Right ()))
 
 prepareDirectory :: FilePath -> IO (Either Text ())
 prepareDirectory dir =
@@ -1043,7 +1046,7 @@ grepEntry :: ArchiveState -> ArchiveGrepRequest -> ArchiveEntry -> Bool
 grepEntry state request entry =
   archiveEntryIncarnationId entry == archiveGrepIncarnationId request
     && maybe True (== archiveEntryTaskId entry) (archiveGrepTaskId request)
-    && maybe True (/= archiveEntryTaskId entry) (archiveGrepExcludeTaskId request)
+    && archiveGrepExcludeTaskId request /= Just (archiveEntryTaskId entry)
     && archiveEntryKind entry `elem` kinds
     && (archiveGrepIncludeProcess request || not (processEntry state entry))
  where
@@ -1345,7 +1348,7 @@ listRuns lock rawIncarnation task =
       . filter
         ( \run ->
             archiveRunIncarnationId run == Text.strip rawIncarnation
-              && maybe True ((== archiveRunTaskId run)) (task >>= nonBlank)
+              && maybe True (== archiveRunTaskId run) (task >>= nonBlank)
         )
       . Map.elems
       . stateRuns

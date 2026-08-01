@@ -10,10 +10,10 @@ where
 
 import Control.Concurrent.MVar
 import Control.Exception (IOException, displayException, try)
-import Control.Monad (forM_)
+import Control.Monad (forM_, void)
 import Data.Aeson
 import Data.ByteString.Lazy qualified as LazyByteString
-import Data.Functor ((<&>))
+import Data.Functor (($>), (<&>))
 import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
@@ -132,7 +132,7 @@ newExperienceStore :: FilePath -> IO (Either Text ExperienceStore)
 newExperienceStore dir =
   createDirectoryIfMissing True (eventsDir dir)
     *> loadEvents path
-    >>= traverse (\loaded -> newMVar loaded <&> mkStore (appendEventFile path) (rewriteEvents path))
+    >>= traverse (fmap (mkStore (appendEventFile path) (rewriteEvents path)) . newMVar)
  where
   path = eventsPath dir
 
@@ -156,17 +156,18 @@ mkStore persist rewrite lock =
           . stateHeads
           <$> readMVar lock,
       experienceDelete = \incarnation ->
-        ()
-          <$ modifyMVar
-            lock
-            ( \state ->
-                let changed =
-                      state
-                        { stateEvents = Map.delete incarnation (stateEvents state),
-                          stateHeads = Map.delete incarnation (stateHeads state)
-                        }
-                 in rewrite changed *> pure (changed, ())
-            )
+        void
+          ( modifyMVar
+              lock
+              ( \state ->
+                  let changed =
+                        state
+                          { stateEvents = Map.delete incarnation (stateEvents state),
+                            stateHeads = Map.delete incarnation (stateHeads state)
+                          }
+                   in rewrite changed $> (changed, ())
+              )
+          )
     }
  where
   append expected draft =
@@ -184,7 +185,7 @@ mkStore persist rewrite lock =
                         { stateEvents = Map.insertWith (flip (<>)) incarnation [event] (stateEvents state),
                           stateHeads = Map.insert incarnation next (stateHeads state)
                         }
-                 in persist event *> pure (updated, Right event)
+                 in persist event $> (updated, Right event)
 
 stale :: Text -> Int -> Maybe ExperienceCursor -> Maybe Text
 stale _ _ Nothing = Nothing

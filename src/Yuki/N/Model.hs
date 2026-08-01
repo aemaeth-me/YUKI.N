@@ -1,3 +1,5 @@
+{-# OPTIONS_GHC -Wno-orphans #-}
+
 module Yuki.N.Model
   ( AssistantTurn (..),
     ChatMessage (..),
@@ -18,58 +20,18 @@ import Data.Aeson (FromJSON (..), ToJSON (..), Value, object, withObject, (.:?),
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Yuki.N.AGUI.Types (ToolSpec)
+import Yuki.N.Domain.Model
 
-data Model = Model
-  { modelProvider :: Text,
-    modelName :: Text,
-    modelContextTokens :: Maybe Int,
-    streamModel :: ModelRequest -> (ModelEvent -> IO ()) -> IO FinishReason,
-    modelRender :: ModelRequest -> Value
-  }
-
-data ModelRequest = ModelRequest
-  { requestMessages :: [ChatMessage],
-    requestTools :: [ToolSpec]
-  }
-  deriving stock (Eq, Show)
-  deriving Generic
-
-instance ToJSON ModelRequest
-
-instance FromJSON ModelRequest
-
-data ChatMessage
-  = ChatSystem Text
-  | ChatUser Text
-  | ChatAssistant AssistantTurn
-  | ChatToolResult Text Text
-  deriving stock (Eq, Show)
-  deriving Generic
-
+-- 兼容序列化（刻意保留的孤儿实例）：
+-- `Yuki.N.Domain.Model` 按纯度规则不持有 JSON 实例；以下三个实例为 journal/金样与
+-- provider wire 格式的持久兼容契约而存在，与迁移前的 JSON 输出逐字节一致。
 instance ToJSON ChatMessage
 
 instance FromJSON ChatMessage
 
-data AssistantTurn = AssistantTurn
-  { turnMessageId :: Text,
-    turnText :: Maybe Text,
-    turnReasoning :: Maybe Text,
-    turnToolCalls :: [ModelToolCall]
-  }
-  deriving stock (Eq, Show)
-  deriving Generic
-
 instance ToJSON AssistantTurn
 
 instance FromJSON AssistantTurn
-
-data ModelToolCall = ModelToolCall
-  { modelToolCallId :: Text,
-    modelToolName :: Text,
-    modelToolArguments :: Text
-  }
-  deriving stock (Eq, Show)
-  deriving Generic
 
 instance ToJSON ModelToolCall
 
@@ -149,6 +111,28 @@ instance FromJSON Usage where
       <*> fields .:? "completion_tokens"
       <*> fields .:? "prompt_cache_hit_tokens"
       <*> fields .:? "prompt_cache_miss_tokens"
+
+-- | effectful provider port：纯 chat 值类型在 `Yuki.N.Domain.Model`，
+-- provider/运行时值类型（事件、终止原因、工具执行/结果、用量）定义于此；
+-- `ModelRequest` 作为端口载荷保留 AG-UI 工具规格引用以维持既有调用方兼容。
+data Model = Model
+  { modelProvider :: Text,
+    modelName :: Text,
+    modelContextTokens :: Maybe Int,
+    streamModel :: ModelRequest -> (ModelEvent -> IO ()) -> IO FinishReason,
+    modelRender :: ModelRequest -> Value
+  }
+
+data ModelRequest = ModelRequest
+  { requestMessages :: [ChatMessage],
+    requestTools :: [ToolSpec]
+  }
+  deriving stock (Eq, Show)
+  deriving Generic
+
+instance ToJSON ModelRequest
+
+instance FromJSON ModelRequest
 
 newtype ProviderFailure = ProviderFailure Text
   deriving stock (Eq, Show)

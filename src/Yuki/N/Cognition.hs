@@ -25,7 +25,7 @@ where
 import Control.Applicative (liftA3, (<|>))
 import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar
-import Control.Exception (SomeException, displayException, try)
+import Control.Exception (IOException, SomeException, displayException, try)
 import Control.Monad (void)
 import Data.Aeson
 import Data.Bool (bool)
@@ -35,7 +35,7 @@ import Data.Functor (($>), (<&>))
 import Data.List (find, sortOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (catMaybes, fromMaybe, listToMaybe, mapMaybe)
+import Data.Maybe (catMaybes, fromMaybe, isNothing, listToMaybe, mapMaybe)
 import Data.Ord (Down (..))
 import Data.Set (Set)
 import Data.Set qualified as Set
@@ -246,7 +246,7 @@ newCognition dir models journal =
               )
       )
  where
-  bindEither use = either (pure . Left) use
+  bindEither = either (pure . Left)
 
 seedPrompts :: Cognition -> IO ()
 seedPrompts cognition =
@@ -279,7 +279,7 @@ seedPrompts cognition =
   automaticRoot prompt =
     promptSourceIntent prompt == "kernel bootstrap"
       && "root-constitution/" `Text.isPrefixOf` promptGeneratorRevision prompt
-  appendRoot source parent status =
+  appendRoot source =
     promptAppend
       incarnations
       Nothing
@@ -288,8 +288,6 @@ seedPrompts cognition =
       rootConstitution
       rootPromptRevision
       Nothing
-      parent
-      status
   activateRoot active current =
     promptActivateRoot incarnations (promptOrdinal active) (promptRevisionId current)
       >>= either (ioError . userError . Text.unpack) (const (pure ()))
@@ -346,7 +344,7 @@ cognitionRecover cognition =
           (workingMemoryRevision head')
           (sleepCycleId cycle')
           "sleep was interrupted before checkpoint commit; no forgetting was applied"
-          <&> fmap (const ())
+          <&> void
       CyclePrepared ->
         workingCommitSleep
           working
@@ -390,7 +388,7 @@ cognitionRecover cognition =
                       (wakeFocusFrame packet wakeEpoch cursor (round now) frame)
                 )
                 focus
-                <&> fmap (const ())
+                <&> void
   ensureRecoveryWake incarnation cycle' =
     workingPacket cycle' >>= \case
       Nothing -> pure (Left "sleep recovery is missing its Wake Packet")
@@ -767,7 +765,7 @@ cognitionHooks cognition incarnation =
     }
  where
   identity = incarnationId incarnation
-  isRoot = maybe True (const False) . AGUI.runParentId
+  isRoot = isNothing . AGUI.runParentId
   observe input RunStarted {}
     | isRoot input =
         maybe
@@ -860,21 +858,25 @@ cognitionHooks cognition incarnation =
 
 activationText :: Cognition -> Incarnation -> AGUI.RunAgentInput -> [ChatMessage] -> IO (Maybe Text)
 activationText cognition incarnation input messages =
-  modifyMVar (cognitionActivationCache cognition) $ \cache ->
-    currentIntent input messages >>= \case
-      Nothing -> pure (cache, Nothing)
-      Just (intentId, text) ->
-        case Map.lookup (key intentId) cache of
-          Just cached -> pure (cache, nonEmpty cached)
-          Nothing ->
-            activate intentId text
-              <&> \injected ->
-                (bounded (key intentId) cache (fromMaybe "" injected), injected)
+  currentIntent input messages >>= \case
+    Nothing -> pure Nothing
+    Just (intentId, text) ->
+      cachedActivation intentId >>= \case
+        Just cached -> pure (nonEmpty cached)
+        Nothing -> do
+          injected <- activate intentId text
+          rememberActivation intentId injected
+          pure injected
  where
   identity = incarnationId incarnation
   task = AGUI.runThreadId input
   run = AGUI.runId input
   key intent = (identity, task, intent)
+  cachedActivation intent =
+    Map.lookup (key intent) <$> readMVar (cognitionActivationCache cognition)
+  rememberActivation intent injected =
+    modifyMVar_ (cognitionActivationCache cognition) $ \cache ->
+      pure (bounded (key intent) cache (fromMaybe "" injected))
   bounded cacheKey cache value =
     Map.insert cacheKey value
       . Map.fromList
@@ -969,7 +971,7 @@ cognitionTools cognition incarnation =
           (fromMaybe 20 (grepCallLimit call))
           (fromMaybe 0 (grepCallOffset call))
           (grepCallIncludeProcess call)
-          (if grepCallTaskId call == Nothing then Just (toolContextThreadId context) else Nothing)
+          (if isNothing (grepCallTaskId call) then Just (toolContextThreadId context) else Nothing)
       )
   readMemory _ call =
     taskArchiveRead
@@ -1799,8 +1801,8 @@ archiveTaskRun ::
   RunOutcome ->
   [ChatMessage] ->
   IO (Either Text ArchiveRun)
-archiveTaskRun cognition incarnation input outcome messages =
-  archiveTaskSnapshot cognition incarnation input (outcomeStatus outcome) (outcomeMessage outcome) messages
+archiveTaskRun cognition incarnation input outcome =
+  archiveTaskSnapshot cognition incarnation input (outcomeStatus outcome) (outcomeMessage outcome)
 
 archiveTaskSnapshot ::
   Cognition ->
@@ -2075,6 +2077,8 @@ withIncarnationLock cognition identity action =
         newMVar () >>= \lock ->
           pure (Map.insert identity lock locks, lock)
 
+-- | 删除分身：档案 → 派生存储 → 记录，任一环失败立即中止并返回 `Left`，
+-- 不会在部分失败后误报成功。
 deleteIncarnation :: Cognition -> Text -> Int -> IO (Either Text ())
 deleteIncarnation cognition identifier expected =
   incarnationRead (cognitionIncarnations cognition) identifier >>= \case
@@ -2085,23 +2089,31 @@ deleteIncarnation cognition identifier expected =
           pure (Left (staleIncarnation expected (incarnationRevision incarnation)))
       | incarnationStatus incarnation /= IncarnationArchived ->
           pure (Left ("incarnation is not archived: " <> identifier))
-      | otherwise ->
-          deleteStores *> deleteRecord
+      | otherwise -> deleteAll
  where
-  deleteRecord =
-    incarnationDelete (cognitionIncarnations cognition) identifier expected
-      >>= either (pure . Left) (const (pure (Right ())))
-  deleteStores =
-    taskArchiveDeleteIncarnation (cognitionArchive cognition) identifier
-      >>= either (pure . Left) (const deleteDerived)
+  derived =
+    [ impressionDelete (cognitionImpressions cognition) identifier,
+      experienceDelete (cognitionExperiences cognition) identifier,
+      workingDelete (cognitionWorking cognition) identifier,
+      longTermDelete (cognitionLongTerm cognition) identifier,
+      contextEpochDeleteIncarnation (cognitionContexts cognition) identifier
+    ]
+  deleteAll =
+    taskArchiveDeleteIncarnation (cognitionArchive cognition) identifier >>= \case
+      Left failure -> pure (Left failure)
+      Right () -> deleteDerived
   deleteDerived =
-    impressionDelete (cognitionImpressions cognition) identifier
-      *> experienceDelete (cognitionExperiences cognition) identifier
-      *> workingDelete (cognitionWorking cognition) identifier
-      *> longTermDelete (cognitionLongTerm cognition) identifier
-      *> contextEpochDeleteIncarnation (cognitionContexts cognition) identifier
-      *> clearCaches
-      *> pure (Right ())
+    go derived
+  go [] = deleteRecord
+  go (action : rest) =
+    (try action :: IO (Either IOException ())) >>= \case
+      Left failure -> pure (Left (Text.pack (displayException failure)))
+      Right () -> go rest
+  deleteRecord =
+    (try (incarnationDelete (cognitionIncarnations cognition) identifier expected) :: IO (Either IOException (Either Text Incarnation))) >>= \case
+      Left failure -> pure (Left (Text.pack (displayException failure)))
+      Right (Left failure) -> pure (Left failure)
+      Right (Right _) -> clearCaches $> Right ()
   clearCaches =
     modifyMVar_ (cognitionSleepRequests cognition) (pure . Set.filter ((/= identifier) . fst))
       *> modifyMVar_ (cognitionActivationCache cognition) (pure . Map.filterWithKey (\key _ -> firstOfThree key /= identifier))
@@ -2152,8 +2164,7 @@ currentRunMessages messages =
 
 archiveEntries :: Text -> [ChatMessage] -> [ArchiveEntryDraft]
 archiveEntries run =
-  filter (not . Text.null . Text.strip . archiveEntryDraftContent)
-    . concatMap one
+  concatMap (filter (not . Text.null . Text.strip . archiveEntryDraftContent) . one)
     . zip [1 :: Int ..]
  where
   source index suffix =
@@ -2190,8 +2201,7 @@ archiveEntries run =
          ]
    where
     turnGroup = fromMaybe (source index "assistant") (nonEmpty (turnMessageId turn))
-  draft sourceId kind content parent call tool =
-    ArchiveEntryDraft sourceId kind content parent call tool
+  draft = ArchiveEntryDraft
 
 chatSegments :: Text -> [ChatMessage] -> [ContextSegmentInput]
 chatSegments run =
