@@ -1,0 +1,81 @@
+# Open-source memory for coding agents, synced over SSH
+
+URL: https://news.ycombinator.com/item?id=None
+Points: 131 | None comments
+
+---
+**OP vshulcz**: https://github.com/vshulcz/deja-vu/
+
+**vshulcz**: Hi HN. I built deja after watching Claude Code and Codex debug the same problems more than once.<p>The annoying thing was that the answer usually already existed somewhere in my old sessions. My records were stored on the disk for months (~3.3 GB). It wasn't easy to find them manually and the new agent session had no idea what the other agent had already found out.<p>deja indexes the transcripts that Claude Code, Codex, and opencode already write. On my corpus, the initial index takes about 10 seconds and warm searches are 7-9 ms.<p>There are 3 ways to get the memory back: a normal CLI search, an MCP tool (agent can query it directly) and a SessionStart hook that automatically injects a bit of relevant project context.<p>The feature I built this for:<p>deja sync ssh <host><p>It moves new memory between machines using the existing SSH setup. Secret data is deleted during indexing and checked again before exporting.<p>My setup is a laptop and a mac mini without an interface. The agent can work on the mini all night, and in the morning I extract its memory. Then the agent on my laptop will know what the mini tried, what broke, and what eventually worked.<p>There are other projects (cass, ctx, claude-mem):<p><a href="https://github.com/Dicklesworthstone/coding_agent_session_search" rel="nofollow">https://github.com/Dicklesworthstone/coding_agent_session_se...</a><p><a href="https://github.com/ctxrs/ctx" rel="nofollow">https://github.com/ctxrs/ctx</a><p><a href="https://github.com/thedotmack/claude-mem" rel="nofollow">https://github.com/thedotmack/claude-mem</a><p>I wanted deja to intentionally use a small approach: one binary code with zero dependency, no LLM calls, searchable verbatim text instead of generated summaries, and synchronization via your own SSH. It does not implement its own network transport; it just connects to the system ssh/scp.<p>You can install it via curl, brew, npx or go install, then run:<p>deja install --all
+
+  **koolba**: > My setup is a laptop and a mac mini without an interface. The agent can work on the mini all night, and in the morning I extract its memory. Then the agent on my laptop will know what the mini tried, what broke, and what eventually worked.<p>If it’s fully automated and then blindly injected into your laptop without any vetting, isn’t that a perfect vector to break that separation?
+
+    **vshulcz**: This is a fair point of view and ofc it should be taken into account. When called automatically, a small overview (~2 KB) of the imported sessions is included in the context.<p>However, when syncing, only data records are moved not instructions. Nothing is done and known secrets are deleted at the indexing stage even before they leave the source computer. In addition, the context here is your own computers and your terminal's output data, if an attacker can control your agent's transcripts, the source computer has already been completely compromised.<p>Nevertheless, you make a perfectly reasonable case for strict isolation. I just opened the issue to add an opt-out checkbox where imported sessions are only displayed when manually searched using the CLI/MCP, not when automatically implemented: <a href="https://github.com/vshulcz/deja-vu/issues/39" rel="nofollow">https://github.com/vshulcz/deja-vu/issues/39</a>
+
+  **imhoguy**: I just wonder how do you filter out signal from noise -  does it self correct wrong memories?
+
+    **latchattack**: I agree that similarity search can't surface reliable project judgment alone. How do you know what was true, what was rejected, and what's obsolete since changes in the project? I am actually building Open-Latch for this reason. It leverages project decisions, facts, lifecycle state, reconciliation, enforcing cited evidence and a judgement gate before coding agents act.<p>GitHub: <a href="https://github.com/open-latch/latch" rel="nofollow">https://github.com/open-latch/latch</a><p>I felt the same annoyance as OP mentioned, but focused on agents violating project judgement and direction. Obviously we are optimizing for some different things than deja: deja uses no-LLMs and exact verbatim transcript retrieval.<p>Latch uses LLMs, ranking, etc, to emphasize strong judgment, correction, and enforcement over dynamic project flow.
+
+**esafak**: Similar to <a href="https://ctx.rs/" rel="nofollow">https://ctx.rs/</a> and others, I'm sure.<p>I'd lead with your differentiation. Is it the ssh?
+
+  **verdverm**: even more: <a href="https://hn.algolia.com/?dateRange=pastMonth&page=0&prefix=false&query=agent%20memory&sort=byPopularity&type=story" rel="nofollow">https://hn.algolia.com/?dateRange=pastMonth&page=0&prefix=fa...</a>
+
+    **vshulcz**: My particular interest in deja was that I found a combination that I couldn't find on this list: zero dependencies, zero LLM calls, verbatim text search, proactive secret cleanup and P2P synchronization over SSH.
+
+      **verdverm**: We are entering the era of personalized software. I have something similar but I'm not trying to promote or make money with it. I somewhat prefer it stay off the radar so I don't feel the need to cater to other people's feature requests and make it more complex than what I want.
+
+  **vshulcz**: Yes, ctx is the closest cousin here. I actually linked it in my top comment.<p>This causes a very similar itch, but we went a slightly different route regarding some implementation details<p>Secrets: The ctx README mentions saving the text as is and warns about the need to review the output data before publishing. deja explicitly removes known secret templates at the indexing stage (replacing them with tags like [redacted:aws-key]).<p>Syncing: It looks like ctx is getting ready for a cloud beta to be shared by the team. Actually, I just wanted something local and free that I had full control over, so deja does P2P syncing through your existing SSH settings.<p>Recall that deja has a session startup feature that automatically introduces a bit of context when a new agent is loaded, instead of relying solely on manual search.<p>Both applications solve the same annoying problem by simply optimizing for different workflows :)
+
+    **noctuid**: This a session search tool, and I think calling it a memory tool is confusing.<p>> Secrets: The ctx README mentions saving the text as is and warns about the need to review the output data before publishing. deja explicitly removes known secret templates at the indexing stage (replacing them with tags like [redacted:aws-key]).<p>How is this not security theater? You've presumably already sent the api key to an LLM if it's in your session file. You need to <i>rotate</i> it.
+
+  **bityard**: Maybe somebody can enlighten me... this page for ctx says the program saves all "decisions, constraints, intent, rejected approaches, bug investigations, refactors, file paths, commands, patches, and notes from previous agents."<p>What am I missing if I instead just instruct the agent to create a handful of files called something like HISTORY.md and tell it to log summarized versions of all of these things inside the project repo whenever something is changed or evaluated? (Which is very close to what I currently do.)
+
+    **esafak**: It deterministically pulls the full session log so you don't need to tell an LLM to do it, plus it doesn't pollute your repo with such files.
+
+      **kevin_thibedeau**: > doesn't pollute your repo with such files.<p>An orphan branch solves that issue.
+
+      **bityard**: If I want that information to be available to other people/agents who use the repo, they are not really polluting the repo? Am I doing vibecoding wrong?
+
+        **esafak**: There are ways to make it available without checking them in as usual. I don't want a folder with session files for every single commit, personally; I want them to be associated with the commit as metadata, so I use `git notes`.
+
+**BedVibe_Studios**: I like that this stays local instead of depending on a hosted service. One thing I've noticed while building LLM applications is that memory becomes much more valuable when it's easy to inspect and edit manually. Are you planning to support semantic search later, or is the goal to keep everything deterministic and text-based?
+
+  **vshulcz**: I intentionally used a dictionary for this. When I dig into old sessions, I'm usually looking for a very specific token (the exact error string, the unique function name, a specific cli flag) rather than a generic value.<p>Adding semantic search usually means sending hundreds of megabytes of embedded models and working with non-deterministic results which completely violates the promise of zero dependency within 7-9 ms. In fact, I encounter some uncertainty when expanding substrings (e.g. when requesting the code, the open source code will be displayed).<p>I won't completely abandon semantic search if there is a really easy and fast way to do it locally, but at the moment deterministic search is the priority. And I completely agree with your first comment, the verbatim approach provides just such a verification opportunity.
+
+**grim_io**: Still waiting for the agentic memory system for the local Mainframe emulator DB2 instance.
+
+**catzapd**: Does memory for AI agents basically mean -<p>- Save everything to disk. Index it or store in vectorDB.
+- Search the storage for similarity based on the new prompt
+- include any finding with the new prompt as system/user prompt 
+(or if you find the exact answer skip the llm call)<p>?<p>Or is there more to it ?
+
+  **kandros**: Different implementation details have different way to rank or “forget” or supersede facts but that’s pretty much it
+
+**arjie**: I think everyone's ended up building one of these for themselves. I did too[0]. In the end it's quite easy these days:<p>* I use the bge-en-base CPU embedding model<p>* I put storage behind a simple endpoint that has read,write,update,search semantics<p>* The endpoint just stores markdown in an S3 like structure (bucket-key-value; tree structure is inferred) and vector indexes<p>* The actual persistence is just SQLite<p>Most modern models are pretty good at handling this. Our home agents (voice and text) use this to store information and I also have skills for claude code and codex to do that as well. Overall, works quite well.<p>I still use MEMORY.md for the home agents to keep short-term memory, and use the KB for long-term memory. You do need a self-reflection/consolidation/dream step in order to periodically consolidate and groom the KB but that's also just another job.<p>The whole setup is pretty trivial and what anyone would come up with from scratch and it's surprising that it works but it does. I'm a pretty good documenter so it helps. In some future perhaps a vision model could see all the things I'm doing and remember, but for now I just tell it and it's pretty good about everything I want.<p>0: <a href="https://wiki.roshangeorge.dev/w/Blog/2026-07-01/The_Everything_Store" rel="nofollow">https://wiki.roshangeorge.dev/w/Blog/2026-07-01/The_Everythi...</a>
+
+  **gtirloni**: > I'm a pretty good documenter so it helps.<p>I wasn't but now, doing a lot of work inside a harness that is logging everything and can easily create docs from that, I'm finally persisting a lot of knowledge.
+
+  **noctuid**: It's not easy, that's why they all suck.
+
+    **arjie**: What did you find wasn't working well? Perhaps I have insufficient content for it to start failing. Works quite well in Claude Code / Codex / Custom Harness with DSV4F.
+
+**hparadiz**: I can't even get my agents to properly read the memories they have saved locally let alone remotely.
+
+  **vshulcz**: That's why I ended up creating two forced paths for this.<p>First, the SessionStart hook aggressively introduces context immediately after loading, completely bypassing the agent's requirements.<p>Secondly, I'm forcibly changing the behavior by using a fragment of the system query in CLAUDE.md or AGENTS.md. I'm literally just copypaste this block from the README:<p><pre><code>    Before debugging or re-implementing anything, run deja "<query>" (or the MCP revocation tool) — the agent's past sessions in Claude Code, Codex, and opencode will be indexed locally. Specify what you are reusing.</code></pre>
+
+**zby**: I did an automatic review of over 140 such systems.<p>There are comparisons and stuff: <a href="https://zby.github.io/commonplace/agent-memory-systems/" rel="nofollow">https://zby.github.io/commonplace/agent-memory-systems/</a><p>Deja-vu is here: <a href="https://zby.github.io/commonplace/agent-memory-systems/reviews/deja-vu/" rel="nofollow">https://zby.github.io/commonplace/agent-memory-systems/revie...</a><p>And the full list: <a href="https://zby.github.io/commonplace/agent-memory-systems/reviews/dir-index/" rel="nofollow">https://zby.github.io/commonplace/agent-memory-systems/revie...</a>
+
+  **serf**: I think 'enforcement' is wholly outside the ballpark of a memory system.
+
+    **zby**: If I remember well, the starting point was that memory is only useful if it changes the system behaviour. There are many ideas of automatic 'tips' or 'rules' that are injected into the prompts so that the agent acts accordingly to some retained lesson. But there are many failure modes for this.
+But maybe I'll need to revise the phrasing on that page and in instructions.
+
+  **rayshan**: This is amazing work but frankly not very helpful for me as a user. What is your top 3 recommendation? I just want to install something that works.
+
+**Arubis**: I've settled on writing these bespoke per project/client, typically as a harness plugin in its own repo. Not infrequently that maps 1:1 with a single target repo. There's something to be said for having the tools and memories you need and _not_ having those you don't, and it simplifies the full mental model not to have to handle moving from machine to machine and keeping all that in sync.<p>Go-to stack for this in my case is to start off with a MEMORY.md, and then keep a long-running agent session going to observe human-operated tmux sessions, surface/respond to occurrences where there's something significant learned (typically the human operator redirecting away from an agent/LLM decision), then start having it integrate into and read out of DuckDB. The latter becomes dense, easily searchable data for agent skills and commands and, yes, memory and such.
+
+**dizhn**: How does one make the agent actually save and recall memories and at relatively sensible times?  I tried a few memory things and have seen a few in-CLI programmatic approaches but nothing that actually looked useful in real use.
+
+**cbcoutinho**: I have developed an open-source memory system for agents accessible over MCP, which makes it possible to access it via any coding agent locally (claude-code) or via mobile (Claude AI, Mistral AI, etc).<p>The primary storage mechanism is .md files stored as Notes in Nextcloud; however, since Nextcloud supports a rich ecosystem of apps such as documents, rss feeds, calendar, etc, your knowledge base can grow with you. All content can optionally be indexed and available via semantic search - powered by a Qdrant vectordb.<p>The biggest cost drivers of a system like this is the memory required to host the vectordb - I'm really curious how others are optimizing their knowledge base. Thanks OP for doing to work in summarizing these tools!<p>If you're interested either the MCP server or Nextcloud App frontend, please check out:<p><a href="https://github.com/cbcoutinho/nextcloud-mcp-server" rel="nofollow">https://github.com/cbcoutinho/nextcloud-mcp-server</a><p><a href="https://apps.nextcloud.com/apps/astrolabe" rel="nofollow">https://apps.nextcloud.com/apps/astrolabe</a>
+
+**ubermon**: I think this is mostly being overengineered. At this stage, a curated MEMORY.md is enough: short, readable at session start, and easy to correct when it becomes stale.<p>The session history is another database like any other database, can be used or invoked by agent like one.

@@ -1,0 +1,1029 @@
+
+
+MemoryLLM: Towards Self-Updatable Large Language Models
+
+1 Introduction
+
+2 Preliminaries
+
+2.1 Problem Statement
+
+2.2 Sketch of MemoryLLM
+
+3 MemoryLLM
+
+3.1 Structure Design
+
+3.1.1 Memory Pool
+
+3.1.2 Self-Update Process
+
+3.1.3 Analysis of Forgetting
+
+3.2 Training Strategy
+
+3.2.1 New knowledge incorporation
+
+3.2.2 Enhancing continuous contexts understanding
+
+3.2.3 Mitigating forgetting problems
+
+3.3 Model Instantiation
+
+3.4 Discussions
+
+4 Experiments
+
+4.1 Evaluation Protocols
+
+4.2 Implementation Details
+
+4.3 Model Editing
+
+4.3.1 Experimental Setup
+
+4.3.2 Overall Performance Comparison
+
+4.4 Long Context Evaluation
+
+4.4.1 Experimental Setup
+
+4.4.2 Overall Performance Comparison
+
+4.4.3 Comparison with RAG methods
+
+4.5 Knowledge Retention Experiments
+
+4.5.1 Experimental Setup
+
+4.6 Model Integrity Analysis
+
+4.7 Ablation Study
+
+4.7.1 Ablation Study of different K𝐾Kitalic_K and N𝑁Nitalic_N
+
+4.7.2 Ablation Study of the Model Structures
+
+5 Related Work
+
+5.1 Memory based methods
+
+5.2 Downsteam Tasks
+
+6 Conclusion and Future Work
+
+A Details in Methodology
+
+A.1 Self-Update Process
+
+A.2 Training Strategy for New Knowledge Incorporation
+
+B Implementation Details
+
+B.1 Details for Mitigating Forgetting Problems
+
+C Additional Experiments
+
+C.1 Baselines for Model Editing
+
+#
+MemoryLLM: Towards Self-Updatable Large Language Models
+
+Yu Wang***Work done during the internship at Amazon.
+
+  
+Yifan Gao
+
+  
+Xiusi Chen
+
+  
+Haoming Jiang
+
+  
+Shiyang Li
+
+  
+Jingfeng Yang
+
+  
+Qingyu Yin
+
+  
+Zheng Li
+
+  
+Xian Li
+
+  
+Bing Yin
+
+  
+Jingbo Shang
+
+  
+Julian McAuley
+
+Abstract
+
+Existing Large Language Models (LLMs) usually remain static after deployment, which might make it hard to inject new knowledge into the model.
+We aim to
+build models containing a
+considerable portion of self-updatable parameters,
+enabling the model to integrate new knowledge effectively and efficiently.
+To this end,
+we introduce MemoryLLM, a model that comprises a transformer and a fixed-size memory pool within the latent space of the transformer.
+MemoryLLM can self-update with text knowledge and memorize the knowledge injected earlier.
+Our evaluations demonstrate the ability of MemoryLLM to effectively incorporate new knowledge, as evidenced by its performance on model editing benchmarks.
+Meanwhile, the model exhibits long-term information retention capacity, which is validated through our custom-designed evaluations and long-context benchmarks.
+MemoryLLM also
+shows operational integrity without any sign of performance degradation even after nearly a million memory updates. Our code and model are open-sourced at https://github.com/wangyu-ustc/MemoryLLM.
+
+memory, large language model
+
+##
+1 Introduction
+
+Despite the impressive performance LLMs demonstrate, a pivotal issue persists: How should we update the model with the latest knowledge? Previous solutions can be broadly categorized into three classes:
+(1) Retrieval-Based Methods: These methods rely on information retrieval in a knowledge base (Khandelwal et al., 2019; Zhong et al., 2023). They can yield strong results, but face challenges when redundancy in the knowledge base presents and suffer the logistical issue of managing an ever-expanding repository of knowledge.
+In multi-modality scenarios, retrieval-based methods might require enormous storage space to store all image data (24 images per second for humans) for retrieval purposes.
+(2) Model Editing: This class of methods involves making targeted edits to the model to adapt to new facts while preserving other desired capabilities (Yao et al., 2023). Existing methods primarily focus on fact-based editing, which is typically limited to single sentences.
+This limitation becomes more severe when one attempts to inject new knowledge in the form of longer and more complicated contexts.
+(3) Long Context Methods: Another alternative solution is to incorporate all the knowledge into the model’s context,
+which essentially makes the context into a knowledge base.
+This differs from retrieval-based methods in that the context directly informs the inference of the model. Methods in this category involve reducing the complexity of attention operations (Child et al., 2019; Beltagy et al., 2020; Wang et al., 2020), and modifying positional embeddings (Press et al., 2021; Sun et al., 2023) to handle longer contexts. However, as complex reasoning tasks are thirsty for massive up-to-date knowledge, the inevitable context overload with long context methods becomes infeasible, as long as the context length is finite.
+
+In response to the challenges identified above, we introduce MemoryLLM, a model that embeds a substantial, fixed-size memory pool within its latent space, which serves as the self-updatable parameters.
+Specifically, we build the memory pool as hidden vectors within each
+layer of the transformer.
+At each layer, the memory pool contains memory tokens representing compressed knowledge.
+This design results in a memory pool that is less redundant than traditional knowledge bases in retrieval-based methods or contexts in long-context methods.
+To update the memory pool, we devise a self-update mechanism to propagate the new knowledge to every layer of the memory. During self-update,
+MemoryLLM only updates a proportion of memory in each layer to absorb the incoming knowledge. This allows previously stored knowledge to slowly phase out.
+These designs ensure MemoryLLM remains up-to-date while the old knowledge is slowly forgotten.
+After curated training, we update MemoryLLM nearly a million times without observing any performance deterioration.
+
+The evaluation of MemoryLLM focuses on several key aspects: (1) Integration of New Knowledge: The model’s performance is assessed with model editing benchmarks and QA tasks (long context QA benchmarks), where MemoryLLM demonstrates substantial improvements over existing methods.
+(2) Knowledge Retention Ability:
+MemoryLLM is evaluated on long context benchmarks and our knowledge retention experiments, showcasing its ability to recall knowledge.
+(3) Robustness: To test the integrity of the model, we subject MemoryLLM to almost a million update steps.
+The results show that our model is functioning properly even after extreme updates.
+
+In summary, our contributions are as follows:
+
+•
+
+We introduce MemoryLLM, which features an integrated memory pool within the latent space of an LLM. This memory pool is designed to manage new knowledge integration and encourage minimal information forgetting while being fixed-sized to circumvent the issue of uncontrolled growth.
+
+•
+
+We augment a 7B parameter model with an extensive memory pool comprising 1B parameters.
+
+•
+
+MemoryLLM demonstrates strong performance across various benchmarks, including model editing, long-context evaluation, and our knowledge retention experiments, showcasing its versatility and effectiveness in diverse applications.
+
+##
+2 Preliminaries
+
+###
+2.1 Problem Statement
+
+The primary challenge addressed in this paper is: How should we design a large language model that is capable of efficiently integrating new knowledge while minimizing the degradation of previously learned knowledge?
+To make the challenge more specific, we outline several essential properties that we hope to integrate into the new model: (1) Effiency: The process of knowledge injection into the model should be streamlined, potentially eliminating the need for back-propagation for efficiency. (2) Efficacy: It is crucial to ensure that the knowledge is effectively injected into the model, guaranteeing its impact on the model’s performance.
+(3) Knowledge Retention: Our model has a fixed-sized memory pool, implying a constant memorization capacity. This necessitates a mechanism for gradually phasing out older knowledge.
+(4) Integrity: The model must maintain full functionality regardless of the number of updates made to the memory pool.
+(5) Non-redundancy: We aim for more compact storage of knowledge, reducing redundancy, and optimizing memory usage.
+
+###
+2.2 Sketch of MemoryLLM
+
+To address the above challenges, our rough idea is to design a model denoted as ℳθ,ϕsubscriptℳ𝜃italic-ϕ\mathcal{M}_{\theta,\phi}caligraphic_M start_POSTSUBSCRIPT italic_θ , italic_ϕ end_POSTSUBSCRIPT consisting of two sets of parameters: ϕitalic-ϕ\phiitalic_ϕ and θ𝜃\thetaitalic_θ. Once we obtain the model, the ϕitalic-ϕ\phiitalic_ϕ parameters should be static, while θ𝜃\thetaitalic_θ dynamically evolves when encountering new knowledge. This aligns with the intuition that some knowledge within an LLM should never change (persistent truths, encoded by ϕitalic-ϕ\phiitalic_ϕ) and some knowledge is being updated continuously (fresh information, modeled by θ𝜃\thetaitalic_θ).
+Specifically, we use an existing large language model (Llama2) to model ϕitalic-ϕ\phiitalic_ϕ, while θ𝜃\thetaitalic_θ is modeled by the memory pool with the detailed structure in Section 3.1.1.
+Here we need to design the self-updating mechanism of θ𝜃\thetaitalic_θ that is pivotal to this process.
+Denoting the new knowledge as x𝑥xitalic_x, a text paragraph, the self-updating process
+refers to
+updating θ𝜃\thetaitalic_θ in a way that does not compromise the general capabilities of the model while injecting the latest knowledge x𝑥xitalic_x into the memory pool θ𝜃\thetaitalic_θ to obtain a new memory pool θ′superscript𝜃′\theta^{\prime}italic_θ start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT:
+
+θ′=U⁢(θ,x)superscript𝜃′𝑈𝜃𝑥\theta^{\prime}=U(\theta,x)italic_θ start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT = italic_U ( italic_θ , italic_x )
+
+(1)
+
+Here U𝑈Uitalic_U is the update function which takes the memory pool θ𝜃\thetaitalic_θ and the new knowledge x𝑥xitalic_x as input and outputs the new memory pool θ′superscript𝜃′\theta^{\prime}italic_θ start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT.
+Extending this process to multistep updating, consider a scenario with a never-ending context or a series of conversation histories, represented as (x1,⋯,xn)subscript𝑥1⋯subscript𝑥𝑛(x_{1},\cdots,x_{n})( italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT , ⋯ , italic_x start_POSTSUBSCRIPT italic_n end_POSTSUBSCRIPT ), where xi,i∈{1,⋯,n}subscript𝑥𝑖𝑖1⋯𝑛x_{i},i\in\{1,\cdots,n\}italic_x start_POSTSUBSCRIPT italic_i end_POSTSUBSCRIPT , italic_i ∈ { 1 , ⋯ , italic_n } is a text paragraph. The model requires the integration of all these contexts, which can be accomplished using the update function I𝐼Iitalic_I defined in Eq.(1):
+
+θn=U(⋯(U(θ,x1),xn).\theta_{n}=U(\cdots(U(\theta,x_{1}),x_{n}).italic_θ start_POSTSUBSCRIPT italic_n end_POSTSUBSCRIPT = italic_U ( ⋯ ( italic_U ( italic_θ , italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT ) , italic_x start_POSTSUBSCRIPT italic_n end_POSTSUBSCRIPT ) .
+
+(2)
+
+We define the process self-updating as modifying the parameters θ𝜃\thetaitalic_θ with newly encountered knowledge x𝑥xitalic_x, essentially enabling the model to read and assimilate knowledge. This design presents two primary challenges: (1) Parameter and Interaction Design: We need to determine the structure for θ𝜃\thetaitalic_θ and how it should interact with ϕitalic-ϕ\phiitalic_ϕ, The goal is to allow the LLM to effectively use the knowledge from the θ𝜃\thetaitalic_θ in the generation process. (2) Update function design: It is crucial to design the update function U𝑈Uitalic_U such that θ𝜃\thetaitalic_θ can be updated without disturbing the old knowledge and undermining the overall capabilities of the model.
+
+##
+3 MemoryLLM
+
+###
+3.1 Structure Design
+
+(a) Generation
+
+(b) Self-Update
+
+Figure 1: The framework of MemoryLLM.
+(a) During generation, all memory tokens in the l𝑙litalic_l-th layer of memory pool θlsuperscript𝜃𝑙\theta^{l}italic_θ start_POSTSUPERSCRIPT italic_l end_POSTSUPERSCRIPT are attended by the hidden states hlsubscriptℎ𝑙h_{l}italic_h start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT. (b) During self-update,
+The last k𝑘kitalic_k memory tokens from θlsubscript𝜃𝑙\theta_{l}italic_θ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT are taken to be concatenated with the hidden states hlsubscriptℎ𝑙h_{l}italic_h start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT as the input to ϕlsubscriptitalic-ϕ𝑙\phi_{l}italic_ϕ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT.
+The output hl+1subscriptℎ𝑙1h_{l+1}italic_h start_POSTSUBSCRIPT italic_l + 1 end_POSTSUBSCRIPT goes to the next layer. The last K𝐾Kitalic_K tokens of hl+1subscriptℎ𝑙1h_{l+1}italic_h start_POSTSUBSCRIPT italic_l + 1 end_POSTSUBSCRIPT serve as the new memory tokens eθl′superscriptsuperscriptsubscript𝑒𝜃𝑙′{e_{\theta}^{l}}^{\prime}italic_e start_POSTSUBSCRIPT italic_θ end_POSTSUBSCRIPT start_POSTSUPERSCRIPT italic_l end_POSTSUPERSCRIPT start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT.
+We randomly drop K𝐾Kitalic_K tokens in θlsubscript𝜃𝑙\theta_{l}italic_θ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT and concatenate the left θlsubscript𝜃𝑙\theta_{l}italic_θ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT (denoted as θl⁢(d)superscript𝜃𝑙𝑑\theta^{l}(d)italic_θ start_POSTSUPERSCRIPT italic_l end_POSTSUPERSCRIPT ( italic_d )) with eθl′superscriptsuperscriptsubscript𝑒𝜃𝑙′{e_{\theta}^{l}}^{\prime}italic_e start_POSTSUBSCRIPT italic_θ end_POSTSUBSCRIPT start_POSTSUPERSCRIPT italic_l end_POSTSUPERSCRIPT start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT to obtain new memory θl′superscriptsubscript𝜃𝑙′\theta_{l}^{\prime}italic_θ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT.
+
+####
+3.1.1 Memory Pool
+
+We choose to instantiate ϕitalic-ϕ\phiitalic_ϕ with an off-the-shelf LLM, specifically Llama2 (Touvron et al., 2023).
+ϕitalic-ϕ\phiitalic_ϕ consists of multiple transformer layers,
+denoted as ϕ={ϕl}l=1Litalic-ϕsuperscriptsubscriptsubscriptitalic-ϕ𝑙𝑙1𝐿\phi=\{\phi_{l}\}_{l=1}^{L}italic_ϕ = { italic_ϕ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT } start_POSTSUBSCRIPT italic_l = 1 end_POSTSUBSCRIPT start_POSTSUPERSCRIPT italic_L end_POSTSUPERSCRIPT, where L𝐿Litalic_L represents the total number of layers.
+To facilitate the transformer ϕitalic-ϕ\phiitalic_ϕ to understand the memory pool θ𝜃\thetaitalic_θ, we conceptualize θ𝜃\thetaitalic_θ as hidden vectors within each transformer layer, symbolized as θ={θl}l=1L𝜃superscriptsubscriptsubscript𝜃𝑙𝑙1𝐿\theta=\{\theta_{l}\}_{l=1}^{L}italic_θ = { italic_θ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT } start_POSTSUBSCRIPT italic_l = 1 end_POSTSUBSCRIPT start_POSTSUPERSCRIPT italic_L end_POSTSUPERSCRIPT.
+Each θlsubscript𝜃𝑙\theta_{l}italic_θ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT is of dimension N×d𝑁𝑑N\times ditalic_N × italic_d, corresponding to N𝑁Nitalic_N hidden states and the word embedding dimension d𝑑ditalic_d in ϕitalic-ϕ\phiitalic_ϕ.
+We term θlsubscript𝜃𝑙\theta_{l}italic_θ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT memory tokens.
+The memory tokens serve as the representation of previous knowledge that the model has seen in a more compressed manner.
+We intend to maximize the memory size, so we assign the memory pool to every layer to significantly enlarge the memory pool.
+During the generation phase, all memory tokens are used, as illustrated in Figure 1(a).
+The attention map is designed to
+enable every token in x𝑥xitalic_x to attend to all memory tokens. If x𝑥xitalic_x comprises nxsubscript𝑛𝑥n_{x}italic_n start_POSTSUBSCRIPT italic_x end_POSTSUBSCRIPT tokens, the attention map assumes a shape of nx×(nx+N)subscript𝑛𝑥subscript𝑛𝑥𝑁n_{x}\times(n_{x}+N)italic_n start_POSTSUBSCRIPT italic_x end_POSTSUBSCRIPT × ( italic_n start_POSTSUBSCRIPT italic_x end_POSTSUBSCRIPT + italic_N ), yielding a linear complexity w.r.t. the size of the memory pool.
+
+####
+3.1.2 Self-Update Process
+
+Figure 1(b) illustrates the self-update process.
+The goal of self-update is to ensure that MemoryLLM can always digest the latest knowledge and memorize the previously learned knowledge at its best. We discuss the self-update process in this subsection and prove in section 3.1.3 that MemoryLLM only forgets stale knowledge at an exponential decay rate with a theoretical guarantee.
+When introducing new knowledge xcsubscript𝑥𝑐x_{c}italic_x start_POSTSUBSCRIPT italic_c end_POSTSUBSCRIPT (in the following, we denote the new knowledge as context xcsubscript𝑥𝑐x_{c}italic_x start_POSTSUBSCRIPT italic_c end_POSTSUBSCRIPT to distinguish it from x𝑥xitalic_x in the last section), the model must integrate xcsubscript𝑥𝑐x_{c}italic_x start_POSTSUBSCRIPT italic_c end_POSTSUBSCRIPT into θ𝜃\thetaitalic_θ as per Eq.(1).
+To avoid additional modules and complexities, we use the transformer ϕitalic-ϕ\phiitalic_ϕ for the update.
+Ideally, the input to ϕlsubscriptitalic-ϕ𝑙\phi_{l}italic_ϕ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT should be the memory pool θlsubscript𝜃𝑙\theta_{l}italic_θ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT and the hidden states hlsubscriptℎ𝑙h_{l}italic_h start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT (where h1subscriptℎ1h_{1}italic_h start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT are the word embeddings of tokenized xcsubscript𝑥𝑐x_{c}italic_x start_POSTSUBSCRIPT italic_c end_POSTSUBSCRIPT). We find it essential to maintain the gradient flow from both the self-update and the generation to achieve better performance (see Section  3.2.1). However, it is much more costly to feed the entire pool θlsubscript𝜃𝑙\theta_{l}italic_θ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT to ϕlsubscriptitalic-ϕ𝑙\phi_{l}italic_ϕ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT during self-update. To solve this problem,
+we extract the last K𝐾Kitalic_K tokens of θlsubscript𝜃𝑙\theta_{l}italic_θ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT where K<<Nmuch-less-than𝐾𝑁K<<Nitalic_K < < italic_N and denote these extracted tokens as eθlsuperscriptsubscript𝑒𝜃𝑙e_{\theta}^{l}italic_e start_POSTSUBSCRIPT italic_θ end_POSTSUBSCRIPT start_POSTSUPERSCRIPT italic_l end_POSTSUPERSCRIPT.
+eθlsuperscriptsubscript𝑒𝜃𝑙e_{\theta}^{l}italic_e start_POSTSUBSCRIPT italic_θ end_POSTSUBSCRIPT start_POSTSUPERSCRIPT italic_l end_POSTSUPERSCRIPT is then concatenated with hlsubscriptℎ𝑙h_{l}italic_h start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT to form the input of ϕlsubscriptitalic-ϕ𝑙\phi_{l}italic_ϕ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT, where hlsubscriptℎ𝑙h_{l}italic_h start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT can attend to the preceding context eθlsuperscriptsubscript𝑒𝜃𝑙e_{\theta}^{l}italic_e start_POSTSUBSCRIPT italic_θ end_POSTSUBSCRIPT start_POSTSUPERSCRIPT italic_l end_POSTSUPERSCRIPT.
+The attention also employs an attention map of dimension
+max⁡(nxc,K)×(nxc+K)subscript𝑛subscript𝑥𝑐𝐾subscript𝑛subscript𝑥𝑐𝐾\max(n_{x_{c}},K)\times(n_{x_{c}}+K)roman_max ( italic_n start_POSTSUBSCRIPT italic_x start_POSTSUBSCRIPT italic_c end_POSTSUBSCRIPT end_POSTSUBSCRIPT , italic_K ) × ( italic_n start_POSTSUBSCRIPT italic_x start_POSTSUBSCRIPT italic_c end_POSTSUBSCRIPT end_POSTSUBSCRIPT + italic_K ), where nxcsubscript𝑛subscript𝑥𝑐n_{x_{c}}italic_n start_POSTSUBSCRIPT italic_x start_POSTSUBSCRIPT italic_c end_POSTSUBSCRIPT end_POSTSUBSCRIPT is the number of tokens in xcsubscript𝑥𝑐x_{c}italic_x start_POSTSUBSCRIPT italic_c end_POSTSUBSCRIPT (Note that in Figure 1(b) we show the case when nxc>Ksubscript𝑛subscript𝑥𝑐𝐾n_{x_{c}}>Kitalic_n start_POSTSUBSCRIPT italic_x start_POSTSUBSCRIPT italic_c end_POSTSUBSCRIPT end_POSTSUBSCRIPT > italic_K. The case when k>nxc𝑘subscript𝑛subscript𝑥𝑐k>n_{x_{c}}italic_k > italic_n start_POSTSUBSCRIPT italic_x start_POSTSUBSCRIPT italic_c end_POSTSUBSCRIPT end_POSTSUBSCRIPT is shown in Figure 8 in Appendix).
+The last K𝐾Kitalic_K hidden states of the output hl+1subscriptℎ𝑙1h_{l+1}italic_h start_POSTSUBSCRIPT italic_l + 1 end_POSTSUBSCRIPT are designated as eθl′superscriptsuperscriptsubscript𝑒𝜃𝑙′{e_{\theta}^{l}}^{\prime}italic_e start_POSTSUBSCRIPT italic_θ end_POSTSUBSCRIPT start_POSTSUPERSCRIPT italic_l end_POSTSUPERSCRIPT start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT. Then we drop K𝐾Kitalic_K memory tokens from the current memory pool θlsuperscript𝜃𝑙\theta^{l}italic_θ start_POSTSUPERSCRIPT italic_l end_POSTSUPERSCRIPT and squeeze θlsuperscript𝜃𝑙\theta^{l}italic_θ start_POSTSUPERSCRIPT italic_l end_POSTSUPERSCRIPT to the left side of the newly formed memory pool θl′superscriptsuperscript𝜃𝑙′{\theta^{l}}^{\prime}italic_θ start_POSTSUPERSCRIPT italic_l end_POSTSUPERSCRIPT start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT where the new memory tokens eθl′superscriptsuperscriptsubscript𝑒𝜃𝑙′{e_{\theta}^{l}}^{\prime}italic_e start_POSTSUBSCRIPT italic_θ end_POSTSUBSCRIPT start_POSTSUPERSCRIPT italic_l end_POSTSUPERSCRIPT start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT fill the right side.
+In this way, eθl′superscriptsuperscriptsubscript𝑒𝜃𝑙′{e_{\theta}^{l}}^{\prime}italic_e start_POSTSUBSCRIPT italic_θ end_POSTSUBSCRIPT start_POSTSUPERSCRIPT italic_l end_POSTSUPERSCRIPT start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT is still of dimension d𝑑ditalic_d, with the new knowledge injected into the last K𝐾Kitalic_K dimensions.
+
+####
+3.1.3 Analysis of Forgetting
+
+The design of the self-update process draws inspiration from the concept of exponential forgetting in human cognition, as described by the Ebbinghaus Forgetting Curve, and analogous to the intuition in MemoryBank (Zhong et al., 2023).
+Through this structure, we aim to simulate exponential forgetting. In each update we drop K𝐾Kitalic_K tokens from the memory pool; statistically, we drop K/N𝐾𝑁K/Nitalic_K / italic_N of the knowledge from the existing memory pool, which means that knowledge within the memory pool would be exponentially forgotten at a rate of K/N𝐾𝑁K/Nitalic_K / italic_N.
+Here, N𝑁Nitalic_N denotes the total memory size, while K𝐾Kitalic_K denotes the number of tokens that are used to incorporate knowledge in xcsubscript𝑥𝑐x_{c}italic_x start_POSTSUBSCRIPT italic_c end_POSTSUBSCRIPT. Thus, N𝑁Nitalic_N denotes the total capacity of the memory while K𝐾Kitalic_K represents the compression ratio. The smaller K𝐾Kitalic_K, the more compressed the knowledge.
+
+After self-update, the latest knowledge is preserved entirely without any random dropping. After N/K𝑁𝐾N/Kitalic_N / italic_K update steps, the retention ratio for knowledge injected N/K𝑁𝐾N/Kitalic_N / italic_K steps earlier can be calculated as:
+
+(1−KN)N/K.superscript1𝐾𝑁𝑁𝐾(1-\frac{K}{N})^{N/K}.( 1 - divide start_ARG italic_K end_ARG start_ARG italic_N end_ARG ) start_POSTSUPERSCRIPT italic_N / italic_K end_POSTSUPERSCRIPT .
+
+(3)
+
+In Eq. 3, with the memory pool θlsubscript𝜃𝑙\theta_{l}italic_θ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT getting larger (N𝑁Nitalic_N becomes greater) and the knowledge in xcsubscript𝑥𝑐x_{c}italic_x start_POSTSUBSCRIPT italic_c end_POSTSUBSCRIPT getting more compressed (K𝐾Kitalic_K becomes smaller), we can approach the following limit:
+
+limNK→∞(1−KN)N/K=1/e,subscript→𝑁𝐾superscript1𝐾𝑁𝑁𝐾1𝑒\lim_{\frac{N}{K}\rightarrow\infty}(1-\frac{K}{N})^{N/K}=1/e,roman_lim start_POSTSUBSCRIPT divide start_ARG italic_N end_ARG start_ARG italic_K end_ARG → ∞ end_POSTSUBSCRIPT ( 1 - divide start_ARG italic_K end_ARG start_ARG italic_N end_ARG ) start_POSTSUPERSCRIPT italic_N / italic_K end_POSTSUPERSCRIPT = 1 / italic_e ,
+
+(4)
+
+where e𝑒eitalic_e is the natural constant, therefore, to achieve minimal forgetting, the strategy involves reducing the compression ratio (by minimizing K𝐾Kitalic_K, as we essentially compress knowledge from hlsubscriptℎ𝑙h_{l}italic_h start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT into eθl′superscriptsubscript𝑒𝜃superscript𝑙′e_{\theta}^{l^{\prime}}italic_e start_POSTSUBSCRIPT italic_θ end_POSTSUBSCRIPT start_POSTSUPERSCRIPT italic_l start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT end_POSTSUPERSCRIPT) and increasing the memory size (by maximizing N𝑁Nitalic_N).
+
+Figure 2: Training Process for new knowledge incorporation.
+During training, we randomly choose one of two shown processes to proceed with 50% probability each. The description pertains to the first layer, and the subsequent layers share an analogous procedure.
+After sampling (x1,x2)subscript𝑥1subscript𝑥2(x_{1},x_{2})( italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT , italic_x start_POSTSUBSCRIPT 2 end_POSTSUBSCRIPT ) from the dataset, we first perform self-update with x1subscript𝑥1x_{1}italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT as depicted in the left side of both processes. Subsequently, the modified memory eθ1′superscriptsuperscriptsubscript𝑒𝜃1′{e_{\theta}^{1}}^{\prime}italic_e start_POSTSUBSCRIPT italic_θ end_POSTSUBSCRIPT start_POSTSUPERSCRIPT 1 end_POSTSUPERSCRIPT start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT is employed to predict x2subscript𝑥2x_{2}italic_x start_POSTSUBSCRIPT 2 end_POSTSUBSCRIPT.
+Of the two processes, the upper one maintains gradient flow throughout the entire process, optimizing the knowledge compression from x1subscript𝑥1x_{1}italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT to eθl′superscriptsuperscriptsubscript𝑒𝜃𝑙′{e_{\theta}^{l}}^{\prime}italic_e start_POSTSUBSCRIPT italic_θ end_POSTSUBSCRIPT start_POSTSUPERSCRIPT italic_l end_POSTSUPERSCRIPT start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT (l∈{1,⋯,L}𝑙1⋯𝐿l\in\{1,\cdots,L\}italic_l ∈ { 1 , ⋯ , italic_L }). In contrast, the lower process executes the self-update without gradient. Both processes are designed to encourage the use of the knowledge in the memory pool for the prediction.
+
+Figure 3: Training process for continuous contexts understanding. We only draw two self-update steps here with x1,x2subscript𝑥1subscript𝑥2x_{1},x_{2}italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT , italic_x start_POSTSUBSCRIPT 2 end_POSTSUBSCRIPT though there should be n−1𝑛1n-1italic_n - 1 self-updates in this training iteration.
+We show the procedure of l𝑙litalic_l-th layer here. At the bottom of the figure, h1nsuperscriptsubscriptℎ1𝑛h_{1}^{n}italic_h start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT start_POSTSUPERSCRIPT italic_n end_POSTSUPERSCRIPT refers to the word embeddings of xnsubscript𝑥𝑛x_{n}italic_x start_POSTSUBSCRIPT italic_n end_POSTSUBSCRIPT, and hLnsuperscriptsubscriptℎ𝐿𝑛h_{L}^{n}italic_h start_POSTSUBSCRIPT italic_L end_POSTSUBSCRIPT start_POSTSUPERSCRIPT italic_n end_POSTSUPERSCRIPT is used for loss value calculation.
+Essentially we are compressing the knowledge from x1,⋯,xn−1subscript𝑥1⋯subscript𝑥𝑛1x_{1},\cdots,x_{n-1}italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT , ⋯ , italic_x start_POSTSUBSCRIPT italic_n - 1 end_POSTSUBSCRIPT into θln−1superscript𝜃superscript𝑙𝑛1\theta^{l^{n-1}}italic_θ start_POSTSUPERSCRIPT italic_l start_POSTSUPERSCRIPT italic_n - 1 end_POSTSUPERSCRIPT end_POSTSUPERSCRIPT to predict xnsubscript𝑥𝑛x_{n}italic_x start_POSTSUBSCRIPT italic_n end_POSTSUBSCRIPT.
+
+###
+3.2 Training Strategy
+
+We adopt the next word prediction task to pretrain our model.
+Our training methodology for MemoryLLM is strategically designed to optimize towards three core objectives discussed as follows:
+
+####
+3.2.1 New knowledge incorporation
+
+The training process begins by selecting a document d𝑑ditalic_d from the dataset, which is then divided into two segments (x1,x2)subscript𝑥1subscript𝑥2(x_{1},x_{2})( italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT , italic_x start_POSTSUBSCRIPT 2 end_POSTSUBSCRIPT ).
+Then we update the memory pool θ𝜃\thetaitalic_θ with x1subscript𝑥1x_{1}italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT, followed by using the updated memory pool to predict x2subscript𝑥2x_{2}italic_x start_POSTSUBSCRIPT 2 end_POSTSUBSCRIPT.
+The whole process is described in Figure 2. Ideally, we would design the whole process shown in the lower part of the figure with gradient enabled (see figure 9).
+However, this approach incurs prohibitive memory demands, especially when the memory pool is large. To mitigate this issue,
+in l𝑙litalic_l-th layer, we propose to only use eθl′superscriptsuperscriptsubscript𝑒𝜃𝑙′{e_{\theta}^{l}}^{\prime}italic_e start_POSTSUBSCRIPT italic_θ end_POSTSUBSCRIPT start_POSTSUPERSCRIPT italic_l end_POSTSUPERSCRIPT start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT for the prediction of x2subscript𝑥2x_{2}italic_x start_POSTSUBSCRIPT 2 end_POSTSUBSCRIPT rather than the whole updated memory θl′superscriptsubscript𝜃𝑙′\theta_{l}^{\prime}italic_θ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT when keeping the gradient flow, and use θl′superscriptsubscript𝜃𝑙′\theta_{l}^{\prime}italic_θ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT when the self-update process with x1subscript𝑥1x_{1}italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT is performed without gradient.
+In each iteration, the two aforementioned processes are randomly selected, to ensure that our model can absorb the knowledge in x1subscript𝑥1x_{1}italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT into θ𝜃\thetaitalic_θ and use the memory pool θ𝜃\thetaitalic_θ during the generation.
+
+####
+3.2.2 Enhancing continuous contexts understanding
+
+In Section 3.2.1,
+We encourage the model to understand the latest knowledge injected, where the model can make predictions based on the new memory pool θ′superscript𝜃′\theta^{\prime}italic_θ start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT.
+However, the model only needs the last K𝐾Kitalic_K tokens of each layer θl′superscriptsubscript𝜃𝑙′\theta_{l}^{\prime}italic_θ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT since only eθl′superscriptsuperscriptsubscript𝑒𝜃𝑙′{e_{\theta}^{l}}^{\prime}italic_e start_POSTSUBSCRIPT italic_θ end_POSTSUBSCRIPT start_POSTSUPERSCRIPT italic_l end_POSTSUPERSCRIPT start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT (the last K𝐾Kitalic_K tokens of θl′superscriptsubscript𝜃𝑙′\theta_{l}^{\prime}italic_θ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT) contains the knowledge of the last injected context.
+Thus our model may suffer from predicting the next token based on multiple injected contexts, which is essentially the long context problem.
+We propose a training routine illustrated in Figure 3 to address this problem. In Figure 3, a long document is sampled and segmented into n𝑛nitalic_n parts (x1,⋯,xn)subscript𝑥1⋯subscript𝑥𝑛(x_{1},\cdots,x_{n})( italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT , ⋯ , italic_x start_POSTSUBSCRIPT italic_n end_POSTSUBSCRIPT ), with each segment being shorter than a predefined maximum length.
+The first n−1𝑛1n-1italic_n - 1 segments are then sequentially injected into the memory pool θ𝜃\thetaitalic_θ using Eq.(2), resulting in θn−1subscript𝜃𝑛1\theta_{n-1}italic_θ start_POSTSUBSCRIPT italic_n - 1 end_POSTSUBSCRIPT.
+Note that this whole injection process of (x1,⋯,xn−1)subscript𝑥1⋯subscript𝑥𝑛1(x_{1},\cdots,x_{n-1})( italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT , ⋯ , italic_x start_POSTSUBSCRIPT italic_n - 1 end_POSTSUBSCRIPT ) is executed with gradient disabled.
+Upon obtaining θn−1subscript𝜃𝑛1\theta_{n-1}italic_θ start_POSTSUBSCRIPT italic_n - 1 end_POSTSUBSCRIPT, we calculate the cross-entropy loss on segment xnsubscript𝑥𝑛x_{n}italic_x start_POSTSUBSCRIPT italic_n end_POSTSUBSCRIPT. With this training procedure, we wish to enhance the model’s ability to understand and process continuous contexts.
+
+####
+3.2.3 Mitigating forgetting problems
+
+To address the forgetting issue, we design a task that involves contexts across multiple documents. Specifically, we sample one main document d𝑑ditalic_d and multiple side documents d′superscript𝑑′d^{\prime}italic_d start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT (we take one side document as an example) and split them into segments (x1,⋯,xn)subscript𝑥1⋯subscript𝑥𝑛(x_{1},\cdots,x_{n})( italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT , ⋯ , italic_x start_POSTSUBSCRIPT italic_n end_POSTSUBSCRIPT ) and (x1′,⋯,xn′)superscriptsubscript𝑥1′⋯superscriptsubscript𝑥𝑛′(x_{1}^{\prime},\cdots,x_{n}^{\prime})( italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT , ⋯ , italic_x start_POSTSUBSCRIPT italic_n end_POSTSUBSCRIPT start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT ). The first n−1𝑛1n-1italic_n - 1 segments of the main document (x1,⋯,xn−1)subscript𝑥1⋯subscript𝑥𝑛1(x_{1},\cdots,x_{n-1})( italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT , ⋯ , italic_x start_POSTSUBSCRIPT italic_n - 1 end_POSTSUBSCRIPT ) and the side document (x1′,⋯,xn′)superscriptsubscript𝑥1′⋯superscriptsubscript𝑥𝑛′(x_{1}^{\prime},\cdots,x_{n}^{\prime})( italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT , ⋯ , italic_x start_POSTSUBSCRIPT italic_n end_POSTSUBSCRIPT start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT ) are then injected into the model sequentially. To force the model to recall the related context injected a long time ago, we make the model predict the last segment of the main document xnsubscript𝑥𝑛{x_{n}}italic_x start_POSTSUBSCRIPT italic_n end_POSTSUBSCRIPT. Similarly, the gradient is disabled during all the injections. We encourage the model to use the knowledge from long ago to make the prediction, thereby mitigating the forgetting problem effectively. The implementation details of this part are described in Appendix B.1.
+
+To maintain the integrity of our model, i.e., to avoid the issue that the model may start malfunctioning after updating θ𝜃\thetaitalic_θ too many times, we update θ𝜃\thetaitalic_θ with the context after back-propagation. Specifically, we update θ𝜃\thetaitalic_θ with x1subscript𝑥1x_{1}italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT in Section 3.2.1 and with {x1,⋯,xn−1}subscript𝑥1⋯subscript𝑥𝑛1\{x_{1},\cdots,x_{n-1}\}{ italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT , ⋯ , italic_x start_POSTSUBSCRIPT italic_n - 1 end_POSTSUBSCRIPT } in Section 3.2.2 at the end of each training iteration. Intuitively, we are regularizing the distribution of eθl′superscriptsuperscriptsubscript𝑒𝜃𝑙′{e_{\theta}^{l}}^{\prime}italic_e start_POSTSUBSCRIPT italic_θ end_POSTSUBSCRIPT start_POSTSUPERSCRIPT italic_l end_POSTSUPERSCRIPT start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT to be the same as that of θlsubscript𝜃𝑙\theta_{l}italic_θ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT to maintain integrity after arbitrarily many updates.
+
+###
+3.3 Model Instantiation
+
+We use Llama2-7b as ϕitalic-ϕ\phiitalic_ϕ, consisting of 32323232 layers, with a hidden dimension of 4,09640964,0964 , 096. The model we propose has 7,68076807,6807 , 680 memory tokens in every layer, meaning that θ∈ℝ32×7680×4096𝜃superscriptℝ3276804096\theta\in\mathbb{R}^{32\times 7680\times 4096}italic_θ ∈ blackboard_R start_POSTSUPERSCRIPT 32 × 7680 × 4096 end_POSTSUPERSCRIPT, comprising 1.066B parameters.
+
+###
+3.4 Discussions
+
+Extension to Other Architectures: Our experimental framework involves the use of Llama2-7b as the instantiation for the function ϕitalic-ϕ\phiitalic_ϕ. This selection was driven by the popularity and performance of Llama2-7b as a large language model during the development phase of our project. It is important to note, however, that the framework of our model is broadly applicable across various large language models (LLMs) that have transformer architectures with full attention mechanisms.
+
+Scalability of the Memory Size: In our main experiments, we expand the memory size to approximately 1 billion parameters. We wish to emphasize that the efficiency of the self-update process (discussed in Section 3.1.2) remains unaffected by increases in the memory pool size. This efficiency is due to the model’s design, which only adopts the most recent K𝐾Kitalic_K tokens from the memory pool as the input during self-updates. Consequently, the primary scalability constraint arises from the attention mechanism between the memory tokens and the input tokens during generation (as depicted in Figure 1(a)). As the memory pool enlarges, the computational complexity of these attention mechanisms increases linearly with respect to the number of tokens N𝑁Nitalic_N in the memory pool, which is because the complexity of the attention is N×K𝑁𝐾N\times Kitalic_N × italic_K. With distributed training, our framework has the potential to be scaled to significantly larger memory sizes.
+
+The design of Random Dropping: Random dropping is a fairly straightforward way to keep the size of the memory pool fixed while maintaining an exponential forgetting mechanism.
+Other possible strategies include applying an exponential decay factor to the memory pool from the previous step and aggregating the decayed memory pool with the new memory. We have experimented with aggregating existing memory and new memory instead of using random dropping. However, we found that maintaining the integrity of hidden states for tokens seems to be beneficial. Aggregating hidden states often disrupts both the original and new knowledge, resulting in situations where even the knowledge injected into the memory during the last self-update process cannot be fully extracted.
+In contrast, while random dropping carries the risk of forgetting previous information, it allows for the full recovery of information from the context injected during the last self-update step, as there is no random dropping applied to the new memory tokens at the last update. Therefore, we choose random dropping as we believe it provides a more natural way to integrate existing hidden states with new hidden states.
+
+##
+4 Experiments
+
+###
+4.1 Evaluation Protocols
+
+As illustrated in Section 1, we need to evaluate MemoryLLM in the following three aspects: (1) Integration of New Knowledge: this evaluation is conducted with the model editing tasks (Section 4.3) and QA tasks (long context QA benchmarks, Section 4.4);
+(2)
+Knowledge Retention Ability:
+the model is evaluated with long context QA benchmarks (Section 4.4) and our knowledge retention experiments (Section 4.5); (3) Robustness: we make nearly a million updates to our memory pool and then test the functionality of our model (Section 4.6).
+
+###
+4.2 Implementation Details
+
+We train our model on the processed version of the C4 dataset (Raffel et al., 2020) from Red-Pajama (Computer, 2023). For the training processes in Section 3.2.1, we sample documents from the entire dataset, while the training process in Section 3.2.2 is based on a subset of C4 (we call this the long context subset) where all documents are of length greater than 2048. For the last part, Section 3.2.3, the documents are sampled randomly from the original C4 dataset and the long context subset. The training is performed on 8 A100-80GB GPUs for three days.
+
+Table 1: Quantitative Editing Results on Llama2-7B for ZsRE and CounterFactual Datasets. “w/EF” means “with editing facts”, indicating the model after updating the memory pool with the new fact.
+
+ZsRE Dataset
+CounterFactual Dataset
+
+Editor
+Score
+Efficacy
+Generalization
+Specificity
+Score
+Efficacy
+Generalization
+Specificity
+
+Llama2-7B
+55.6
+55.9
+54.7
+56.3
+20.7
+13.7
+16.6
+83.4
+
+MemoryLLM-7B
+51.2
+50.0
+49.1
+54.8
+22.6
+15.7
+17.6
+82.1
+
+FT
+50.3
+78.6
+80.6
+29.0
+10.0
+99.7
+96.9
+3.6
+
+FT-L
+69.8
+81.4
+76.8
+56.6
+33.8
+47.2
+18.0
+83.3
+
+ROME
+69.3
+88.7
+70.2
+56.3
+69.2
+82.6
+75.2
+55.8
+
+IKE
+-
+-
+-
+-
+70.7
+99.8
+96.2
+45.4
+
+MemoryLLM-7B (w/ EF)
+79.2
+99.8
+96.7
+57.1
+75.3
+98.5
+82.2
+57.0
+
+###
+4.3 Model Editing
+
+####
+4.3.1 Experimental Setup
+
+We follow the experimental setup in (Meng et al., 2022). The benchmarks are:
+
+zsRE (Levy et al., 2017): Zero-Shot Relation Extraction(zsRE) is first used in Mitchell et al. (2022); Cao et al. (2021) for model editing evaluations. we use the first 10,0001000010,00010 , 000 records in the dataset as the evaluation set, with each record containing one factual statement.
+
+CounterFactual (Meng et al., 2022): A set of more difficult false facts in which the LLMs would have low scores when prompted with these facts. Then after editing the model, the model is queried again with these facts. Each example includes the question, the original fact, and the false fact, where we aim to inject the false fact into the model. The first 2,00020002,0002 , 000 examples in this dataset are used for evaluation (following the evaluation of GPT-J in (Meng et al., 2022)).
+
+Evaluation metrics include Efficiency (the post-edit accuracy), Generalization (post-edit accuracy of the paraphrased version of the factual statement), and Specificity (the post-edit accuracy on unrelated facts). The harmonic mean of the three metrics is reported in column  Score.
+
+We compare our model with the following baselines***We tried MEND (Mitchell et al., 2022), but the existing code is for GPT-style models. Our re-implementation of MEND on Llama2 based on the published code constantly encounters nan. In addition, MEND is inferior in the experiments in (Meng et al., 2022), thus we omit MEND in our experiments. :
+FT, FT-L (Zhu et al., 2020), IKE (Zheng et al., 2023), ROME (Meng et al., 2022). The details of the baselines are described in Appendix C.1.
+
+####
+4.3.2 Overall Performance Comparison
+
+The experimental results on dataset ZsRE and CounterFactual are shown in
+Table 1. From the table,
+We observe (1)
+Our model outperforms all baseline models in both datasets, achieving the highest overall performance metrics.
+(2) While Fine-Tuning (FT)
+performs better in terms of Efficacy and Generalization, which means the model absorbs the knowledge, but it tends to lag in “Specificity”, meaning the model’s knowledge of other facts is affected by the tuning.
+(3) With enforced constraints (FT-L),
+the model performs better in terms of Specificity while compromising Efficacy and Generalization, representing that the knowledge is not absorbed by the model effectively.
+(4) ROME, striking a reasonable balance between efficacy and specificity, compared with MemoryLLM, may fall short in the overall performance measurement.
+(5) IKE, conceptually similar to our approach by incorporating the information into the context, faces limitations in specificity, which could be ascribed to the complexity of the prompts used in the implementation, potentially disrupting the accuracy.
+
+###
+4.4 Long Context Evaluation
+
+####
+4.4.1 Experimental Setup
+
+In this section, we evaluate the long-context modeling capabilities of our model. Our assessment utilizes the LongBench benchmark (Bai et al., 2023), specifically designed to test performance in long-context scenarios.
+Since our model has not undergone instruction fine-tuning, the baselines for comparison are also not instruction finetuned. The baselines include Llama2-7B: our backbone; Longllama-3B-v1-1(Tworkowski et al., 2023): The model employs contrastive learning to extend the effective context length of existing models. We adopt the 3B model here as only the 3B model is open-sourced, derived from Openllama-V2; Openllama-V2 (Geng & Liu, 2023): An open-sourced reproduction of Llama. Llama2-LongLora-7B-16k (Chen et al., 2023b): A novel attention mechanism, Shift Short Attention, is proposed and used for longer context pertaining. This model, based on Llama2-7B, is extended to accommodate a 16k context length;
+Llama2-LongLora-7B-100k (Chen et al., 2023b). The same method but context length is extended to 100k.
+For 7B models, we omit the results of maximum length being 16,3841638416,38416 , 384 as we encounter the out-of-memory (OOM) error even when using eight A100-80GB GPUs. This shows another advantage of MemoryLLM, as our model needs one 48 GB GPU or two 40GB GPUs to run inference regardless of the input length.
+
+####
+4.4.2 Overall Performance Comparison
+
+The results in Figure 4 reveal that:
+(1) MemoryLLM outperforms baselines in four out of six datasets when provided with extended contexts. However, a notable exception is observed in the Qasper dataset, where MemoryLLM exhibits suboptimal performance. This could be attributed to the model’s training predominantly on the C4 dataset, without incorporating the arxiv dataset. Thus, the training may affect the model’s ability on scientific datasets (such as Qasper).
+(2) As the context length grows, the performance of MemoryLLM continues to improve, demonstrating the knowledge retention ability of MemoryLLM, where the knowledge from multiple updates earlier could boost performance.
+The performance of MemoryLLM, when the context length is less than 4k, is not the same as that of Llama2-7B, which can be attributed to the subset we used for training MemoryLLM, as we do not need to use the entire dataset for pertaining Llama2-7B for our model and a subset would inevitably have distribution shift from the original dataset.
+
+####
+4.4.3 Comparison with RAG methods
+
+In this section, we aim to explore the role of RAG methods in QA tasks which we argue is orthogonal to MemoryLLM.
+The primary goal of MemoryLLM is to achieve self-updatable LLM where the memory module serves as the parameters that could keep updating along the inference process, whereas RAG methods aim to retrieve the most relevant piece of information from the history. Intuitively, RAG is used to conduct coarse retrieval from millions of documents, while MemoryLLM can process the retrieved documents. We use BM25 retriever to extract 4k tokens from the whole context and use MemoryLLM to process these 4k tokens to generate the answer. The results are shown in Table 2. Here MemoryLLM-7b-16k corresponds to the results in Figure 4, and MemoryLLM-7b-all-BM25 means retrieving 4k tokens from the whole given context and using MemoryLLM to process the retrieved 4k tokens. The results show that using the BM25 retriever could enhance the model performance on certain datasets while not universally beneficial.
+
+Table 2: The performance comparison on long context QA benchmarks of our model with and without BM25 retriever.
+
+MemoryLLM-16k
+
+MemoryLLM-all-BM25
+
+narrativeqa
+20.64
+15.60
+
+qasper
+19.57
+20.30
+
+multifieldqa_en
+29.56
+33.08
+
+hotpotqa
+34.03
+32.27
+
+2wikimqa
+27.22
+24.17
+
+musique
+13.47
+15.36
+
+Figure 4: Experimental Results on LongBench.
+The x-axis is the maximum context length for the QA task. For instance, with a maximum length of 4096409640964096, we truncate 4096409640964096 tokens from the given context as input to the model. The y-axis is the F1 score.
+
+(a) SQuAD
+
+(b) NaturalQA
+
+Figure 5: Performance Comparison on SQuAD and NaturalQA. The x-axis shows the number of updates we perform on the model, where the context that contains the knowledge to answer the question is injected in Step 1. The y-axis reveals the accuracy of the model’s prediction after a certain number of updates. The accuracy is higher than the borderline indicating that the knowledge is not completely forgotten, while we wish the model to be more aligned with the exponential decay, i.e., the theoretical upper bound.
+
+(a) SQuAD
+
+(b) NaturalQA
+
+Figure 6: Model Integrity Check with SQuAD and NaturalQA. We plot accuracy along the updating process as well as the exponential moving average as the Smoothed (99.99%) value. We do not observe any decrease over 650k updates.
+
+(a) NaturalQA Acc Percentage
+
+(b) SQuAD Acc Percentage
+
+(c) NaturalQA Accuracy
+
+(d) SQuAD Accuracy
+
+Figure 7: Ablation Study with our knowledge retention experiments on NaturalQA and SQuAD. All models are trained with the same setting, 30×2563025630\times 25630 × 256 is our main model.
+The relevant knowledge for answering the question is injected in step 1, and the x-axis means the number of updates (steps) performed.
+The top figures show the ratio of the accuracy at each step compared with the accuracy at step 1 for better visualization of knowledge retention.
+
+###
+4.5 Knowledge Retention Experiments
+
+####
+4.5.1 Experimental Setup
+
+The datasets are prepared as below:
+
+SQuAD: Formatted as (context, question, answer), where context and question are sentences, answer refers to the first answer in the list of ground-truth acceptable answers. Then we extract all the samples with answer shorter or equal to 3333 tokens. The model generates 10 new tokens from the prompt “Question: Question Answer:”. Correct predictions cover the 3-token answer within the 10 generated tokens. A total of 2,25022502,2502 , 250 samples are used for the accuracy calculation.
+
+NaturalQA: Formatted as (context, question, answer), using the long answer as the context and the short answer as the ground truth. Samples with answers of 4 tokens or less are selected. Like SQuAD, the model generates 10 new tokens, and the correct predictions cover the 4-token answer. This yields 1,004 samples for analysis.
+
+The results are shown in Figure 5. We assess MemoryLLM’s forgetting rate, comparing it against a baseline (accuracy without context injected into the memory) and a theoretical upper bound.
+Denote the accuracy at step 1 as ausubscript𝑎𝑢a_{u}italic_a start_POSTSUBSCRIPT italic_u end_POSTSUBSCRIPT, and the borderline accuracy as absubscript𝑎𝑏a_{b}italic_a start_POSTSUBSCRIPT italic_b end_POSTSUBSCRIPT. Then at step t𝑡titalic_t, we calculate the point on the curve with the following equation:
+
+at=(au−ab)∗(N−KN)t−1subscript𝑎𝑡subscript𝑎𝑢subscript𝑎𝑏superscript𝑁𝐾𝑁𝑡1a_{t}=(a_{u}-a_{b})*\Big{(}\frac{N-K}{N}\Big{)}^{t-1}italic_a start_POSTSUBSCRIPT italic_t end_POSTSUBSCRIPT = ( italic_a start_POSTSUBSCRIPT italic_u end_POSTSUBSCRIPT - italic_a start_POSTSUBSCRIPT italic_b end_POSTSUBSCRIPT ) ∗ ( divide start_ARG italic_N - italic_K end_ARG start_ARG italic_N end_ARG ) start_POSTSUPERSCRIPT italic_t - 1 end_POSTSUPERSCRIPT
+
+(5)
+
+In our instantiation, N=7,680𝑁7680N=7,680italic_N = 7 , 680 and K=256𝐾256K=256italic_K = 256. Our findings indicate that the model retains knowledge even after 20 updates. However, it falls short of the exponential decay curve representing the upper bound. This gap can be attributed to the fact that even if the knowledge is partially corrupted after 20 steps of updating, it might be hard for the model to reveal the exact answer. The performance exceeding the upper bound at step 2 on the dataset SQuAD might be due to (a) the variation of inference and (b) dropping a small part of the memory may not affect the model predicting the words, while the exponential curve would drop.
+
+###
+4.6 Model Integrity Analysis
+
+To illustrate the integrity of our model,
+We update our model with NaturalQA and SQuAD mentioned in Section 4.5.
+Each time we go through the whole dataset, we shuffle the dataset and inject it into the memory again. In this way, we can simulate infinite updates. Then during the updating process, we track if our model could answer the question related to the most recent context, obtaining a long binary array that indicates whether our model successfully answers the question related to the most recently injected context. With this binary array, we calculate the average accuracy of the last 2,25022502,2502 , 250 samples for SQuAD and the last 1,00410041,0041 , 004 samples for NaturalQA. The results are shown in Figure 6. We continue running for up to 650,000650000650,000650 , 000 steps for 3333 days. As shown in the figure, there is no sign of decreasing in accuracy even after the 650,000650000650,000650 , 000 steps, demonstrating the integrity of our model. From this observation, we argue that our model could be potentially updated for arbitrarily many times without affecting the functioning ability.
+
+###
+4.7 Ablation Study
+
+####
+4.7.1 Ablation Study of different K𝐾Kitalic_K and N𝑁Nitalic_N
+
+In this section, we study the effects of different K𝐾Kitalic_K and N𝑁Nitalic_N in Eq.(3) with our knowledge-retention experiments.
+Our primary goal is to explore the forgetting ratio when the model has different memory sizes (N𝑁Nitalic_N) and numbers of tokens to store the new knowledge (K𝐾Kitalic_K). We vary N𝑁Nitalic_N to be {10×256,20×256,30×256}102562025630256\{10\times 256,20\times 256,30\times 256\}{ 10 × 256 , 20 × 256 , 30 × 256 }, and K𝐾Kitalic_K to be {256,512}256512\{256,512\}{ 256 , 512 }. We also tried K=128𝐾128K=128italic_K = 128, but to find that the accuracy is much worse than the other settings (the step 1 accuracy of NQA and SQuAD under the setting K=128𝐾128K=128italic_K = 128 are 0.34 and 0.25, respectively), we omit this setting here. The results shown in Figure 7 reveal that (1) When K𝐾Kitalic_K is fixed, with greater N𝑁Nitalic_N, the forgetting ratio is smaller; (2) When N𝑁Nitalic_N is fixed, with smaller K𝐾Kitalic_K (10×5121051210\times 51210 × 512 vs. 20×2562025620\times 25620 × 256, the latter yields better knowledge-retention ability), the forgetting ratio becomes smaller.
+These experiments support our intuition and show that with the improvement of N/K𝑁𝐾N/Kitalic_N / italic_K, we can enable better knowledge-retention ability.
+
+####
+4.7.2 Ablation Study of the Model Structures
+
+In our main experiments, we train the model with the memory tokens augmented in every layer. To study the necessity of this design, we tried the following several settings: (1) Augment only one layer in the model with memory tokens; (2) Augment the last half of the layers in the model with the memory tokens (this design is inspired by Figure 6(a) in Fang et al. (2024)). Then we find that design (1) leads to almost zero improvements with the context compared to the performance without the context, which means augmenting only one layer is almost useless. For design (2), We record the accuracies after injecting the context for one step: NaturalQA: 0.39, SQuAD: 0.22. For reference, the accuracy of NaturalQA and SQuAD in Figure 7 at step 1 is 0.46 and 0.39 respectively. This shows that having the memory tokens in both the first half and the second half layers is necessary for better performance.
+
+##
+5 Related Work
+
+###
+5.1 Memory based methods
+
+Previous memory-based methods share certain similarities with MemoryLLM. Among these methods, some use an external encoder to inject knowledge into the memory pool, such as the Memory Network (Weston et al., 2014), which focuses on rectifying the forgetting problems in RNNs. Follow-up work Sukhbaatar et al. (2015) computes the weighted sum of the entire memory pool as the representative vector of the memory. Others use the language model itself as the encoder to update the memory. Memory Transformer (Burtsev & Sapunov, 2020) and RMT (Bulatov et al., 2022) propose to add memory tokens when reading the contexts, where the memory pool is up to 20202020 tokens. EMMA (Moro et al., 2023) has a slightly larger memory pool, which is the size of the chunk when injecting the contexts into the memory. These fixed-sized memory pools show promising results, although performance is limited by the size of the memory pool. This also shows the challenges of expanding memory and incorporating information without disturbing the original capability of the model.
+
+Other memory-based methods integrate the memory pool with unfixed size, where different forgetting mechanisms are adopted to handle the ever-growing problem. In this case, the memory pool would be in the form of (1) hidden states, such as (Adel, 2022) and MemoryBank (Zhong et al., 2023); (2) key-value pairs, represented by KNN-LM (Khandelwal et al., 2019), LONGMEM (Wang et al., 2023). (3) vectors in hidden space. This involves the image captioning task (Cornia et al., 2020) and Memformer (Wu et al., 2022). (4) raw texts. RET-LLM (Modarressi et al., 2023) proposes to save the knowledge with triplets into the memory and then use API query to retrieve related information in the memory given the context.
+These methods have a more flexible memory pool. However, the memory pool might be redundant in terms of the stored knowledge.
+
+###
+5.2 Downsteam Tasks
+
+As MemoryLLM has a large memory pool that can be used to store knowledge, it could be used for downstream tasks such as model editing and long context tasks.
+
+For model editing tasks (Yao et al., 2023), MEND (Mitchell et al., 2022) and ROME (Meng et al., 2022) propose to modify the parameters of the LLM with the new given fact. During inference, MEND needs back-propagation and ROME requires the optimization for new MLP weights, while MemoryLLM, regarding the memory pool as part of the model parameters, could directly update the memory pool to store new facts. IKE (Zheng et al., 2023) proposes to simply put the new facts in context, which is straightforward and intuitively similar to MemoryLLM in terms of this task. However, IKE would encounter the same problem as long context methods, i.e., the ever-growing contexts.
+
+For Long context tasks, representative methods can be categorized as follows: (1) Efficient Attention such as Longformer (Beltagy et al., 2020), Linformer (Wang et al., 2020), LongNet (Jiayu et al., 2023), (2) Positional Encoding like Alibi (Press et al., 2021), Positional Interpolation (Chen et al., 2023a) and Extrapolation (Sun et al., 2023), (3) Finetuning with longer context (Xiong et al., 2023; Tworkowski et al., 2023), (4) Memory-based methods (Wang et al., 2023; Bulatov et al., 2022; Wu et al., 2022). Among all these categories, MemoryLLM could fit into the fourth category where long contexts are absorbed into the memory, which is used for future prediction.
+
+##
+6 Conclusion and Future Work
+
+In this paper, we propose MemoryLLM, a language model
+consisting of a transformer and a huge memory pool within the latent space of the transformer, which serves as the self-updatable parameters of the model.
+MemoryLLM can perform self-updates on the memory with new knowledge, enabling effective knowledge incorporation and slow forgetting of previous knowledge.
+Comparisons against baselines for model editing and long context, together with a dedicated customized evaluation for knowledge retention analysis, demonstrate the superiority of MemoryLLM in effectively absorbing new knowledge and knowledge retention ability.
+In the future, it is of interest to extend the memory size as well as increase the compression rate, i.e., using fewer memory tokens during self-update to store the new knowledge.
+In addition, we aim to extend MemoryLLM to be multimodal, as the memory tokens of MemoryLLM may be suitable for storing multimodal knowledge.
+
+## Impact Statement
+
+This paper presents work that aims to advance the field of Natural Language Processing, specifically the Large Language Models. There are many potential societal consequences of our work associated with LLMs, such as AI safety and reliability. Beyond LLMs, we feel no other consequences must be highlighted here.
+
+## References
+
+Adel (2022)
+
+Adel, A. A.
+
+Global memory transformer for processing long documents.
+
+CoRR, abs/2212.01650, 2022.
+
+Bai et al. (2023)
+
+Bai, Y., Lv, X., Zhang, J., Lyu, H., Tang, J., Huang, Z., Du, Z., Liu, X., Zeng, A., Hou, L., et al.
+
+Longbench: A bilingual, multitask benchmark for long context understanding.
+
+arXiv preprint arXiv:2308.14508, 2023.
+
+Beltagy et al. (2020)
+
+Beltagy, I., Peters, M. E., and Cohan, A.
+
+Longformer: The long-document transformer.
+
+CoRR, abs/2004.05150, 2020.
+
+URL https://arxiv.org/abs/2004.05150.
+
+Bulatov et al. (2022)
+
+Bulatov, A., Kuratov, Y., and Burtsev, M. S.
+
+Recurrent memory transformer.
+
+In NeurIPS, 2022.
+
+Burtsev & Sapunov (2020)
+
+Burtsev, M. S. and Sapunov, G. V.
+
+Memory transformer.
+
+CoRR, abs/2006.11527, 2020.
+
+URL https://arxiv.org/abs/2006.11527.
+
+Cao et al. (2021)
+
+Cao, N. D., Aziz, W., and Titov, I.
+
+Editing factual knowledge in language models.
+
+In EMNLP (1), pp.  6491–6506. Association for Computational Linguistics, 2021.
+
+Chen et al. (2023a)
+
+Chen, S., Wong, S., Chen, L., and Tian, Y.
+
+Extending context window of large language models via positional interpolation.
+
+arXiv preprint arXiv:2306.15595, 2023a.
+
+Chen et al. (2023b)
+
+Chen, Y., Qian, S., Tang, H., Lai, X., Liu, Z., Han, S., and Jia, J.
+
+Longlora: Efficient fine-tuning of long-context large language models.
+
+arXiv preprint arXiv:2309.12307, 2023b.
+
+Child et al. (2019)
+
+Child, R., Gray, S., Radford, A., and Sutskever, I.
+
+Generating long sequences with sparse transformers.
+
+CoRR, abs/1904.10509, 2019.
+
+URL http://arxiv.org/abs/1904.10509.
+
+Computer (2023)
+
+Computer, T.
+
+Redpajama: an open dataset for training large language models, 2023.
+
+URL https://github.com/togethercomputer/RedPajama-Data.
+
+Cornia et al. (2020)
+
+Cornia, M., Stefanini, M., Baraldi, L., and Cucchiara, R.
+
+Meshed-memory transformer for image captioning.
+
+In CVPR, pp.  10575–10584. Computer Vision Foundation / IEEE, 2020.
+
+Fang et al. (2024)
+
+Fang, J., Tang, L., Bi, H., Qin, Y., Sun, S., Li, Z., Li, H., Li, Y., Cong, X., Yan, Y., et al.
+
+Unimem: Towards a unified view of long-context large language models.
+
+arXiv preprint arXiv:2402.03009, 2024.
+
+Geng & Liu (2023)
+
+Geng, X. and Liu, H.
+
+Openllama: An open reproduction of llama, May 2023.
+
+URL https://github.com/openlm-research/open_llama.
+
+Jiayu et al. (2023)
+
+Jiayu, D., Shuming, M., Li, D., Xingxing, Z., Shaohan, H., Wenhui, W., and Wei†, F.
+
+Longnet: Scaling transformers to 1,000,000,000 tokens.
+
+arXiv preprint arXiv:2307.02486, 2023.
+
+Khandelwal et al. (2019)
+
+Khandelwal, U., Levy, O., Jurafsky, D., Zettlemoyer, L., and Lewis, M.
+
+Generalization through memorization: Nearest neighbor language models.
+
+arXiv preprint arXiv:1911.00172, 2019.
+
+Levy et al. (2017)
+
+Levy, O., Seo, M., Choi, E., and Zettlemoyer, L.
+
+Zero-shot relation extraction via reading comprehension.
+
+In Levy, R. and Specia, L. (eds.), Proceedings of the 21st Conference on Computational Natural Language Learning (CoNLL 2017), Vancouver, Canada, August 3-4, 2017, pp.  333–342. Association for Computational Linguistics, 2017.
+
+doi: 10.18653/V1/K17-1034.
+
+URL https://doi.org/10.18653/v1/K17-1034.
+
+Meng et al. (2022)
+
+Meng, K., Bau, D., Andonian, A., and Belinkov, Y.
+
+Locating and editing factual associations in gpt.
+
+Advances in Neural Information Processing Systems, 35:17359–17372, 2022.
+
+Mitchell et al. (2022)
+
+Mitchell, E., Lin, C., Bosselut, A., Finn, C., and Manning, C. D.
+
+Fast model editing at scale.
+
+In ICLR. OpenReview.net, 2022.
+
+Modarressi et al. (2023)
+
+Modarressi, A., Imani, A., Fayyaz, M., and Schütze, H.
+
+Ret-llm: Towards a general read-write memory for large language models.
+
+arXiv preprint arXiv:2305.14322, 2023.
+
+Moro et al. (2023)
+
+Moro, G., Ragazzi, L., Valgimigli, L., Frisoni, G., Sartori, C., and Marfia, G.
+
+Efficient memory-enhanced transformer for long-document summarization in low-resource regimes.
+
+Sensors, 23(7):3542, 2023.
+
+Press et al. (2021)
+
+Press, O., Smith, N. A., and Lewis, M.
+
+Train short, test long: Attention with linear biases enables input length extrapolation.
+
+arXiv preprint arXiv:2108.12409, 2021.
+
+Raffel et al. (2020)
+
+Raffel, C., Shazeer, N., Roberts, A., Lee, K., Narang, S., Matena, M., Zhou, Y., Li, W., and Liu, P. J.
+
+Exploring the limits of transfer learning with a unified text-to-text transformer.
+
+J. Mach. Learn. Res., 21:140:1–140:67, 2020.
+
+Sukhbaatar et al. (2015)
+
+Sukhbaatar, S., Weston, J., Fergus, R., et al.
+
+End-to-end memory networks.
+
+Advances in neural information processing systems, 28, 2015.
+
+Sun et al. (2023)
+
+Sun, Y., Dong, L., Patra, B., Ma, S., Huang, S., Benhaim, A., Chaudhary, V., Song, X., and Wei, F.
+
+A length-extrapolatable transformer.
+
+In ACL (1), pp.  14590–14604. Association for Computational Linguistics, 2023.
+
+Touvron et al. (2023)
+
+Touvron, H., Martin, L., Stone, K., Albert, P., Almahairi, A., Babaei, Y., Bashlykov, N., Batra, S., Bhargava, P., Bhosale, S., Bikel, D., Blecher, L., Canton-Ferrer, C., Chen, M., Cucurull, G., Esiobu, D., Fernandes, J., Fu, J., Fu, W., Fuller, B., Gao, C., Goswami, V., Goyal, N., Hartshorn, A., Hosseini, S., Hou, R., Inan, H., Kardas, M., Kerkez, V., Khabsa, M., Kloumann, I., Korenev, A., Koura, P. S., Lachaux, M., Lavril, T., Lee, J., Liskovich, D., Lu, Y., Mao, Y., Martinet, X., Mihaylov, T., Mishra, P., Molybog, I., Nie, Y., Poulton, A., Reizenstein, J., Rungta, R., Saladi, K., Schelten, A., Silva, R., Smith, E. M., Subramanian, R., Tan, X. E., Tang, B., Taylor, R., Williams, A., Kuan, J. X., Xu, P., Yan, Z., Zarov, I., Zhang, Y., Fan, A., Kambadur, M., Narang, S., Rodriguez, A., Stojnic, R., Edunov, S., and Scialom, T.
+
+Llama 2: Open foundation and fine-tuned chat models.
+
+CoRR, abs/2307.09288, 2023.
+
+Tworkowski et al. (2023)
+
+Tworkowski, S., Staniszewski, K., Pacek, M., Wu, Y., Michalewski, H., and Miłoś, P.
+
+Focused transformer: Contrastive training for context scaling.
+
+arXiv preprint arXiv:2307.03170, 2023.
+
+Wang et al. (2020)
+
+Wang, S., Li, B. Z., Khabsa, M., Fang, H., and Ma, H.
+
+Linformer: Self-attention with linear complexity.
+
+arXiv preprint arXiv:2006.04768, 2020.
+
+Wang et al. (2023)
+
+Wang, W., Dong, L., Cheng, H., Liu, X., Yan, X., Gao, J., and Wei, F.
+
+Augmenting language models with long-term memory.
+
+arXiv preprint arXiv:2306.07174, 2023.
+
+Weston et al. (2014)
+
+Weston, J., Chopra, S., and Bordes, A.
+
+Memory networks.
+
+arXiv preprint arXiv:1410.3916, 2014.
+
+Wu et al. (2022)
+
+Wu, Q., Lan, Z., Qian, K., Gu, J., Geramifard, A., and Yu, Z.
+
+Memformer: A memory-augmented transformer for sequence modeling.
+
+In AACL/IJCNLP (Findings), pp.  308–318. Association for Computational Linguistics, 2022.
+
+Xiong et al. (2023)
+
+Xiong, W., Liu, J., Molybog, I., Zhang, H., Bhargava, P., Hou, R., Martin, L., Rungta, R., Sankararaman, K. A., Oguz, B., et al.
+
+Effective long-context scaling of foundation models.
+
+arXiv preprint arXiv:2309.16039, 2023.
+
+Yao et al. (2023)
+
+Yao, Y., Wang, P., Tian, B., Cheng, S., Li, Z., Deng, S., Chen, H., and Zhang, N.
+
+Editing large language models: Problems, methods, and opportunities.
+
+CoRR, abs/2305.13172, 2023.
+
+Zheng et al. (2023)
+
+Zheng, C., Li, L., Dong, Q., Fan, Y., Wu, Z., Xu, J., and Chang, B.
+
+Can we edit factual knowledge by in-context learning?
+
+arXiv preprint arXiv:2305.12740, 2023.
+
+Zhong et al. (2023)
+
+Zhong, W., Guo, L., Gao, Q., and Wang, Y.
+
+Memorybank: Enhancing large language models with long-term memory.
+
+arXiv preprint arXiv:2305.10250, 2023.
+
+Zhu et al. (2020)
+
+Zhu, C., Rawat, A. S., Zaheer, M., Bhojanapalli, S., Li, D., Yu, F. X., and Kumar, S.
+
+Modifying memories in transformer models.
+
+CoRR, abs/2012.00363, 2020.
+
+##
+Appendix A Details in Methodology
+
+###
+A.1 Self-Update Process
+
+In Section 3.1.2, we illustrate the self-update process with the scenario of the input context xcsubscript𝑥𝑐x_{c}italic_x start_POSTSUBSCRIPT italic_c end_POSTSUBSCRIPT having more than K𝐾Kitalic_K tokens. As for the case when xcsubscript𝑥𝑐x_{c}italic_x start_POSTSUBSCRIPT italic_c end_POSTSUBSCRIPT has less than K𝐾Kitalic_K tokens, we draw the process in Figure 8. As shown in this figure, we input eθlsuperscriptsubscript𝑒𝜃𝑙e_{\theta}^{l}italic_e start_POSTSUBSCRIPT italic_θ end_POSTSUBSCRIPT start_POSTSUPERSCRIPT italic_l end_POSTSUPERSCRIPT and hlsubscriptℎ𝑙h_{l}italic_h start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT into the transformer layer ϕlsubscriptitalic-ϕ𝑙\phi_{l}italic_ϕ start_POSTSUBSCRIPT italic_l end_POSTSUBSCRIPT to obtain eθl′superscriptsuperscriptsubscript𝑒𝜃𝑙′{e_{\theta}^{l}}^{\prime}italic_e start_POSTSUBSCRIPT italic_θ end_POSTSUBSCRIPT start_POSTSUPERSCRIPT italic_l end_POSTSUPERSCRIPT start_POSTSUPERSCRIPT ′ end_POSTSUPERSCRIPT where the last nxcsubscript𝑛subscript𝑥𝑐n_{x_{c}}italic_n start_POSTSUBSCRIPT italic_x start_POSTSUBSCRIPT italic_c end_POSTSUBSCRIPT end_POSTSUBSCRIPT tokens are passed into the next layer.
+
+Figure 8: Self-Update process when the number of tokens is smaller than the number of memory tokens needed.
+
+###
+A.2 Training Strategy for New Knowledge Incorporation
+
+Figure 9: Ideal Training Routine for Latest Knowledge Incorporation
+
+As shown in Figure 9, compared with Section 3.2.1, the ideal case is to perform the whole process, i.e., self-update and the prediction on x2subscript𝑥2x_{2}italic_x start_POSTSUBSCRIPT 2 end_POSTSUBSCRIPT, with gradient flow, so that the cross-entropy loss could be backpropagated to x1subscript𝑥1x_{1}italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT. However, this would induce unaffordable memory consumption, thus we decompose this process into two processes in Figure 2.
+
+##
+Appendix B Implementation Details
+
+###
+B.1 Details for Mitigating Forgetting Problems
+
+As mentioned in Section 3.2.3, we need to sample one main document d𝑑ditalic_d = {x1,⋯,xn}subscript𝑥1⋯subscript𝑥𝑛\{x_{1},\cdots,x_{n}\}{ italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT , ⋯ , italic_x start_POSTSUBSCRIPT italic_n end_POSTSUBSCRIPT } and multiple side documents and inject all the side documents into the memory after the injection of {x1,⋯,xn−1}subscript𝑥1⋯subscript𝑥𝑛1\{x_{1},\cdots,x_{n-1}\}{ italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT , ⋯ , italic_x start_POSTSUBSCRIPT italic_n - 1 end_POSTSUBSCRIPT }, then we calculate the loss on xnsubscript𝑥𝑛x_{n}italic_x start_POSTSUBSCRIPT italic_n end_POSTSUBSCRIPT to update the model. However, instead of sampling multiple documents at each step, we develop a more efficient strategy during training. We provide the pseudo-code in Algorithm 1.
+
+Algorithm 1  Training Strategy for Mitigating Forgetting Problems
+
+0:  Training data 𝒟𝒟\mathcal{D}caligraphic_D;
+
+1:  Initialize the indicator r0=1subscript𝑟01r_{0}=1italic_r start_POSTSUBSCRIPT 0 end_POSTSUBSCRIPT = 1, l=0𝑙0l=0italic_l = 0;
+
+2:  Initialize the cache xc⁢a⁢c⁢h⁢esubscript𝑥𝑐𝑎𝑐ℎ𝑒x_{cache}italic_x start_POSTSUBSCRIPT italic_c italic_a italic_c italic_h italic_e end_POSTSUBSCRIPT = None;
+
+3:  for d∈𝒟𝑑𝒟d\in\mathcal{D}italic_d ∈ caligraphic_D do
+
+4:     n=𝑛absentn=italic_n = the number of contexts in d𝑑ditalic_d;
+
+5:     {x1,⋯,xn}=dsubscript𝑥1⋯subscript𝑥𝑛𝑑\{x_{1},\cdots,x_{n}\}=d{ italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT , ⋯ , italic_x start_POSTSUBSCRIPT italic_n end_POSTSUBSCRIPT } = italic_d;
+
+6:     if r0==1r_{0}==1italic_r start_POSTSUBSCRIPT 0 end_POSTSUBSCRIPT = = 1 or l==0l==0italic_l = = 0 then
+
+7:        r𝑟ritalic_r = 0;
+
+8:     else
+
+9:        r𝑟ritalic_r = Random(0, 2);
+
+10:     end if
+
+11:     if r==0r==0italic_r = = 0 and r0==0r_{0}==0italic_r start_POSTSUBSCRIPT 0 end_POSTSUBSCRIPT = = 0 then
+
+12:        Inject {x1,⋯,xn−1}subscript𝑥1⋯subscript𝑥𝑛1\{x_{1},\cdots,x_{n-1}\}{ italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT , ⋯ , italic_x start_POSTSUBSCRIPT italic_n - 1 end_POSTSUBSCRIPT } into the memory pool;
+
+13:        Calculate the cross-entropy loss on xnsubscript𝑥𝑛x_{n}italic_x start_POSTSUBSCRIPT italic_n end_POSTSUBSCRIPT and update the model;
+
+14:        l+=nlimit-from𝑙𝑛l+=nitalic_l + = italic_n;
+
+15:     else if r==0r==0italic_r = = 0 and r0==1r_{0}==1italic_r start_POSTSUBSCRIPT 0 end_POSTSUBSCRIPT = = 1 then
+
+16:        Inject {x1,⋯,xn−1}subscript𝑥1⋯subscript𝑥𝑛1\{x_{1},\cdots,x_{n-1}\}{ italic_x start_POSTSUBSCRIPT 1 end_POSTSUBSCRIPT , ⋯ , italic_x start_POSTSUBSCRIPT italic_n - 1 end_POSTSUBSCRIPT } into the memory pool;
+
+17:        Calculate the cross-entropy loss on xnsubscript𝑥𝑛x_{n}italic_x start_POSTSUBSCRIPT italic_n end_POSTSUBSCRIPT and update the model;
+
+18:        xc⁢a⁢c⁢h⁢e=xnsubscript𝑥𝑐𝑎𝑐ℎ𝑒subscript𝑥𝑛x_{cache}=x_{n}italic_x start_POSTSUBSCRIPT italic_c italic_a italic_c italic_h italic_e end_POSTSUBSCRIPT = italic_x start_POSTSUBSCRIPT italic_n end_POSTSUBSCRIPT;
+
+19:        l+=nlimit-from𝑙𝑛l+=nitalic_l + = italic_n;
+
+20:     else if r==1r==1italic_r = = 1 then
+
+21:        Calculate the cross-entropy loss on xc⁢a⁢c⁢h⁢esubscript𝑥𝑐𝑎𝑐ℎ𝑒x_{cache}italic_x start_POSTSUBSCRIPT italic_c italic_a italic_c italic_h italic_e end_POSTSUBSCRIPT and update the model;
+
+22:        l=0𝑙0l=0italic_l = 0;
+
+23:     end if
+
+24:     r0=rsubscript𝑟0𝑟r_{0}=ritalic_r start_POSTSUBSCRIPT 0 end_POSTSUBSCRIPT = italic_r;
+
+25:  end for
+
+Note that at every step, we inject the knowledge into the memory pool, thus after a random number of steps, the useful knowledge for predicting xc⁢a⁢c⁢h⁢esubscript𝑥𝑐𝑎𝑐ℎ𝑒x_{cache}italic_x start_POSTSUBSCRIPT italic_c italic_a italic_c italic_h italic_e end_POSTSUBSCRIPT must be somewhere in the memory pool, we need to encourage the model to extract the relevant knowledge. If the model could extract the knowledge from the memory that was injected long ago, we could mitigate the forgetting problems.
+
+##
+Appendix C Additional Experiments
+
+###
+C.1 Baselines for Model Editing
+
+We introduce the details of the baselines for the model editing experiments here:
+
+FT (Finetuning): which applies Adam with early stopping at one layer to finetune the model on the given fact.
+
+FT-L (Constrained Finetuning) (Zhu et al., 2020): a parameter-space L∞subscript𝐿L_{\infty}italic_L start_POSTSUBSCRIPT ∞ end_POSTSUBSCRIPT norm constraint is imposed on the weight changes.
+
+IKE (In-context knowledge editing) (Zheng et al., 2023): The facts used to edit the model are saved in the contexts, which are inputted into the model during inference. This method is only implemented on CounterFactual so we compare our model with it on the CounterFactual benchmark.
+
+ROME (Rank-One Model Editing) (Meng et al., 2022): After identifying that MLPs in LLMs are the major modules for saving knowledge, ROME proposes to alter the MLP matrix by regarding the matrix as a key-value store and then insert a new key-value pair into the matrix, obtaining a new one that contains the injected information.
+
+Generated  on Sun May 26 23:05:34 2024 by LaTeXML
+

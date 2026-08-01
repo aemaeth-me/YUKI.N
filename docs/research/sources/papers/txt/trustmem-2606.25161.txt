@@ -1,0 +1,1478 @@
+
+
+TrustMem: Learning Trustworthy Memory Consolidation for LLM Agents with Long-Term Memory
+
+ Report GitHub Issue
+
+ ×
+
+ Title:
+
+ Content selection saved. Describe the issue below:
+
+ Description:
+
+ Submit without GitHub
+ Submit in GitHub
+
+ arXiv is now an independent nonprofit!
+ Learn more
+ ×
+
+ Back to arXiv
+
+ Why HTML?
+
+ Report Issue
+
+ Back to Abstract
+
+ Download PDF
+
+Abstract
+
+1 Introduction
+
+2 Related Works
+
+3 Method
+
+3.1 Overview of TrustMem Framework
+
+3.2 Memory Transition Verifier
+
+3.3 Multi-granularity Reward Design
+
+3.4 Transition-Ranked GRPO
+
+Global Trajectory Optimization via GRPO.
+
+Verifier-Guided Pair Construction.
+
+Local Preference Ranking via Verifier.
+
+Joint Objective.
+
+4 Experiment
+
+4.1 Experiment Settings
+
+4.2 Experiments on Memory Utility
+
+4.3 Experiments on HaluMem
+
+4.4 Ablation Study
+
+4.5 Reliability of Memory Consolidation
+
+4.6 Training Reward Dynamics
+
+4.7 Case Study
+
+5 Conclusion
+
+References
+
+A Experiment Settings
+
+B Experiments on Memory Utility
+
+C Experiments on HaluMem
+
+D Memory Transition Error Judge Prompt
+
+Evaluation Protocol.
+
+ License: CC BY 4.0
+
+arXiv:2606.25161v1 [cs.AI] 23 Jun 2026
+
+1]AI Center-Mountain View, Samsung Electronics
+2]University of Notre Dame
+
+TrustMem: Learning Trustworthy Memory Consolidation for LLM Agents with Long-Term Memory
+
+Tianyu Yang
+
+Sudipta Paul
+
+Vijay Srinivasan
+
+Vivek Kulkarni
+
+Srinivas Chappidi
+
+[
+
+[
+
+Abstract
+
+Large language model (LLM) agents rely on long-term memory to support extended interactions and personalized assistance beyond finite context windows. Existing memory agents actively update external memory through generated write, revise, and delete operations, but these updates may omit important information, corrupt existing memory, or introduce unsupported hallucinated content. Once stored, such errors become persistent system-state failures that can affect future reasoning and generation. In this paper, we propose TrustMem,
+a framework designed to improve the trustworthiness of memory consolidation. TrustMem relies on a Memory Transition Verifier to evaluate the transition process of memory updates in terms of coverage, preservation, and faithfulness. It further constructs preference pairs among candidate updates under the same memory state, enabling preference-guided reinforcement learning to directly optimize memory updating behaviors.
+Extensive experiments demonstrate that TrustMem improves both memory utility and reliability: it achieves state-of-the-art results across MemoryAgentBench, HaluMem, and the Mem- [MATH] validation set, improves HaluMem memory extraction by 12.14 F1 points, and reduces transition-level omission, corruption, and hallucination by 40.1%, 79.1%, and 50.0%, respectively, compared with the strongest baseline for each error type.
+
+22footnotetext: Work done during an internship at AI Center-Mountain View, Samsung Electronics.
+
+1 Introduction
+
+Figure 1: 
+Comparison of memory consolidation results produced by existing methods and TrustMem.
+Compared with Mem1 [46] and Mem-T [41], TrustMem better preserves input evidence and avoids corruption, omission, and hallucination when converting user inputs into persistent memory.
+
+As Large Language Models (LLMs) evolve into intelligent agents capable of long-term interaction and personalized service, long-term memory has become a pivotal component [27, 21]. By maintaining an external memory store, agents can transcend finite context windows to preserve user preferences, historical facts, and reasoning trajectories [45, 17, 20]. Recent advancements [39, 32, 35, 41, 46] have moved beyond passive retrieval toward active memory management, where agents actively maintain and revise memory over time.
+Specifically, a memory agent typically processes streaming inputs in chunks: at each step, it retrieves relevant past contexts and executes structured memory-editing actions, such as inserting new insights, updating existing records, or deleting obsolete information, to consolidate its persistent state. While this flexibility enhances controllability, it raises a critical concern: can we trust the autonomously generated memory updates?
+
+As shown in Figure 1, representative memory agents can introduce persistent errors during memory consolidation. These examples are drawn from outputs of Mem1 [46] and Mem-T [41] under the same memory-consolidation setting used in our evaluation.
+For instance, the first row shows a Corruption error, where an existing method incorrectly places Voltaire in the 17th century despite the input associating him with the 18th century. The second row illustrates Omission, where key split and reunification timelines are dropped from memory. The third row shows Hallucination, where an unsupported statement about John W. Ingram is introduced despite being grounded in neither the input nor the previous memory state. Since these errors can compound over time, the reliability of a memory system cannot be judged solely by terminal performance. Once a flawed entry is consolidated, it may be repeatedly retrieved and amplified in subsequent interactions, persistently contaminating the agent’s reasoning chain [3]. Consequently, the core challenge of long-term memory systems has shifted from merely “retaining” information to building trustworthy memory.
+
+Furthermore, existing supervisory signals struggle to address these issues due to a severe credit assignment gap [18]. Most training paradigms [32, 39, 41, 35] rely on terminal scalar rewards—such as final task success or tool-calling validity—which act on the trajectory level rather than the transition level for memory updates. These global signals are too coarse to pinpoint exactly when or where a faulty memory update occurred within a long sequence of updates. An incorrect final answer could stem from an early omission, a destructive overwrite in mid-stream, or a simple reasoning flaw at the final step. Conversely, a correct answer may mask unsafe intermediate updates that did not trigger a failure in the current turn but remain latent risks for future tasks. Therefore, relying solely on terminal outcomes fails to provide the granular supervision necessary to explicitly correct the agent’s specific memory-editing behaviors.
+
+To address this challenge, we shift the focus from evaluating only the final memory outcome to supervising how memory is constructed step by step. The agent processes the input chunk by chunk and executes structured memory-editing actions, such as writing new information, revising existing entries, or pruning outdated content. Each action sequence induces a local transition from the previous memory state to the updated one, enabling us to inspect whether each intermediate update is trustworthy before it becomes persistent.
+
+Based on this formulation, we propose TrustMem, a framework for training memory agents to perform trustworthy memory consolidation at the transition level.
+In particular, TrustMem introduces a Memory Transition Verifier to evaluate each memory update along coverage, preservation, and faithfulness, and further proposes Transition-Ranked GRPO, built upon GRPO [25], to optimize the memory-update policy. By ranking candidate updates under the same memory state, TrustMem provides fine-grained supervision for memory-editing behaviors while maintaining the downstream utility of the final memory.
+
+We evaluate TrustMem across three settings: MemoryAgentBench [9],
+HaluMem [3], and the Mem- [MATH] [32] validation set,
+covering accurate retrieval, test-time learning, long-range understanding, and memory reliability.
+Extensive experiments demonstrate that TrustMem achieves state-of-the-art results across these
+settings, improving over the strongest baseline by 6.5 points on MemoryAgentBench and 12.14 F1
+points in HaluMem memory extraction. Beyond final task performance, Figure 2
+shows that TrustMem achieves the lowest transition-level error rates across omission, corruption,
+and hallucination. Compared with the strongest baseline for each error type, TrustMem reduces
+omission, corruption, and hallucination by 40.1%, 79.1%, and 50.0%, respectively. These results
+demonstrate that TrustMem improves not only memory utility, but also operation-level reliability
+and transition-level safety.
+
+Figure 2: 
+Transition-level error rates of existing memory agents and TrustMem.
+TrustMem achieves the lowest omission, corruption, and hallucination rates, reducing errors by 40.1%, 79.1%, and 50.0% over the strongest baseline for each error type.
+
+2 Related Works
+
+Long-Term Memory Systems for LLM Agents.
+Long-term memory enables LLM agents to preserve information beyond finite context windows.
+Early systems store interactions, reflections, or user-specific notes in external memory, including Generative Agents [21], Reflexion [27], MemoryBank [45], and MemoChat [17].
+System-level frameworks such as MemGPT [20], MemoryOS [12], Mem0 [4], A-MEM [34], MIRIX [29], Zep [23], and LightMem [8] improve memory management through external storage, extraction, organization, graph structure, retrieval, or efficiency.
+Another line explores parametric or latent memory, including MemoryLLM [30], M+ [31], Titans [1], and MemGen [42].
+These works primarily study how memory is stored, retrieved, compressed, or represented, whereas TrustMem focuses on whether each generated memory update is trustworthy before it gets stored.
+
+RL-based Memory Agents.
+Recent methods formulate memory management as a learnable decision process.
+MemAgent [39] trains LLMs to process long inputs segment by segment and maintain compact memory; MEM1 [46] studies the interaction between memory construction and reasoning; Memory-R1 [35] learns explicit ADD, UPDATE, DELETE, and NOOP operations; and Mem- [MATH] [32] optimizes sequential memory construction over multi-component memories with RL.
+AgeMem [40], ReMemR1 [26], and Mem-T [41] further explore unified memory actions, revisitable memory, and denser credit assignment.
+While these methods demonstrate that RL can improve memory utility, they mainly optimize final task performance or trajectory-level rewards.
+TrustMem instead introduces transition-level verification and preference ranking to supervise the safety of each local memory update.
+
+Reliable Memory Agents.
+As memory becomes persistent and editable, reliability failures can accumulate across interactions.
+Benchmarks such as LoCoMo [19], LongMemEval [33], and MemoryAgentBench [9] evaluate long-term memory through multi-session QA, temporal reasoning, knowledge updates, test-time learning, long-range understanding, or selective forgetting.
+HaluMem [3] further analyzes operation-level hallucination during memory extraction, updating, and memory-based QA.
+Related studies examine memory injection attacks [6, 28], memory admission control [43], provenance-aware memory [47], and governance of evolving memory [14].
+Unlike these evaluation- or defense-oriented works, TrustMem directly optimizes the memory-update policy with transition-level verification, reducing omission, corruption, and hallucination before unsafe updates become persistent.
+
+Figure 3: 
+Overview of TrustMem.
+Top: TrustMem performs continual memory consolidation over an input stream.
+At step [MATH] , the memory agent observes the current chunk [MATH] and the accumulated memory state [MATH] , generates memory-editing actions, and updates the memory state to [MATH] through the Memory Executor.
+The resulting transition is evaluated by the Memory Transition Verifier for coverage, preservation, and faithfulness before the updated memory is used for retrieval and downstream tasks.
+Bottom: TrustMem optimizes the memory agent with Transition-Ranked GRPO, where verifier scores from multiple rollouts are used for both scalar reward computation and transition-level preference ranking.
+
+3 Method
+
+3.1 Overview of TrustMem Framework
+
+We formulate memory consolidation as a continual memory-update problem.
+At each step, the memory agent receives a new input chunk from a long-form interaction stream, such as a document segment, a dialogue turn, or a task demonstration segment.
+We denote the input stream as [MATH] , where [MATH] is the newly observed chunk at step [MATH] .
+The chunks are processed in chronological order and consolidated into an evolving external memory.
+
+Let [MATH] denote the persistent memory state before processing chunk [MATH] .
+This memory state stores useful information accumulated from previous chunks [MATH] , rather than the content of only one chunk.
+At step [MATH] , the agent observes [MATH] and generates a sequence of structured memory-editing actions
+ [MATH] .
+Thus, the agent handles one chunk at each step, while the memory state represents global accumulated memory after all processed chunks so far.
+
+To make memory updates executable and auditable, we define a unified action space
+ [MATH] .
+Specifically, Write inserts new memory items when the current chunk contains useful information not yet stored in memory;
+Revise updates or merges existing memory entries when the current chunk provides corrections, refinements, or complementary evidence;
+and Prune removes memory entries that become invalid, redundant, or no longer useful for downstream tasks based on the current evidence and the existing memory state.
+The agent decides whether an update is needed by generating one or more of these actions conditioned on [MATH] .
+If the current chunk does not introduce new useful information, correct previous memory, or make any existing entry invalid or redundant, the agent may output no action.
+
+A deterministic memory executor [MATH] then applies [MATH] to the memory store, yielding the updated state
+ [MATH] .
+This incremental construction defines a local memory transition
+ [MATH] .
+
+Since each update alters the agent’s persistent memory state, we introduce a Memory Transition Verifier [MATH] to evaluate the trustworthiness of each local transition, yielding a score [MATH] .
+As detailed in Section 3.2, the verifier checks if the update preserves important information from the current chunk, maintains valid prior memory, and avoids unsupported hallucinated content.
+
+After all [MATH] chunks are processed, the terminal memory [MATH] is used for downstream tasks.
+For a query [MATH] , a fixed retriever fetches relevant records [MATH] , and an answer model generates a prediction [MATH] , which is compared against the reference answer [MATH] to compute the task reward.
+Our overall objective is to optimize the policy [MATH] so that the agent constructs compact and useful terminal memory while ensuring that each intermediate memory transition is trustworthy.
+
+3.2 Memory Transition Verifier
+
+Because memory construction is cumulative, relying solely on terminal downstream accuracy suffers from a severe credit assignment gap.
+An incorrect final answer may stem from an early omission, a later destructive edit, or a failure of the answer model.
+Conversely, a correct final answer does not guarantee that all intermediate memory updates are safe, since silent errors may remain in the persistent memory state and affect future tasks.
+
+To provide fine-grained supervision, we introduce a Memory Transition Verifier [MATH] that evaluates each local memory transition defined in Section 3.1.
+Rather than judging the final answer, the verifier acts as a state-transition evaluator and checks whether the update from [MATH] to [MATH] is trustworthy after processing the current chunk.
+
+For each transition [MATH] , the verifier is instantiated as a frozen LLM and receives a compact view of the transition, including the current chunk, the generated memory-editing actions, and the memory entries touched or retrieved by these actions.
+This avoids feeding the full memory bank while still providing the evidence needed to judge the local update.
+The simplified verifier prompt is shown in Figure 5 in the Appendix.
+
+Specifically, the verifier evaluates each transition along three diagnostic dimensions:
+coverage, which checks whether important information from the current chunk is preserved;
+preservation, which checks whether valid prior memory is maintained without unjustified deletion or distortion;
+and faithfulness, which checks whether newly added or modified memory content is supported by the current chunk or the previous memory state.
+These judgments are aggregated into a scalar trustworthiness score
+ [MATH] , which is used as the transition-level verification reward.
+
+By directly evaluating intermediate memory transitions, the verifier provides local supervision for memory-editing behavior and helps prevent omission, corruption, and hallucination before they become persistent memory errors.
+
+3.3 Multi-granularity Reward Design
+
+Training reliable memory agents requires supervision at different granularities.
+Sample-level rewards evaluate the utility and compactness of the final memory after the full input stream has been processed, while transition-level rewards evaluate whether each local memory update is executable, meaningful, and trustworthy.
+We therefore design a multi-granularity reward that combines sample-level rewards with transition-level rewards.
+
+Sample-Level Rewards.
+These rewards evaluate the terminal memory state [MATH] after all chunks in sample [MATH] are processed.
+
+Task Reward ( [MATH] ) measures downstream utility: given questions [MATH] , a fixed retriever [MATH] and answer model [MATH] generate predictions [MATH] , and the reward is the average metric, such as F1 or LLM-as-a-judge score, against reference answers [MATH] .
+
+Efficiency Reward ( [MATH] ) penalizes memory bloat to prevent excessive copying, computed as [MATH] , encouraging compact memory.
+
+Transition-Level Rewards.
+These rewards evaluate each local memory transition [MATH] .
+
+Action Execution ( [MATH] ) checks whether the generated structured actions are parseable and executable by the memory executor [MATH] .
+
+Content Type ( [MATH] ) uses a lightweight analyzer [MATH] to ensure that the modified content is semantically specific and non-empty.
+
+Verifier Reward ( [MATH] ) uses the Memory Transition Verifier [MATH] from Section 3.2 to evaluate the semantic safety of the transition, defined as [MATH] .
+
+Aggregating the above, we define the total reward for the [MATH] -th memory update of sample [MATH] as
+
+ [MATH] 
+ [MATH] 
+ [MATH] 
+
+(1)
+
+This reward combines final memory utility, memory compactness, action executability, content specificity, and transition-level trustworthiness.
+The sample-level terms provide global supervision over the final constructed memory, while the transition-level terms provide local supervision for each memory update.
+
+3.4 Transition-Ranked GRPO
+
+Building on the multi-granularity reward, we propose Transition-Ranked GRPO, which combines scalar reward optimization with verifier-guided transition ranking.
+While the verifier score can be used as a transition-level reward in Eq. (1), its absolute magnitude may not always be well calibrated.
+However, in our setting, verifier scores are used more robustly as relative preferences among candidate updates generated under the same state than as fully calibrated absolute values.
+Therefore, we further use verifier scores to construct preference pairs among candidate transitions and optimize the policy with an additional ranking objective.
+
+Global Trajectory Optimization via GRPO.
+
+We adopt Group Relative Policy Optimization (GRPO) [25] to optimize the memory policy.
+Specifically, for each training sample [MATH] , we sample a group of [MATH] rollouts from the old policy [MATH] .
+At each chunk step [MATH] within rollout [MATH] , we compute the scalar reward [MATH] from Eq. (1).
+The group-normalized advantage is computed as
+ [MATH] ,
+where [MATH] and [MATH] are the mean and standard deviation of rewards across the [MATH] rollouts for the same chunk step.
+Letting [MATH] denote the importance ratio for the [MATH] -th generated token, the GRPO objective over the memory construction trajectory is formulated as:
+
+ [MATH] 
+ [MATH] 
+ [MATH] 
+
+(2)
+
+Verifier-Guided Pair Construction.
+
+For each training sample [MATH] , the [MATH] rollouts produce multiple candidate memory transitions at each chunk step [MATH] , denoted as [MATH] . These candidate transitions are generated from the same current chunk and previous memory state, but may contain different memory-editing actions.
+Because the verifier [MATH] evaluates each transition independently, it induces a ranking over [MATH] .
+We select the transitions with the highest and lowest verifier scores as the preferred transition [MATH] and rejected transition [MATH] , respectively, provided their score gap exceeds a margin [MATH] .
+These preference pairs capture local differences in transition quality and provide additional supervision beyond the scalar reward.
+
+Local Preference Ranking via Verifier.
+
+Given the preference pairs [MATH] , we optimize a DPO-style ranking loss to inject step-level semantic supervision.
+Because [MATH] and [MATH] are generated for the same chunk and previous memory state, they share the same prompt [MATH] and differ only in the generated memory-editing actions.
+Let [MATH] and [MATH] denote the preferred and rejected action sequences.
+We define the length-normalized log-probability margin as [MATH] ,
+where [MATH] denotes the length-normalized log probability of a generated response [MATH] given prompt [MATH] .
+The ranking loss is:
+
+ [MATH] 
+
+(3)
+
+where [MATH] is the corresponding margin under the reference policy.
+
+Joint Objective.
+
+We use a frozen reference policy [MATH] to regularize policy updates with a KL penalty.
+This KL term is applied as an actor-side auxiliary loss, rather than being added to the scalar reward used for advantage estimation.
+Here, [MATH] denotes the rollout policy used in the GRPO importance ratio, while [MATH] denotes the frozen reference policy used for KL regularization and the ranking margin.
+
+The final training objective combines scalar reward optimization, KL regularization, and transition-level ranking:
+
+ [MATH] 
+
+(4)
+
+Here, [MATH] denotes the token-level KL regularization loss, while [MATH] and [MATH] control the weights of KL regularization and transition-level ranking, respectively.
+
+Method
+AR
+TTL
+LRU
+Avg.
+
+SQuAD
+HotpotQA
+PerLTQA
+TREC-C
+NLU
+PubMed
+BookSum
+
+Long-Context
+74.2
+85.2
+60.5
+62.3
+70.8
+53.3
+5.2
+58.8
+
+RAG-Top2
+76.2
+84.9
+62.3
+61.2
+50.8
+57.0
+4.2
+56.7
+
+MemAgent [39]
+
+52.6
+66.0
+41.5
+53.5
+57.4
+61.6
+8.6
+48.7
+
+MEM1 [46]
+
+12.0
+16.4
+16.0
+47.5
+33.2
+22.6
+6.6
+22.0
+
+Mem- [MATH] [32]
+
+78.6
+83.2
+65.9
+66.6
+65.8
+54.5
+18.7
+61.9
+
+\rowcolorlightpurple
+TrustMem
+
+80.6
+84.9
+63.6
+72.4
+73.8
+64.0
+22.6
+66.3
+
+Table 1: Experiment results on the Mem- [MATH] validation set. The top-2 results are highlighted.
+
+Method
+AR
+TTL
+LRU
+Avg.
+
+Single-Doc
+Multi-Doc
+LME(S)
+TREC-C
+NLU
+TREC-F
+Clinic
+Banking77
+InfBench
+
+Long-Context
+28.0
+27.0
+29.2
+64.0
+74.0
+34.0
+86.0
+77.0
+12.5
+46.1
+
+RAG-Top2
+69.0
+45.0
+58.1
+69.0
+65.0
+21.0
+70.0
+75.0
+6.5
+50.2
+
+MemAgent [39]
+
+51.0
+52.0
+23.0
+62.0
+78.0
+30.0
+88.0
+83.0
+10.9
+53.1
+
+MEM1 [46]
+
+23.0
+33.0
+13.0
+57.0
+80.0
+28.0
+48.0
+76.0
+7.0
+40.6
+
+Mem-T [41]
+
+56.0
+60.0
+43.3
+75.0
+48.0
+27.0
+43.0
+79.0
+14.1
+49.5
+
+AtomMem [10]
+
+37.0
+33.0
+8.7
+11.0
+1.0
+9.0
+0.0
+0.0
+18.9
+13.2
+
+Mem- [MATH] [32]
+
+74.0
+68.0
+52.0
+71.0
+71.0
+41.0
+73.0
+70.0
+12.9
+59.2
+
+\rowcolorlightpurple
+TrustMem
+
+83.0
+64.0
+55.0
+85.0
+79.2
+41.0
+84.0
+84.0
+15.9
+65.7
+
+Table 2: Experiment results on MemoryAgentBench. The top-2 results are highlighted.
+
+4 Experiment
+
+4.1 Experiment Settings
+
+Datasets.
+We evaluate TrustMem on MemoryAgentBench [9], HaluMem [3], and the Mem- [MATH] validation set.
+Following Mem- [MATH] [32], we use its training pool, which aggregates eight sources: SQuAD [22], HotpotQA [37], PerLTQA [7], LongMemEval-Train [33], NLU [15], TREC-C [16], PubMed-RCT [5], and BookSum [13]. We train TrustMem on a balanced subset of 562 instances sampled from the 4,139-instance Mem- [MATH] training pool, and evaluate validation performance and ablations on 463 held-out Mem- [MATH] validation instances. We use all datasets, models, and systems only for research purposes and follow their publicly released access conditions and licenses where available.
+
+Method
+Memory Extraction
+Memory Updating
+Question Answering
+
+R [MATH] 
+Weighted R [MATH] 
+Acc. [MATH] 
+F1 [MATH] 
+C [MATH] 
+H [MATH] 
+O [MATH] 
+C [MATH] 
+H [MATH] 
+O [MATH] 
+
+Mem0 [4]
+
+42.91
+65.03
+60.86
+57.31
+25.50
+0.45
+74.02
+53.02
+19.17
+27.81
+
+Memobase [38]
+
+14.55
+25.88
+32.29
+25.13
+5.20
+0.55
+94.25
+35.33
+29.97
+34.71
+
+Supermemory [24]
+
+41.53
+64.76
+60.83
+56.90
+16.37
+1.15
+82.47
+54.07
+22.24
+23.69
+
+Zep [23]
+
+–
+–
+–
+–
+47.28
+0.42
+52.31
+55.47
+21.92
+22.62
+
+MemAgent [39]
+
+12.39
+15.31
+82.02
+22.03
+11.66
+4.55
+83.78
+42.11
+28.70
+28.12
+
+Mem-T [41]
+
+36.60
+46.85
+67.13
+52.69
+45.53
+3.35
+51.12
+59.43
+26.11
+13.98
+
+AtomMem [10]
+
+0.28
+0.39
+87.50
+0.56
+2.14
+4.29
+93.57
+31.27
+5.56
+64.00
+
+\rowcolorlightpurple
+TrustMem
+
+56.73
+67.45
+67.81
+69.45
+46.84
+0.53
+48.64
+55.22
+6.07
+12.46
+
+Table 3: Experiment results on HaluMem Benchmark. We report operation-level metrics for memory extraction, memory updating, and memory-based question answering. R, Weighted R, Acc., and F1 evaluate memory extraction quality; C, H, and O denote correctness, hallucination, and omission, respectively.
+
+MemoryAgentBench.
+We evaluate TrustMem on representative tasks from MemoryAgentBench [9] across three memory capabilities. For Accurate Retrieval (AR), we use Single-Doc, Multi-Doc, and LME(S), which evaluate whether the agent can retrieve useful information from historical contexts for downstream queries. For Test-Time Learning (TTL), we use five multi-class classification datasets: TREC-C [16], NLU [15], TREC-F [16], Clinic [15], and Banking77 [2], which test whether the agent can acquire new classification rules from examples during interaction. For Long-Range Understanding (LRU), we use InfBench-Sum [44], which evaluates the agent’s ability to integrate information across long contexts for summarization. Each task is evaluated with its original task-specific scoring protocol, and the final results are reported as task-level performance scores.
+
+HaluMem Bench.
+HaluMem [3] is an operation-level benchmark focusing on memory safety, including hallucinations, omissions, and incorrect updates, during memory extraction, updating, and question answering. We use HaluMem-Medium, which contains 30,073 dialogue turns from 20 users ( [MATH] 160K tokens/user), encompassing 14,948 memory points and 3,467 QA pairs. While MemoryAgentBench evaluates downstream memory utility and out-of-distribution generalization, HaluMem evaluates memory update safety and operation-level reliability through stage-wise extraction, updating, and QA metrics.
+
+Baselines.
+We compare TrustMem with a broad set of baselines covering three memory-processing paradigms, as summarized in Tables 6.
+(1) Standard paradigms: Long-Context directly places the interaction history into the context window, while RAG-Top2 retrieves the top-2 relevant chunks before answer generation. These baselines test whether long-context encoding or simple retrieval is sufficient for long-term memory tasks.
+(2) RL-based and agentic memory methods: We compare with recent methods that train or design agents to construct, update, and use long-term memory, including Mem- [MATH] [32], MemAgent [39], MEM1 [46], Mem-T [41], and AtomMem [10]. These methods typically process long inputs incrementally and maintain compact or structured memory states for downstream tasks.
+(3) System-level memory frameworks: We further compare with practical memory management systems, including Mem0 [4], Memobase [38], Supermemory [24], and Zep [23], which provide memory extraction, updating, retrieval, and memory-based question answering capabilities.
+Since different benchmarks emphasize different aspects of memory behavior and not all baselines are applicable to every setting, we report the available and comparable results for each benchmark in the corresponding tables.
+
+Implementation Details.
+TrustMem is initialized from Qwen3-4B [36] and trained only on the Mem- [MATH] training pool with Transition-Ranked GRPO for approximately two days on 32 NVIDIA H100 GPUs.
+No examples from MemoryAgentBench or HaluMem are used for training; all results are reported on held-out validation instances or external benchmarks. We report results from the step-85 checkpoint. Following the reward definition in Section 3, the training reward is defined as [MATH] , where [MATH] measures downstream task performance, [MATH] evaluates action executability, [MATH] measures transition-level memory trustworthiness, [MATH] encourages compact memory construction, and [MATH] evaluates content specificity. We use 8 GRPO rollouts per instance, a learning rate of [MATH] , KL coefficient 0.001, maximum prompt length 4096, maximum response length 2048. For the preference-ranking objective, we use top-1/bottom-1 pair construction with score margin 0.15, at most 256 preference pairs per batch, pair micro-batch size of 1 per GPU, preference loss weight [MATH] , and [MATH] . Thinking mode is disabled during both training and evaluation.
+
+Evaluation Metrics.
+For the MemoryAgentBench and validation set , we follow the original evaluation protocols of the corresponding benchmarks. Since different data sources use different scoring functions, we evaluate each instance with its dataset-specific metric and report the resulting task-level performance score for each dataset. The Avg. column denotes the macro-average over the reported task scores. For HaluMem, we report operation-level metrics over three stages: memory extraction, memory updating, and memory-based question answering. For memory extraction, we report recall (R), weighted recall (Weighted R), accuracy (Acc.), and F1. For memory updating and question answering, we report correctness (C), hallucination rate (H), and omission rate (O). Higher values indicate better performance for R, Weighted R, Acc., F1, and C, while lower values are better for H and O.
+
+4.2 Experiments on Memory Utility
+
+Table 1 reports results on the Mem- [MATH] validation set. TrustMem achieves the best average score of 66.3, outperforming the strongest baseline Mem- [MATH] by 4.4 points. The improvement is especially clear on Test-Time Learning, where TrustMem obtains the best scores on TREC-C (72.4), NLU (73.8), and PubMed (64.0). TrustMem also improves BookSum from 18.7 to 22.6, showing better long-range memory utility. These gains indicate that transition-level verification helps the agent preserve useful task-specific and long-range information during memory construction.
+
+Table 2 evaluates out-of-distribution generalization on MemoryAgentBench. TrustMem again achieves the best average score of 65.7, improving over Mem- [MATH] by 6.5 points and outperforming Long-Context and RAG-Top2 by 19.6 and 15.5 points, respectively. TrustMem performs strongly on both retrieval and test-time learning tasks, achieving the best score on Single-Doc (83.0), TREC-C (85.0), and Banking77 (84.0). These results show that TrustMem learns a more robust memory update policy than simply retaining long context or retrieving top-ranked chunks. Overall, these results demonstrate that reliable local memory transitions improve both validation performance and out-of-distribution memory utility, with detailed analysis provided in Appendix B.
+
+4.3 Experiments on HaluMem
+
+Table 3 evaluates operation-level memory reliability on HaluMem-Medium, covering memory extraction, memory updating, and memory-based question answering.
+TrustMem achieves the best memory extraction recall (56.73), weighted recall (67.45), and F1 (69.45), improving the strongest prior F1 score by 12.14 points.
+Although AtomMem obtains the highest extraction accuracy, its very low recall and F1 suggest an overly conservative extraction behavior that misses most useful memories.
+In contrast, TrustMem achieves a stronger coverage-correctness trade-off, resulting in the best overall extraction quality. For memory updating and memory-based question answering, TrustMem obtains the lowest omission rates while maintaining competitive correctness and low hallucination.
+These results show that transition-level verification and preference-guided optimization improve intermediate memory reliability beyond final task performance.
+A detailed stage-wise analysis is provided in Appendix C.
+
+4.4 Ablation Study
+
+As shown in Table 4.4, we perform ablation studies on the Mem- [MATH] validation set to quantitatively evaluate the impact of Action Execution Reward ( [MATH] ), Efficiency Reward ( [MATH] ), Transition Verifier Reward ( [MATH] ), and the Transition-Ranked GRPO optimization strategy.
+
+Methods
+AR
+TTL
+LRU
+Overall
+
+\rowcolortableHeaderBg               Ablation of Reward Components
+
+w/o [MATH] 
+
+67.4
+52.6
+15.9
+54.0
+
+w/o [MATH] 
+
+71.1
+66.9
+18.8
+61.8
+
+\rowcolortableHeaderBg               Ablation of Transition Verification
+
+w/o [MATH] 
+
+72.1
+58.3
+20.6
+58.7
+
+\rowcolortableHeaderBg               Ablation of Optimization Strategy
+
+PRM-style GRPO
+75.8
+57.6
+21.5
+60.3
+
+TrustMem (TR-GRPO)
+76.4
+70.1
+22.6
+66.3
+
+Table 4: Ablation studies on reward components, transition verification, and optimization strategy.
+
+Effectiveness of Reward Components.
+Removing [MATH] causes the largest drop, reducing the overall score from 66.3 to 54.0. This shows that executable memory-editing actions are crucial for reliable memory construction. Removing [MATH] also decreases the overall score to 61.8, indicating that compact memory states help reduce redundancy and improve downstream memory utility.
+
+Effectiveness of the Memory Transition Verifier.
+Removing [MATH] reduces the overall score from 66.3 to 58.7, with a clear drop on TTL from 70.1 to 58.3. This confirms that the Memory Transition Verifier provides important transition-level supervision. By checking local memory updates for omission, corruption, and hallucination, the verifier helps prevent unsafe updates from entering the persistent memory state.
+
+Effectiveness of Transition-Ranked GRPO.
+Compared with PRM-style GRPO, TrustMem with Transition-Ranked GRPO improves the overall score from 60.3 to 66.3. The improvement is especially large on TTL, increasing from 57.6 to 70.1. This suggests that ranking candidate memory transitions provides a stronger learning signal than directly using verifier scores as scalar rewards, leading to safer and more useful memory updates.
+
+4.5 Reliability of Memory Consolidation
+
+We evaluate transition-level reliability by measuring three semantic failure modes: omission, corruption, and hallucination.
+Using generated trajectories from the 463-instance Mem- [MATH] validation set, we construct chunk-level transition records for each method and use GPT-4o-mini [11] with temperature 0 as an LLM judge.
+The judge follows the prompt and definitions in Appendix D; we report the percentage of transitions containing each major error type.
+
+As shown in Figure 2, omission is the dominant error type because memory construction is inherently compressive, while corruption and hallucination require actively writing incorrect or unsupported facts.
+Thus, comparisons should be made within each error type across methods.
+TrustMem achieves the lowest error rates across all categories, with 8.08% omission, 0.14% corruption, and 0.01% hallucination, demonstrating that transition-level verification reduces missing, distorted, and unsupported memory content.
+
+4.6 Training Reward Dynamics
+
+Figure 4: 
+Training reward dynamics of TrustMem and the variant without Transition-Ranked GRPO.
+
+Figure 4 compares TrustMem with a variant trained without Transition-Ranked GRPO.
+Both methods improve in the early stage, suggesting that task-level rewards can learn basic memory-editing behaviors.
+However, the variant without transition-ranked optimization later becomes unstable and shows a sharp drop in both task and total rewards, while TrustMem maintains higher rewards and converges to a stable plateau.
+This indicates that coarse scalar rewards alone are insufficient for reliable memory consolidation.
+By ranking candidate memory transitions with verifier scores, Transition-Ranked GRPO provides finer-grained supervision over memory state changes, encouraging trustworthy updates and stabilizing training.
+
+4.7 Case Study
+
+We present representative case studies in Figure 1, with additional examples provided in Table 5 in the Appendix. These examples cover transition-level failures: corruption, omission, and hallucination.
+
+Existing memory agents often produce unreliable memory updates. Mem1 reverses input semantics by storing a negation-reversed fact; AtomMem omits all key status-symbol facts; and MemAgent hallucinates user events from labeled command examples. Such errors are written into the memory and may affect future retrieval and reasoning.
+
+In contrast, TrustMem preserves key evidence and avoids unsupported memory edits, demonstrating more faithful transition-level memory consolidation.
+
+\rowcolortableHeaderBgInput Chunk
+
+Existing Method Memory
+
+TrustMem Memory
+
+Paris became the capital of French literature in the 17th century
+with Boileau, Corneille, La Fontaine, Moliere, and Racine.
+In the 18th century, Parisian literary
+life was dominated by Voltaire, Rousseau, Marivaux, and Beaumarchais.
+
+Mem1.
+Stored memory: Paris became a 17th-century literary center with
+Boileau, Corneille, La Fontaine, Moliere, Racine, and
+Voltaire.
+Corruption: wrong time period.
+
+Ours.
+Stored memory: Paris literary timeline:
+17C—Boileau, Corneille, La Fontaine, Moliere, Racine;
+18C—Voltaire, Rousseau, Marivaux,
+Beaumarchais.
+
+Constantine Monomachos restored the Church of the Holy Sepulchre between
+1042 and 1048. Nothing survived of the
+mosaics covering the walls and dome;
+Russian abbot Daniel later left a description.
+
+Mem1.
+Stored memory: Daniel described mosaics as lively and
+covering the walls and dome.
+Corruption: negation reversed.
+
+Ours.
+Stored memory: Holy Sepulchre: restored by Constantine Monomachos
+in 1042–1048; wall/dome mosaics did not
+survive; Daniel later described the decoration.
+
+Emperor is a Norwegian black metal band formed in 1991.
+It split in 2001; reunited in 2005–2007
+and 2013–2014.It was founded by Ihsahn and Samoth.
+
+Mem1.
+Stored memory: Emperor is a Norwegian black metal band formed in
+1991, founded by Ihsahn and Samoth.
+Omission: missing split/reunion timeline.
+
+Ours.
+Stored memory: Emperor: Norwegian black metal band, founded
+1991 by Ihsahn/Samoth; split 2001; reunions
+in 2005–2007 and 2013–2014.
+
+“Because the Night” reached #13 on Billboard,
+number 5 in the UK,
+and was ranked number 116on
+NME’s Top 150 Singles of All Time.
+
+MemAgent.
+Stored memory: “Because the Night” reached #13 on Billboard.
+Omission: missing UK peak and NME ranking.
+
+Ours.
+Stored memory: “Because the Night”: Billboard #13;
+UK number 5; NME all-time rank number 116.
+
+Only senators could wear Tyrian purple in
+ancient Rome; high-ranking Hawaiian chiefs could wear feather cloaks; before the
+republic, only the Chinese emperor could wear yellow.
+
+AtomMem.
+Stored memory:
+None.
+Omission: all status-symbol facts omitted.
+
+Ours.
+Stored memory: Clothing as status marker:
+Roman senators—Tyrian purple; Hawaiian
+chiefs—feather cloaks; Chinese emperor—yellow.
+
+Austrocylindropuntia is a cactus genus
+with 11 recognized species. It was once
+included in Opuntia; some species are native to South America.
+
+MemT.
+Stored memory: Austrocylindropuntia is a cactus genus …John W. Ingram was president of the Rock
+Island Railroad.
+Hallucination: unsupported railroad fact.
+
+Ours.
+Stored memory: Austrocylindropuntia:
+11-species cactus genus; formerly Opuntia;
+some South American.
+
+RAAF Base Edinburgh is a Royal Australian Air Force military airbase
+located 25 km north of Adelaide, South
+Australia.
+
+MemT.
+Stored memory: RAAF Base Edinburgh is a RAAF airbase …EPMD is a hip-hop group; “True North” is a
+TV episode; Bill Parcells coached the Giants.
+Hallucination: unrelated pop-culture facts.
+
+Ours.
+Stored memory: RAAF Base Edinburgh:
+RAAF military base near Edinburgh, South
+Australia, 25 km north of Adelaide.
+
+Input contains labeled command examples:
+“add new email to contacts”;
+“how is shell stock doing today”;
+“confirm that the alarm is set for tomorrow”.
+
+MemAgent.
+Stored memory:
+John is the user’s friend. At 2024-01-10, the
+user added a new email to contacts and checked Shell stock.
+Hallucination: examples treated as real events.
+
+Ours.
+Stored memory: Command-intent examples:
+add email: label 1; check Shell stock:
+label 4; confirm alarm: label 42.
+
+Czech verb aspect pairs differ by prefix or
+suffix; Czech has indicative, imperative, and conditional moods; Czech
+orthography is phonemic and uses hacek marks.
+
+AtomMem.
+Stored memory: Czech verb aspects and moods …the Digimon franchise, Digital World, and
+Digidestined/Tamers.
+Hallucination: unrelated franchise memory.
+
+Ours.
+Stored memory: Czech grammar:
+aspect via prefix/suffix; indicative/imperative/conditional moods;
+phonemic orthography with hacek marks.
+
+Table 5: Representative memory transition case studies across multiple baseline agents. Each row shows the input chunk, the memory stored by an existing method, and the memory stored by TrustMem. Blue highlights mark relevant evidence in the input; red highlights mark corrupted or unsupported memory spans, and bold red annotations identify the failure type.
+
+5 Conclusion
+
+In this paper, we introduce TrustMem, a framework for learning trustworthy memory consolidation in LLM agents with long-term memory. Instead of relying only on final task outcomes, TrustMem supervises intermediate memory transitions through a Memory Transition Verifier and optimizes memory-editing behavior with Transition-Ranked GRPO. Experiments on MemoryAgentBench, HaluMem, and the Mem- [MATH] show that TrustMem improves both memory utility and operation-level reliability. The results further demonstrate that transition-level verification helps reduce omission, corruption, and hallucination, highlighting its importance for reliable long-term memory systems.
+
+Limitations
+
+A key limitation of TrustMem is that our current experiments mainly focus on text-based long-term memory benchmarks.
+However, in real-world agent applications, user inputs and memory evidence are often multimodal, involving not only textual interactions but also images, videos, documents, and other contextual signals.
+We plan to extend our framework to multimodal memory agents and vision-language models, enabling more faithful and trustworthy consolidation of multimodal memory for open-ended personalized applications.
+
+References
+
+Behrouz et al. [2024]
+
+Ali Behrouz, Peilin Zhong, and Vahab Mirrokni.
+
+Titans: Learning to memorize at test time.
+
+arXiv preprint arXiv:2501.00663, 2024.
+
+Casanueva et al. [2020]
+
+Iñigo Casanueva, Tadas Temčinas, Daniela Gerz, Matthew Henderson, and Ivan Vulić.
+
+Efficient intent detection with dual sentence encoders.
+
+In Proceedings of the 2nd workshop on natural language processing for conversational AI, pages 38–45, 2020.
+
+Chen et al. [2025]
+
+Ding Chen, Simin Niu, Kehang Li, Peng Liu, Xiangping Zheng, Bo Tang, Xinchi Li, Feiyu Xiong, and Zhiyu Li.
+
+Halumem: Evaluating hallucinations in memory systems of agents.
+
+arXiv preprint arXiv:2511.03506, 2025.
+
+Chhikara et al. [2025]
+
+Prateek Chhikara, Dev Khant, Saket Aryan, Taranjeet Singh, and Deshraj Yadav.
+
+Mem0: Building production-ready ai agents with scalable long-term memory.
+
+arXiv preprint arXiv:2504.19413, 2025.
+
+Dernoncourt and Lee [2017]
+
+Franck Dernoncourt and Ji-Young Lee.
+
+Pubmed 200k rct: a dataset for sequential sentence classification in medical abstracts.
+
+In Proceedings of the Eighth International Joint Conference on Natural Language Processing (Volume 2: Short Papers), pages 308–313, 2017.
+
+Dong et al. [2025]
+
+Shen Dong, Shaochen Xu, Pengfei He, Yige Li, Jiliang Tang, Tianming Liu, Hui Liu, and Zhen Xiang.
+
+Memory injection attacks on llm agents via query-only interaction.
+
+arXiv preprint arXiv:2503.03704, 2025.
+
+Du et al. [2024]
+
+Yiming Du, Hongru Wang, Zhengyi Zhao, Bin Liang, Baojun Wang, Wanjun Zhong, Zezhong Wang, and Kam-Fai Wong.
+
+Perltqa: A personal long-term memory dataset for memory classification, retrieval, and fusion in question answering.
+
+In Proceedings of the 10th SIGHAN Workshop on Chinese Language Processing (SIGHAN-10), pages 152–164, 2024.
+
+Fang et al. [2025]
+
+Jizhan Fang, Xinle Deng, Haoming Xu, Ziyan Jiang, Yuqi Tang, Ziwen Xu, Shumin Deng, Yunzhi Yao, Mengru Wang, Shuofei Qiao, et al.
+
+Lightmem: Lightweight and efficient memory-augmented generation.
+
+arXiv preprint arXiv:2510.18866, 2025.
+
+Hu et al. [2025]
+
+Yuanzhe Hu, Yu Wang, and Julian McAuley.
+
+Evaluating memory in llm agents via incremental multi-turn interactions.
+
+arXiv preprint arXiv:2507.05257, 2025.
+
+Huo et al. [2026]
+
+Yupeng Huo, Yaxi Lu, Zhong Zhang, Haotian Chen, and Yankai Lin.
+
+Atommem: Learnable dynamic agentic memory with atomic memory operation.
+
+arXiv preprint arXiv:2601.08323, 2026.
+
+Hurst et al. [2024]
+
+Aaron Hurst, Adam Lerer, Adam P Goucher, Adam Perelman, Aditya Ramesh, Aidan Clark, AJ Ostrow, Akila Welihinda, Alan Hayes, Alec Radford, et al.
+
+Gpt-4o system card.
+
+arXiv preprint arXiv:2410.21276, 2024.
+
+Kang et al. [2025]
+
+Jiazheng Kang, Mingming Ji, Zhe Zhao, and Ting Bai.
+
+Memory os of ai agent.
+
+In Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing, pages 25972–25981, 2025.
+
+Kryściński et al. [2022]
+
+Wojciech Kryściński, Nazneen Rajani, Divyansh Agarwal, Caiming Xiong, and Dragomir Radev.
+
+Booksum: A collection of datasets for long-form narrative summarization.
+
+In Findings of the association for computational linguistics: EMNLP 2022, pages 6536–6558, 2022.
+
+Lam et al. [2026]
+
+Chingkwun Lam, Jiaxin Li, Lingfei Zhang, and Kuo Zhao.
+
+Governing evolving memory in llm agents: Risks, mechanisms, and the stability and safety governed memory (ssgm) framework.
+
+arXiv preprint arXiv:2603.11768, 2026.
+
+Larson et al. [2019]
+
+Stefan Larson, Anish Mahendran, Joseph J Peper, Christopher Clarke, Andrew Lee, Parker Hill, Jonathan K Kummerfeld, Kevin Leach, Michael A Laurenzano, Lingjia Tang, et al.
+
+An evaluation dataset for intent classification and out-of-scope prediction.
+
+In Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing and the 9th International Joint Conference on Natural Language Processing (EMNLP-IJCNLP), pages 1311–1316, 2019.
+
+Li and Roth [2006]
+
+Xin Li and Dan Roth.
+
+Learning question classifiers: the role of semantic information.
+
+Natural Language Engineering, 12(3):229–249, 2006.
+
+Lu et al. [2023]
+
+Junru Lu, Siyu An, Mingbao Lin, Gabriele Pergola, Yulan He, Di Yin, Xing Sun, and Yunsheng Wu.
+
+Memochat: Tuning llms to use memos for consistent long-range open-domain conversation.
+
+arXiv preprint arXiv:2308.08239, 2023.
+
+Luo et al. [2025]
+
+Xufang Luo, Yuge Zhang, Zhiyuan He, Zilong Wang, Siyun Zhao, Dongsheng Li, Luna K Qiu, and Yuqing Yang.
+
+Agent lightning: Train any ai agents with reinforcement learning.
+
+arXiv preprint arXiv:2508.03680, 2025.
+
+Maharana et al. [2024]
+
+Adyasha Maharana, Dong-Ho Lee, Sergey Tulyakov, Mohit Bansal, Francesco Barbieri, and Yuwei Fang.
+
+Evaluating very long-term conversational memory of llm agents.
+
+In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 13851–13870, 2024.
+
+Packer et al. [2023]
+
+Charles Packer, Vivian Fang, Shishir_G Patil, Kevin Lin, Sarah Wooders, and Joseph_E Gonzalez.
+
+Memgpt: towards llms as operating systems.
+
+2023.
+
+Park et al. [2023]
+
+Joon Sung Park, Joseph O’Brien, Carrie Jun Cai, Meredith Ringel Morris, Percy Liang, and Michael S Bernstein.
+
+Generative agents: Interactive simulacra of human behavior.
+
+In Proceedings of the 36th annual acm symposium on user interface software and technology, pages 1–22, 2023.
+
+Rajpurkar et al. [2016]
+
+Pranav Rajpurkar, Jian Zhang, Konstantin Lopyrev, and Percy Liang.
+
+Squad: 100,000+ questions for machine comprehension of text.
+
+In Proceedings of the 2016 conference on empirical methods in natural language processing, pages 2383–2392, 2016.
+
+Rasmussen et al. [2025]
+
+Preston Rasmussen, Pavlo Paliychuk, Travis Beauvais, Jack Ryan, and Daniel Chalef.
+
+Zep: a temporal knowledge graph architecture for agent memory.
+
+arXiv preprint arXiv:2501.13956, 2025.
+
+Shah et al. [2025]
+
+Dhravya Shah, Mahesh Sanikommu, Yash, et al.
+
+Supermemory.
+
+https://supermemory.ai/, 2025.
+
+Accessed: 2025-11-05.
+
+Shao et al. [2024]
+
+Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, YK Li, Y Wu, et al.
+
+Deepseekmath: Pushing the limits of mathematical reasoning in open language models.
+
+arXiv preprint arXiv:2402.03300, 2024.
+
+Shi et al. [2025]
+
+Yaorui Shi, Yuxin Chen, Siyuan Wang, Sihang Li, Hengxing Cai, Qi Gu, Xiang Wang, and An Zhang.
+
+Look back to reason forward: Revisitable memory for long-context llm agents.
+
+arXiv preprint arXiv:2509.23040, 2025.
+
+Shinn et al. [2023]
+
+Noah Shinn, Federico Cassano, Ashwin Gopinath, Karthik Narasimhan, and Shunyu Yao.
+
+Reflexion: Language agents with verbal reinforcement learning.
+
+Advances in neural information processing systems, 36:8634–8652, 2023.
+
+Tian et al. [2026]
+
+Hanling Tian, Zeyang Sha, Jingying Wang, Yuhang Liu, Zhehao Huang, and Xiaolin Huang.
+
+Injecmem: Memory injection attack on llm agent memory systems.
+
+2026.
+
+Wang and Chen [2025]
+
+Yu Wang and Xi Chen.
+
+Mirix: Multi-agent memory system for llm-based agents.
+
+arXiv preprint arXiv:2507.07957, 2025.
+
+Wang et al. [2024]
+
+Yu Wang, Yifan Gao, Xiusi Chen, Haoming Jiang, Shiyang Li, Jingfeng Yang, Qingyu Yin, Zheng Li, Xian Li, Bing Yin, et al.
+
+Memoryllm: Towards self-updatable large language models.
+
+arXiv preprint arXiv:2402.04624, 2024.
+
+Wang et al. [2025a]
+
+Yu Wang, Dmitry Krotov, Yuanzhe Hu, Yifan Gao, Wangchunshu Zhou, Julian McAuley, Dan Gutfreund, Rogerio Feris, and Zexue He.
+
+M+: Extending memoryllm with scalable long-term memory.
+
+arXiv preprint arXiv:2502.00592, 2025a.
+
+Wang et al. [2025b]
+
+Yu Wang, Ryuichi Takanobu, Zhiqi Liang, Yuzhen Mao, Yuanzhe Hu, Julian McAuley, and Xiaojian Wu.
+
+Mem- [MATH] [MATH] alpha [MATH] : Learning memory construction via reinforcement learning.
+
+arXiv preprint arXiv:2509.25911, 2025b.
+
+Wu et al. [2024]
+
+Di Wu, Hongwei Wang, Wenhao Yu, Yuwei Zhang, Kai-Wei Chang, and Dong Yu.
+
+Longmemeval: Benchmarking chat assistants on long-term interactive memory.
+
+arXiv preprint arXiv:2410.10813, 2024.
+
+Xu et al. [2025]
+
+Wujiang Xu, Zujie Liang, Kai Mei, Hang Gao, Juntao Tan, and Yongfeng Zhang.
+
+A-mem: Agentic memory for llm agents.
+
+arXiv preprint arXiv:2502.12110, 2025.
+
+Yan et al. [2025]
+
+Sikuan Yan, Xiufeng Yang, Zuchao Huang, Ercong Nie, Zifeng Ding, Zonggen Li, Xiaowen Ma, Jinhe Bi, Kristian Kersting, Jeff Z Pan, et al.
+
+Memory-r1: Enhancing large language model agents to manage and utilize memories via reinforcement learning.
+
+arXiv preprint arXiv:2508.19828, 2025.
+
+Yang et al. [2025]
+
+An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, et al.
+
+Qwen3 technical report.
+
+arXiv preprint arXiv:2505.09388, 2025.
+
+Yang et al. [2018]
+
+Zhilin Yang, Peng Qi, Saizheng Zhang, Yoshua Bengio, William Cohen, Ruslan Salakhutdinov, and Christopher D Manning.
+
+Hotpotqa: A dataset for diverse, explainable multi-hop question answering.
+
+In Proceedings of the 2018 conference on empirical methods in natural language processing, pages 2369–2380, 2018.
+
+Ye et al. [2025]
+
+Gustavo Ye, Jinjia, Gener, et al.
+
+Memobase.
+
+https://github.com/memodb-io/memobase, 2025.
+
+Accessed: 2025-11-05.
+
+Yu et al. [2025]
+
+Hongli Yu, Tinghong Chen, Jiangtao Feng, Jiangjie Chen, Weinan Dai, Qiying Yu, Ya-Qin Zhang, Wei-Ying Ma, Jingjing Liu, Mingxuan Wang, et al.
+
+Memagent: Reshaping long-context llm with multi-conv rl-based memory agent.
+
+arXiv preprint arXiv:2507.02259, 2025.
+
+Yu et al. [2026]
+
+Yi Yu, Liuyi Yao, Yuexiang Xie, Qingquan Tan, Jiaqi Feng, Yaliang Li, and Libing Wu.
+
+Agentic memory: Learning unified long-term and short-term memory management for large language model agents.
+
+arXiv preprint arXiv:2601.01885, 2026.
+
+Yue et al. [2026]
+
+Yanwei Yue, Boci Peng, Xuanbo Fan, Jiaxin Guo, Qiankun Li, and Yan Zhang.
+
+Mem-t: Densifying rewards for long-horizon memory agents.
+
+arXiv preprint arXiv:2601.23014, 2026.
+
+Zhang et al. [2025]
+
+Guibin Zhang, Muxin Fu, and Shuicheng Yan.
+
+Memgen: Weaving generative latent memory for self-evolving agents.
+
+arXiv preprint arXiv:2509.24704, 2025.
+
+Zhang et al. [2026]
+
+Guilin Zhang, Wei Jiang, Xiejiashan Wang, Aisha Behr, Kai Zhao, Jeffrey Friedman, Xu Chu, and Amine Anoun.
+
+Adaptive memory admission control for llm agents.
+
+arXiv preprint arXiv:2603.04549, 2026.
+
+Zhang et al. [2024]
+
+Xinrong Zhang, Yingfa Chen, Shengding Hu, Zihang Xu, Junhao Chen, Moo Hao, Xu Han, Zhen Thai, Shuo Wang, Zhiyuan Liu, et al.
+
+Infinitebench: Extending long context evaluation beyond 100k tokens.
+
+In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pages 15262–15277, 2024.
+
+Zhong et al. [2024]
+
+Wanjun Zhong, Lianghong Guo, Qiqi Gao, He Ye, and Yanlin Wang.
+
+Memorybank: Enhancing large language models with long-term memory.
+
+In Proceedings of the AAAI conference on artificial intelligence, pages 19724–19731, 2024.
+
+Zhou et al. [2025]
+
+Zijian Zhou, Ao Qu, Zhaoxuan Wu, Sunghwan Kim, Alok Prakash, Daniela Rus, Jinhua Zhao, Bryan Kian Hsiang Low, and Paul Pu Liang.
+
+Mem1: Learning to synergize memory and reasoning for efficient long-horizon agents.
+
+arXiv preprint arXiv:2506.15841, 2025.
+
+Zhu et al. [2026]
+
+Qiming Zhu, Shunian Chen, Rui Yu, Zhehao Wu, and Benyou Wang.
+
+From lossy to verified: A provenance-aware tiered memory for agents.
+
+arXiv preprint arXiv:2602.17913, 2026.
+
+Appendix A Experiment Settings
+
+Method
+Category
+Model/System Used
+Backbone/Base Model
+
+Long-Context
+Standard paradigm
+Qwen3-32B with 32K context window
+Qwen3-32B
+
+RAG-Top2
+Standard paradigm
+BM25 top-2 retrieval + Qwen3-32B
+Qwen3-32B answer model
+
+MemAgent [39]
+
+RL-based / agentic memory method
+RL-MemAgent-7B
+Qwen2.5-7B
+
+MEM1 [46]
+
+RL-based / agentic memory method
+MEM1-7B
+Qwen2.5-7B
+
+Mem- [MATH] [32]
+
+RL-based memory method
+
+Mem- [MATH] 
+
+Qwen3-4B
+
+Mem-T [41]
+
+RL-based / agentic memory method
+Mem-T-4B
+Qwen3-4B
+
+AtomMem [10]
+
+RL-based / agentic memory method
+AtomMem-8B
+Qwen3-8B
+
+Mem0 [4]
+
+System-level memory framework
+Mem0
+Not fixed
+
+Memobase [38]
+
+System-level memory framework
+Memobase
+Not fixed
+
+Supermemory [24]
+
+System-level memory framework
+Supermemory
+Not fixed
+
+Zep [23]
+
+System-level memory framework
+Zep
+Not fixed
+
+Table 6: Summary of baseline models and systems used in our experiments. For model-based baselines, we report the evaluated checkpoint or model and its backbone when applicable. For system-level memory frameworks, the backbone is marked as “Not fixed” because these methods function as memory infrastructures and can be paired with different LLMs during extraction, updating, retrieval, or answer generation.
+
+The exact subset of baselines evaluated on each benchmark depends on the applicability of the corresponding method and the availability of comparable results. The reported baselines for each benchmark are shown in the corresponding result tables 6.
+
+Appendix B Experiments on Memory Utility
+
+Table 1 reports results on the validation set. TrustMem achieves the best average score of 66.3, outperforming Mem- [MATH] by 4.4 points. The improvement is especially clear on Test-Time Learning, where TrustMem obtains 72.4 on TREC-C, 73.8 on NLU, and 64.0 on PubMed. TrustMem also improves BookSum from 18.7 to 22.6, showing stronger long-range memory utility. These results suggest that transition-level verification helps the agent preserve useful task-specific and long-range information during memory construction.
+
+Table 2 evaluates out-of-distribution generalization on MemoryAgentBench. TrustMem achieves the best average score of 65.7, improving over Mem- [MATH] by 6.5 points and outperforming Long-Context and RAG-Top2 by 19.6 and 15.5 points, respectively. TrustMem performs strongly on both retrieval and test-time learning tasks, achieving 83.0 on Single-Doc, 85.0 on TREC-C, and 84.0 on Banking77. These results show that TrustMem learns a more robust memory update policy than simply retaining long context or retrieving top-ranked chunks. Overall, reliable local memory transitions improve both validation performance and out-of-distribution memory utility.
+
+Appendix C Experiments on HaluMem
+
+Table 3 evaluates operation-level memory reliability on HaluMem-Medium, covering memory extraction, memory updating, and memory-based question answering. This benchmark directly matches the goal of TrustMem: improving the safety and reliability of each local memory transition.
+
+For memory extraction, TrustMem achieves the best recall, weighted recall, and F1, with scores of 56.73, 67.45, and 69.45, respectively. Compared with the strongest prior F1 score from Mem0, TrustMem improves extraction F1 by 12.14 points. Although AtomMem obtains the highest extraction accuracy, its recall and F1 are extremely low, indicating that it misses most useful memories. In contrast, TrustMem achieves a better balance between coverage and correctness, showing that the verifier helps reduce both omission and unsupported memory writing.
+
+For memory updating, TrustMem achieves the lowest omission rate of 48.64 and the second-best correctness score of 46.84. This supports the role of the Memory Transition Verifier, which checks whether each update preserves valid prior memory, incorporates new evidence, and avoids unsupported changes. As a result, TrustMem learns safer memory-editing behavior and reduces missed updates.
+
+For memory-based question answering, TrustMem obtains the lowest omission rate of 12.46 and the second-lowest hallucination rate of 6.07 while maintaining competitive correctness. Compared with methods that either hallucinate more, such as Mem-T, or omit too much information, such as AtomMem, TrustMem provides a stronger trade-off across correctness, hallucination, and omission. Overall, these results show that transition-level verification and preference-guided optimization improve not only final task performance but also the intermediate memory operations required for trustworthy long-term memory.
+
+Figure 5: Simplified prompt template for transition verification.
+
+Appendix D Memory Transition Error Judge Prompt
+
+We use GPT-4o-mini [11] with temperature set to 0 as the LLM judge for transition-level memory reliability evaluation.
+The judge receives the prior memory, the current input chunk, the memory operations produced after reading the chunk, and the updated memory, and returns a structured JSON judgment over omission, corruption, and hallucination.
+
+Evaluation Protocol.
+
+For the reliability analysis in Section 4.5, we construct one record for each chunk-level memory transition.
+Each record contains the prior memory, the current input chunk, the generated memory-editing operations, and the updated memory.
+A transition may contain multiple error types, so we compute each error rate independently as the percentage of transitions marked with that error type.
+We count only errors marked as major; transitions with minor or none severity are not counted as failures.
+
+ Experimental support, please
+ view the build logs
+ for errors. Generated by
+
+ L
+ A
+ T
+ E
+
+ xml
+
+ .
+
+ Instructions for reporting errors
+
+ We are continuing to improve HTML versions of papers, and your feedback helps enhance accessibility and mobile
+ support. To report errors in the HTML that will help us improve conversion and rendering, choose any of the
+ methods listed below:
+
+ Click the "Report Issue" ( ) button, located in the page header.
+
+ Tip: You can select the relevant text first, to include it in your report.
+
+ Our team has already identified the following issues. We appreciate your time reviewing and reporting rendering errors we
+ may not have found yet. Your efforts will help us improve the HTML versions for all readers, because disability
+ should not be a barrier to accessing research. Thank you for your continued support in championing open access for
+ all.
+
+ Have a free development cycle? Help support accessibility at arXiv! Our collaborators at LaTeXML maintain a list of packages that need conversion, and welcome developer contributions.
+
+ We gratefully acknowledge support from
+ our major funders,
+ member institutions, ,
+ and all contributors.
+
+ About
+ ·
+ Help
+ ·
+ Contact
+ ·
+ Subscribe
+ ·
+ Copyright
+ ·
+ Privacy
+ ·
+ Accessibility
+ ·
+ Operational Status (opens in new tab)
+
+ Major funding support from
+

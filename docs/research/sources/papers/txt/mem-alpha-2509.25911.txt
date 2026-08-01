@@ -1,0 +1,2379 @@
+
+
+Mem-𝛼: Learning Memory Construction via Reinforcement Learning
+
+1 Introduction
+
+2 Related Work
+
+Latent-Space Memory
+
+LLM Agents with External Memory
+
+Learning Memory Construction with Reinforcement Learning
+
+3 Method
+
+3.1 Reinforcement Learning Framework
+
+3.1.1 Task Setup
+
+3.1.2 Reward Functions
+
+Correctness Reward ( [MATH] )
+
+Tool Call Format Reward ( [MATH] )
+
+Compression Reward ( [MATH] )
+
+Memory Content Reward ( [MATH] )
+
+3.1.3 Memory Comprehensiveness Evaluation via RAG
+
+3.2 Policy Optimization
+
+3.3 Memory Instantiation
+
+3.4 Training Dataset Preparation
+
+4 Experiments
+
+4.1 Experimental Setup
+
+Evaluation Datasets and Metrics
+
+Baselines
+
+Implementation Details
+
+4.2 Overall Performance Comparison
+
+4.3 Performance Boost from Reinforcement Learning
+
+4.4 Ablation Studies
+
+4.5 Case Studies
+
+5 Conclusion, Limitation and Future Work
+
+A Datasets Details
+
+A.1 Training Dataset
+
+Accurate Retrieval (AR)
+
+Test-Time Learning (TTL)
+
+Long Range Understanding (LRU)
+
+A.2 Evaluation Dataset
+
+Accurate Retrieval (AR)
+
+Test-Time Learning (TTL)
+
+Long Range Understanding (LRU)
+
+B Formal Definitions of Reward Components
+
+Correctness Reward ( [MATH] )
+
+Tool Call Format Reward ( [MATH] )
+
+Compression Reward ( [MATH] )
+
+Memory Content Reward ( [MATH] )
+
+C Experimental Details
+
+C.1 Justification of Backbone Model Selection
+
+C.2 Baseline Introduction and Implementation Details
+
+C.3 Prompts Used in Training
+
+Instruction to Memorize the Chunk
+
+Prompt to Measure Memory Content
+
+Prompt to Answer the Questions
+
+C.4 Additional Ablation Study
+
+Mem- [MATH] : Learning Memory Construction via Reinforcement Learning
+
+Yu Wang1,2,   Ryuichi Takanobu1,
+  Zhiqi Liang2,
+  Yuzhen Mao3,
+  Yuanzhe Hu2,
+  Julian McAuley2,
+  Xiaojian Wu1,
+
+1Anuttacon, 2University of California San Diego, 3 Stanford University
+    yuw164@ucsd.edu, truthless11@gmail.com
+
+ Datasets 
+ Models  Source Code
+
+Work done during the internship at Anuttacon.
+
+Abstract
+
+Large language model (LLM) agents are constrained by limited context windows, necessitating external memory systems for long-term information understanding. Current memory-augmented agents typically depend on pre-defined instructions and tools for memory updates. However, language models may lack the ability to determine which information to store, how to structure it, and when to update it—especially as memory systems become more complex. This results in suboptimal memory construction and information loss. To this end, we propose Mem- [MATH] , a reinforcement learning framework that trains agents to effectively manage complex memory systems through interaction and feedback. We also construct a specialized training dataset spanning diverse multi-turn interaction patterns paired with comprehensive evaluation questions designed to teach effective memory management. During training, agents process sequential information chunks, learn to extract, store, and update the memory system. The reward signal derives from downstream question-answering accuracy over the full interaction history, directly optimizing for memory construction. To illustrate the effectiveness of our training framework, we design a memory architecture comprising core, episodic, and semantic components, equipped with multiple tools for memory operations. Empirical evaluation demonstrates that Mem- [MATH] achieves significant improvements over existing memory-augmented agent baselines. Despite being trained exclusively on instances with a maximum length of 30k tokens, our agents exhibit remarkable generalization to sequences exceeding 400k tokens—over 13× the training length, highlighting the robustness of Mem- [MATH] .
+
+1 Introduction
+
+Large language model (LLM) agents are fundamentally constrained by limited context windows when processing long information streams, leading to the development of memory-augmented agents (Wang et al., 2025/02; Fang et al., 2025). These agents are equipped with persistent, updatable memory systems that actively stores long-term information and manage the context seen by the language model (Packer et al., 2023; Lin et al., 2025; Cai et al., 2025).
+Most existing memory systems rely entirely on pre-defined instructions and fixed tool sets without any training to optimize memory construction, such as Mem0 (Chhikara et al., 2025), MemGPT (Packer et al., 2023), and MIRIX (Wang & Chen, 2025). These memory systems provide agents with various memory update tools—ranging from simple fact extraction to complex multi-component memory architectures—but expect models to utilize these tools effectively out-of-the-box. However, models lack the inherent ability to determine what to store, how to structure, and when to update different memory components. Although complicated system prompts can partially mitigate this issue, manual adjustment of system prompts is challenging to address all scenarios. For small language models with weak instruction-following abilities, complicated instructions may even confuse the model (Wen et al., 2024; Wang et al., 2025b).
+
+To address this challenge, we turn to reinforcement learning (RL) as a principled approach for training agents to learn effective memory management strategies. Unlike supervised fine-tuning, which requires ground-truth memory construction traces, RL enables agents to discover optimal memory strategies through trial and error. This approach is necessary across all model scales: even state-of-the-art models like GPT-4o struggle with proper tool selection for memory updates (Wang & Chen, 2025), while smaller models become completely overwhelmed by complex tool sets (Wang & Chen, 2025; Wang et al., 2025b). Since we cannot obtain reliable supervision signals from any existing model, we instead directly optimize for downstream task performance—using question-answering accuracy and memory quality metrics as reward signals. Through RL, language models learn to navigate complex memory systems effectively, discovering strategies that optimize memory construction without relying on potentially suboptimal predefined behaviors. Existing works including MEM1 (Zhou et al., 2025), MemAgent (Yu et al., 2025) and Memory-R1 (Yan et al., 2025) are the first works exploring this direction. However, they employ relatively simple memory structures (e.g., memory rewriting or maintaining a list of facts) that are insufficient for handling complex data such as long narratives, procedural rules, evolving knowledge, or even multi-modal information.
+
+Figure 1: Reinforcement learning teaches agents to select appropriate memory tools and types. Before training (left), agents struggle with tool selection when given new information. After RL training (right), agents learn effective memory management policies.
+
+To this end, we propose Mem- [MATH] , a reinforcement learning framework that trains agents to effectively manage complex memory systems through interaction and feedback. Unlike existing approaches that either provide sophisticated tools without teaching models how to use them, or train models on simplistic memory operations, Mem- [MATH] enables agents to learn memory construction strategies for complex, multi-component memory architectures (as shown in Figure 1). Our approach addresses three key challenges in memory-augmented agent training. First, we formulate the process of memory construction as a sequential decision-making problem where agents process information chunks, decide which memory operations to perform, and receive multiple rewards based on downstream question-answering accuracy over the full interaction history. This direct optimization for end-task performance naturally teaches agents to save the most important information and organize the existing memory effectively. Second, we construct a specialized training dataset spanning diverse multi-turn interaction patterns, including conversations, document sharing, pattern recognition, and storytelling, paired with comprehensive evaluation questions that require comprehensive memory to answer correctly. This design exposes agents to various scenarios of memory management during training. Lastly, we adopt a comprehensive memory architecture comprising core, episodic, and semantic components, each equipped with specialized tools for memory operations, providing sufficient expressiveness to handle diverse information types while remaining learnable through reinforcement.
+
+Empirical evaluation demonstrates that Mem- [MATH] achieves significant improvements over existing memory-augmented agent baselines across diverse benchmarks. Most remarkably, despite being trained exclusively on instances with a maximum length of 30k tokens, our agents exhibit robust generalization to sequences exceeding 400k tokens, over 13× the training length. This exceptional length generalization suggests that reinforcement learning enables agents to learn fundamental memory management principles rather than merely memorizing specific patterns, highlighting the potential of learning-based approaches for long-context retention.
+
+2 Related Work
+
+Latent-Space Memory
+
+These methods encode new information directly into a model’s internal components—such as hidden states (Wang et al., 2024; 2025a; Bulatov et al., 2022; He et al., 2024), key-value caches (Qian et al., 2025; Li et al., 2024; Zhang et al., 2023b; Zhong et al., 2023), soft prompts (Burtsev & Sapunov, 2020; Ge et al., 2023), model parameters (Behrouz et al., 2024; Berges et al., 2024; Wang et al., ; Wei et al., 2025), or learnable external matrices (Das et al., 2024). The main advantage is efficient compression: for instance, SELF-PARAM (Wang et al., ) can memorize hundreds of contexts without external storage. However, these approaches face two key limitations. First, their memory capacity remains bounded—M+ (Wang et al., 2025a) achieves retention of approximately 160k tokens, which falls short of state-of-the-art memory agents like MIRIX (Wang & Chen, 2025). Second, they require direct access to model internals, making them incompatible with proprietary systems (e.g., GPT-4/5). Since open-weight alternatives typically underperform leading proprietary models, these constraints limit practical deployment.
+
+LLM Agents with External Memory
+
+An alternative approach equips language models with external memory systems built on databases or vector stores (Zhang et al., 2025a), as demonstrated by MemGAS (Xu et al., 2025a), SCM (Wang et al., 2023), A-MEM (Xu et al., 2025b), MemTree (Rezazadeh et al., 2024) MemGPT (Packer et al., 2023), Mem0 (Chhikara et al., 2025), Zep (Rasmussen et al., 2025), Nemori (Nan et al., 2025), EgoMem (Yao et al., 2025), MIRIX (Wang & Chen, 2025), Memobase111https://github.com/memodb-io/memobase, MemoChat (Lu et al., 2023) and similar frameworks. These architectures offer two key advantages: they work seamlessly with proprietary frontier models (e.g., GPT-4/5, Claude family) and can efficiently organize, retrieve, and update large amounts of information through well-designed schemas and controllers. However, their effectiveness depends heavily on the base model’s ability to follow instructions and use tools (function-calling)—capabilities that smaller, more cost-effective models often lack. Meanwhile, when the system becomes complex, even proprietary models may not update the memory systems well (Wang & Chen, 2025). This limitation motivates approaches that explicitly train models to manage memory rather than relying purely on prompting.
+
+Learning Memory Construction with Reinforcement Learning
+
+Recent work explores training language models to construct memory using reinforcement learning, though results remain preliminary. Early efforts such as MEM1 (Zhou et al., 2025) and MemAgent (Yu et al., 2025) train models to update simple, text-only memories. Memory-R1 (Yan et al., 2025), Learn-to-Memorize (Zhang et al., 2025b) and REMEMBER (Zhang et al., 2023a) introduce a slightly richer memory representation and a simplified tool-calling interface, but focuses on LoCoMo (Maharana et al., 2024) settings with relatively short maximum context (less than [MATH] 26k tokens) and train on subsets of the same distribution, which makes the task comparatively easier. In this paper, we develop an RL framework that trains a model to operate a substantially more capable memory system and demonstrate significant improvements across multiple dimensions of memory quality and efficiency.
+
+3 Method
+
+3.1 Reinforcement Learning Framework
+
+We formulate memory construction as a reinforcement learning problem where the agent learns to optimize memory building policies. The quality of the constructed memory is evaluated through a separate question-answering process using retrieval-augmented generation (RAG). The complete training framework is shown in Figure 2.
+
+Figure 2: Training Framework of Mem- [MATH] . 
+
+3.1.1 Task Setup
+
+We consider a memory construction task where an agent processes a sequence of conversations [MATH] between a user and an assistant. These conversations span diverse formats, including casual discussions, storytelling, book sharing, and classification examples.
+At step [MATH] the agent observes [MATH] and the current memory [MATH] (here [MATH] is the memory and [MATH] is initialized as an empty memory) and may issue a sequence of write operations before advancing to the next chunk. Formally, the action at step [MATH] is
+
+ [MATH] 
+
+where each [MATH] is a structured function call with arguments (e.g., record id, memory type, string content), and [MATH] is the number of operations in this action. Then we apply these function calls on [MATH] :
+
+ [MATH] 
+
+After processing all the chunks in [MATH] , we obtain the final memory [MATH] . Then we can calculate the rewards according to the final memory [MATH] and all the actions [MATH] across the whole list of chunks.
+
+3.1.2 Reward Functions
+
+Correctness Reward ( [MATH] )
+
+The correctness reward evaluates the comprehensiveness of the final memory [MATH] through question-answering performance. Given questions [MATH] and predicted answers [MATH] obtained via the RAG pipeline, we compute [MATH] using dataset-specific metrics (Table 6). For example, on SQuAD: [MATH] where [MATH] is the number of correctly answered questions.
+
+Tool Call Format Reward ( [MATH] )
+
+To ensure reliable function execution, we reward tool calls with the correct format. For each function call [MATH] , let [MATH] be a binary indicator where [MATH] if [MATH] has the correct format and executes successfully and [MATH] otherwise. The reward is: [MATH] , measuring the percentage of successfully executed function calls.
+
+Compression Reward ( [MATH] )
+
+To encourage efficient memory usage, we define: [MATH] , where [MATH] is the total memory length and [MATH] is the total length of the chunks. This promotes compact memory representations while preserving essential information.
+
+Memory Content Reward ( [MATH] )
+
+To ensure memory operations satisfy their semantic definitions, we use Qwen3-32b to validate memory updates (prompts in Appendix C.3). For each operation [MATH] , let [MATH] be a binary indicator where [MATH] if [MATH] is semantically valid and [MATH] otherwise. The reward is: [MATH] , measuring the fraction of valid operations.
+
+Formal mathematical definitions of all reward components are provided in Appendix B.
+
+Then we combine four rewards together to obtain the final reward [MATH] for action [MATH] :
+
+ [MATH] 
+
+(1)
+
+where [MATH] are hyperparameters requiring tuning. We fix the weight of [MATH] at 1 (rather than varying it) because the function call success rate is critical for memory updates. The four reward components operate at different granularities: [MATH] (correctness) and [MATH] (compression) are computed globally based on the final memory state [MATH] and thus share the same value across all actions in the sequence. In contrast, [MATH] (tool call success) and [MATH] (memory content quality) are evaluated at the action level, with each action [MATH] receiving its own specific reward values based on the success rate of its function calls and the quality of its memory updates.
+
+3.1.3 Memory Comprehensiveness Evaluation via RAG
+
+As outlined in Section 3.1.2, the comprehensiveness of the learned memory is evaluated by a decoupled retrieval-augmented generation (RAG) pipeline, where only the write policy is learnable and both retrieval and generation components remain fixed. After processing all context chunks, the agent outputs the terminal memory state [MATH] . For each question [MATH] , evaluation proceeds in three stages:
+(1) Retrieval: For both semantic memory and episodic memory in [MATH] , we use a fixed retriever [MATH] that selects the top- [MATH] memory entries from the corresponding memory pool using the BM25 retriever.
+(2) Generation: A frozen generator [MATH] receives [MATH] and the retrieved support set and produces an answer [MATH] . The system prompt is presented in Appendix C.3.
+(3) Scoring: We compare [MATH] with the reference [MATH] to obtain correctness indicators, which induce the correctness
+reward [MATH] described in Section 3.1.2.
+
+3.2 Policy Optimization
+
+We employ Group Relative Policy Optimization (GRPO) (Shao et al., 2024). In section 3.1.2, we eventually obtain the rewards for each action [MATH] at step [MATH] . The advantage is:
+
+ [MATH] 
+
+where [MATH] is the obtained final reward for [MATH] which consists of four different rewards. Then [MATH] and [MATH] are the mean and standard deviation of rewards within the sampled action group, and [MATH] is a small constant for numerical stability. The objective of Mem- [MATH] is to maximize the expected reward over all actions in the sequence:
+
+ [MATH] 
+ [MATH] 
+
+ [MATH] 
+
+(2)
+
+where [MATH] is a list of context chunks, and [MATH] is the total set of possible lists. [MATH] is the initial empty memory, and [MATH] is the obtained actions from the chunks [MATH] and the initial memory [MATH] . We discard the KL term in GRPO to encourage policy exploration.
+
+3.3 Memory Instantiation
+
+We design a memory architecture comprising three complementary components, each serving distinct functional roles in long-term information management. (1) Core Memory: Following MemGPT (Packer et al., 2023), we maintain a persistent text summary (maximum 512 tokens) that remains continuously accessible in the agent’s context. This component serves as a condensed representation of the most critical information, providing immediate access to essential context without retrieval overhead. (2) Semantic Memory: This component stores factual knowledge and declarative information about the world and user (Li & Li, 2024). We implement semantic memory as a structured collection of discrete factual statements, where each entry represents an atomic piece of knowledge that can be independently retrieved and updated. (3) Episodic Memory: This component captures temporally-grounded events and experiences (Li & Li, 2024; Liu et al., 2025; Anokhin et al., 2024; Pink et al., 2025; Fountas et al., 2024). We implement episodic memory as a chronologically-organized collection of timestamped events, enabling the agent to maintain temporal context and reconstruct interaction histories.
+Figure 3 illustrates the complete memory architecture and the interactions between these components.
+Each memory component is equipped with specialized operations tailored to its functional requirements. Semantic and episodic memories support fine-grained manipulation through three operations: memory_insert (adding new entries), memory_update (modifying existing entries), and memory_delete (removing entries). In contrast, core memory supports only memory_update, requiring complete rewriting to maintain coherence in its condensed representation. This design reflects the different update patterns: while semantic and episodic memories benefit from incremental modifications, core memory requires holistic revision to preserve its summarization quality.
+Importantly, our memory architecture is modular and decoupled from the reinforcement learning framework. Researchers can seamlessly substitute alternative memory designs—whether simpler or more complex—without modifying the training methodology, enabling flexible adaptation to diverse application requirements.
+
+Figure 3: Memory Architecture: Core Memory stores a single paragraph (max 512 tokens), while Semantic Memory and Episodic Memory maintain expandable lists of sentences for facts and timestamped events, respectively.
+
+3.4 Training Dataset Preparation
+
+MemoryAgentBench (Hu et al., 2025) evaluates memory agents across four dimensions: (1) Accurate Retrieval: extracting correct information from historical data to address queries, encompassing both single-hop and multi-hop retrieval scenarios; (2) Test-Time Learning: acquiring new behaviors or capabilities during deployment; (3) Long-Range Understanding: integrating information distributed across multiple segments to answer queries requiring comprehensive sequence analysis; and (4) Conflict Resolution: revising, overwriting, or removing previously stored information when encountering contradictory evidence.
+Our work focuses on the first three dimensions, excluding Conflict Resolution due to the lack of realistic evaluation benchmarks—existing datasets for this dimension remain predominantly synthetic and do not adequately capture real-world complexity. We compile a training dataset comprising 4,139 instances, with detailed statistics presented in Table 6. Each instance consists of multiple context chunks, each of which triggers a distinct write action, resulting in long action sequences per instance. Given the computational overhead of reinforcement learning and the significant class imbalance in the full dataset, we employ a stratified sampling approach to create a balanced subset of 562 instances. The resulting distribution is detailed in Table 7, with comprehensive dataset preprocessing procedures described in Appendix A.1.
+
+4 Experiments
+
+4.1 Experimental Setup
+
+Evaluation Datasets and Metrics
+
+We follow MemoryAgentBench (Hu et al., 2025) and select representative datasets from three categories to comprehensively evaluate our approach: (1) Accurate Retrieval: We use Single-Doc, Multi-Doc and LME(S*) as the evaluation tasks. (2) Test-Time Learning: We evaluate on five multi-class classification datasets: TREC-C, TREC-F, NLU, CLINIC, BANKING77. (3) Long-Ran-Understanding, we use InfBench-Sum as the summarization task for evaluation. The detailed introduction of these datasets is in Appendix A.2.
+
+Baselines
+
+We compare with the following baselines: (1) Long-Context: We simply use Qwen3-32B as the long-context model. In our experiments, this model always has the maximum context window as 32k. (2) RAG-Top2: We use BM25 as the retrieval method, and use the question as the query, retrieve top two chunks from all the previous chunks, and then use Qwen3-32B as the model to answer the questions. (3) MemAgent: We give the agent the specific task description, and then let the agent go over all the chunks, then ask the question according to the accumulated memory. (4) MEM1: Given all the chunks, the agent is required to maintain a paragraph of memory, retrieve some chunks, update the memory, and then answer the question according to the memory. The implementation details of the baselines are shown in Appendix C.2.
+
+Implementation Details
+
+Here we present the implementation details of Mem- [MATH] to ensure reproducibility. We use verl framework, choose Qwen3-4B as the backbone model222We also tried Qwen3-8B but the performances are not as good, see details in Appendix C.1., train on 32 H100 GPUs with learning_rate as 1e-6, batch_size as 32, grpo_rollout_n as 8 for three days. The complete training is 205 steps and we choose the best checkpoint according to the validation performance. In the main experiments, we choose the hyperparameters in Eq.(1) as [MATH] . We show the performance variations with respect to different hyperparameter configurations in Section 4.4.
+
+4.2 Overall Performance Comparison
+
+We present performance comparisons on validation datasets (matching the training distribution) in Table 1 and out-of-distribution test datasets (MemoryAgentBench) in Table 2. Our analysis yields four key findings:
+(1) Superior performance across tasks: Our method significantly outperforms existing baselines across all metrics. On MemoryAgentBench (Table 2), we observe particularly substantial improvements on Accurate Retrieval (AR) and Long-Range Understanding (LRU) tasks, demonstrating robust generalization to unseen distributions.
+(2) Efficient memory compression: Compared to Long-Context and RAG-Top2, our approach reduces memory footprint by approximately 50(3) Structured memory architecture matters: The limited performance of flat memory baselines (MEM1 and MemAgent), which employ single-paragraph representations, highlights the inadequacy of unstructured memory for complex information processing. This performance gap validates our hierarchical memory design and reinforcement learning-based optimization strategy.
+(4) Strong length generalization: Despite training exclusively on documents averaging [MATH] 20K tokens, our method successfully generalizes to documents exceeding 400K tokens (up to 474K in MemoryAgentBench’s Multi-Doc dataset), demonstrating the robustness of our training framework to extreme length extrapolation.
+
+AR
+TTL
+LRU
+Avg.
+
+Method
+Metric
+SQuAD
+HotpotQA
+PerLTQA
+TREC-C
+NLU
+Pubmed
+BookSum
+
+Long-Context
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.742
+
+\cellcolorblue!100.852
+
+\cellcolorblue!100.605
+
+\cellcolorblue!100.623
+
+\cellcolorblue!100.708
+
+\cellcolorblue!100.533
+
+\cellcolorblue!100.052
+
+\cellcolorblue!100.588
+
+\cellcolororange!10Mem.
+
+\cellcolororange!1010.6K
+
+\cellcolororange!109.7K
+
+\cellcolororange!1013.1K
+
+\cellcolororange!103.9K
+
+\cellcolororange!106.1K
+
+\cellcolororange!1016.7K
+
+\cellcolororange!1015.4K
+
+\cellcolororange!1010.8K
+
+RAG-Top2
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.762
+
+\cellcolorblue!100.849
+
+\cellcolorblue!100.623
+
+\cellcolorblue!100.612
+
+\cellcolorblue!100.508
+
+\cellcolorblue!100.570
+
+\cellcolorblue!100.042
+
+\cellcolorblue!100.567
+
+\cellcolororange!10Mem.
+
+\cellcolororange!1010.6K
+
+\cellcolororange!109.7K
+
+\cellcolororange!1016.7K
+
+\cellcolororange!103.9K
+
+\cellcolororange!106.1K
+
+\cellcolororange!1016.7K
+
+\cellcolororange!1015.6K
+
+\cellcolororange!1011.3K
+
+MemAgent
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.091
+
+\cellcolorblue!100.140
+
+\cellcolorblue!100.052
+
+\cellcolorblue!100.562
+
+\cellcolorblue!100.290
+
+\cellcolorblue!100.343
+
+\cellcolorblue!100.103
+
+\cellcolorblue!100.236
+
+\cellcolororange!10Mem.
+
+\cellcolororange!100.79K
+
+\cellcolororange!100.76K
+
+\cellcolororange!100.29K
+
+\cellcolororange!101.24K
+
+\cellcolororange!100.99K
+
+\cellcolororange!100.94K
+
+\cellcolororange!100.59K
+
+\cellcolororange!100.84K
+
+MEM1
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.039
+
+\cellcolorblue!100.083
+
+\cellcolorblue!100.068
+
+\cellcolorblue!100.269
+
+\cellcolorblue!100.056
+
+\cellcolorblue!100.175
+
+\cellcolorblue!100.085
+
+\cellcolorblue!100.111
+
+\cellcolororange!10Mem.
+
+\cellcolororange!100.16K
+
+\cellcolororange!100.22K
+
+\cellcolororange!100.14K
+
+\cellcolororange!100.23K
+
+\cellcolororange!100.22K
+
+\cellcolororange!100.08K
+
+\cellcolororange!100.16K
+
+\cellcolororange!10 0.17K
+
+Mem- [MATH] 
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.786
+
+\cellcolorblue!100.832
+
+\cellcolorblue!100.659
+
+\cellcolorblue!100.666
+
+\cellcolorblue!100.658
+
+\cellcolorblue!100.545
+
+\cellcolorblue!100.187
+
+\cellcolorblue!100.642
+
+\cellcolororange!10Mem.
+
+\cellcolororange!1010.1k
+
+\cellcolororange!108.7k
+
+\cellcolororange!1011.2k
+
+\cellcolororange!104.0k
+
+\cellcolororange!106.5k
+
+\cellcolororange!1012.3k
+
+\cellcolororange!102.2k
+
+\cellcolororange!107.9k
+
+Table 1: Performance and the total number of tokens in the memory across validation datasets. Perf.: task-specific metrics (F1/Accuracy), Mem.: memory in thousands of tokens. AR: Accurate Retrieval, TTL: Time Time Learning, LRU: Long Range Understanding. Same as below.
+
+AR
+TTL
+LRU
+Avg.
+
+Method
+Metric
+Single-Doc
+Multi-Doc
+LME(S)
+TREC-C
+NLU
+TREC-F
+Clinic
+Banking77
+InfBench
+
+Long-Context
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.280
+
+\cellcolorblue!100.270
+
+\cellcolorblue!100.292
+
+\cellcolorblue!100.640
+
+\cellcolorblue!100.740
+
+\cellcolorblue!100.340
+
+\cellcolorblue!100.860
+
+\cellcolorblue!100.770
+
+\cellcolorblue!100.125
+
+\cellcolorblue!100.461
+
+\cellcolororange!10Mem.
+
+\cellcolororange!1033K
+
+\cellcolororange!1033K
+
+\cellcolororange!1033K
+
+\cellcolororange!1033K
+
+\cellcolororange!1033K
+
+\cellcolororange!1033K
+
+\cellcolororange!1033K
+
+\cellcolororange!1033K
+
+\cellcolororange!1033K
+
+\cellcolororange!1033K
+
+RAG-Top2
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.690
+
+\cellcolorblue!100.450
+
+\cellcolorblue!100.581
+
+\cellcolorblue!100.690
+
+\cellcolorblue!100.650
+
+\cellcolorblue!100.210
+
+\cellcolorblue!100.700
+
+\cellcolorblue!100.750
+
+\cellcolorblue!100.065
+
+\cellcolorblue!100.502
+
+\cellcolororange!10Mem.
+
+\cellcolororange!10217K
+
+\cellcolororange!10474K
+
+\cellcolororange!10348K
+
+\cellcolororange!10124K
+
+\cellcolororange!10134K
+
+\cellcolororange!10126K
+
+\cellcolororange!10131K
+
+\cellcolororange!10128K
+
+\cellcolororange!10181K
+
+\cellcolororange!10207K
+
+MemAgent
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.070
+
+\cellcolorblue!100.160
+
+\cellcolorblue!100.050
+
+\cellcolorblue!100.370
+
+\cellcolorblue!100.260
+
+\cellcolorblue!100.210
+
+\cellcolorblue!100.250
+
+\cellcolorblue!100.370
+
+\cellcolorblue!100.043
+
+\cellcolorblue!100.198
+
+\cellcolororange!10Mem.
+
+\cellcolororange!101.02K
+
+\cellcolororange!101.02K
+
+\cellcolororange!100.56K
+
+\cellcolororange!101.02K
+
+\cellcolororange!101.02K
+
+\cellcolororange!100.77K
+
+\cellcolororange!101.02K
+
+\cellcolororange!101.02K
+
+\cellcolororange!100.73K
+
+\cellcolororange!100.92K
+
+MEM1
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.070
+
+\cellcolorblue!100.180
+
+\cellcolorblue!100.090
+
+\cellcolorblue!100.180
+
+\cellcolorblue!100.000
+
+\cellcolorblue!100.000
+
+\cellcolorblue!100.090
+
+\cellcolorblue!100.000
+
+\cellcolorblue!100.029
+
+\cellcolorblue!100.071
+
+\cellcolororange!10Mem.
+
+\cellcolororange!100.30K
+
+\cellcolororange!100.38K
+
+\cellcolororange!100.22K
+
+\cellcolororange!100.16K
+
+\cellcolororange!100.11K
+
+\cellcolororange!100.13K
+
+\cellcolororange!100.28K
+
+\cellcolororange!100.11K
+
+\cellcolororange!100.19K
+
+\cellcolororange!100.21K
+
+Mem- [MATH] -4B
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.740
+
+\cellcolorblue!100.680
+
+\cellcolorblue!100.520
+
+\cellcolorblue!100.710
+
+\cellcolorblue!100.710
+
+\cellcolorblue!100.410
+
+\cellcolorblue!100.730
+
+\cellcolorblue!100.700
+
+\cellcolorblue!100.129
+
+\cellcolorblue!100.592
+
+\cellcolororange!10Mem.
+
+\cellcolororange!10160K
+
+\cellcolororange!10323K
+
+\cellcolororange!10127K
+
+\cellcolororange!10120K
+
+\cellcolororange!10142K
+
+\cellcolororange!10123K
+
+\cellcolororange!1018K
+
+\cellcolororange!10133K
+
+\cellcolororange!1019K
+
+\cellcolororange!10129K
+
+Table 2: Performance and the total number of tokens in the memory on MemoryAgentBench. Perf.: task-specific metrics (F1/Accuracy), Mem.: memory in thousands of tokens.
+
+4.3 Performance Boost from Reinforcement Learning
+
+To demonstrate that the performance improvements in Section 4.2 stem from our reinforcement learning approach rather than merely the memory structure, we conduct ablation studies comparing three configurations: (1) our RL-tuned model with RL framework Mem- [MATH] , (2) the base Qwen3-4B model with our memory framework, and (3) gpt-4.1-mini with our memory framework.
+Table 3 presents the validation dataset results. The base Qwen3-4B model achieves only 0.389 average performance—substantially below both RAG-Top2 (0.567) and Long-Context (0.588) from Table 1. While gpt-4.1-mini demonstrates stronger baseline performance (leveraging its superior instruction-following capabilities), our RL-tuned Mem- [MATH] achieves the highest performance, surpassing even gpt-4.1-mini.
+These results provide compelling evidence that our performance gains originate from the reinforcement learning optimization rather than the memory architecture alone. The dramatic improvement from base Qwen3-4B (0.389) to Mem- [MATH] (0.642) demonstrates that our RL framework successfully trains the model to effectively utilize the memory structure, transforming a relatively weak base model into a state-of-the-art memory-augmented agent.
+
+AR
+TTL
+LRU
+Avg.
+
+Method
+Metric
+SQuAD
+HotpotQA
+PerLTQA
+TREC-C
+NLU
+Pubmed
+BookSum
+
+Qwen3-4B
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.338
+
+\cellcolorblue!100.637
+
+\cellcolorblue!100.557
+
+\cellcolorblue!100.416
+
+\cellcolorblue!100.381
+
+\cellcolorblue!100.281
+
+\cellcolorblue!100.130
+
+\cellcolorblue!100.389
+
+\cellcolororange!10Mem.
+
+\cellcolororange!103.3K
+
+\cellcolororange!104.8K
+
+\cellcolororange!109.0K
+
+\cellcolororange!102.3K
+
+\cellcolororange!102.9K
+
+\cellcolororange!104.4K
+
+\cellcolororange!100.9K
+
+\cellcolororange!103.9K
+
+gpt-4.1-mini
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.426
+
+\cellcolorblue!100.749
+
+\cellcolorblue!100.492
+
+\cellcolorblue!100.637
+
+\cellcolorblue!100.519
+
+\cellcolorblue!100.544
+
+\cellcolorblue!100.246
+
+\cellcolorblue!100.517
+
+\cellcolororange!10Mem.
+
+\cellcolororange!103.8K
+
+\cellcolororange!104.9K
+
+\cellcolororange!103.7K
+
+\cellcolororange!103.4K
+
+\cellcolororange!105.9K
+
+\cellcolororange!1010.6K
+
+\cellcolororange!101.5K
+
+\cellcolororange!104.8K
+
+Qwen3-4B w/
+
+Mem- [MATH] 
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.786
+
+\cellcolorblue!100.832
+
+\cellcolorblue!100.659
+
+\cellcolorblue!100.666
+
+\cellcolorblue!100.658
+
+\cellcolorblue!100.545
+
+\cellcolorblue!100.187
+
+\cellcolorblue!100.642
+
+\cellcolororange!10Mem.
+
+\cellcolororange!1010.1K
+
+\cellcolororange!108.7K
+
+\cellcolororange!1011.2K
+
+\cellcolororange!104.0K
+
+\cellcolororange!106.5K
+
+\cellcolororange!1012.3K
+
+\cellcolororange!102.2K
+
+\cellcolororange!107.9K
+
+Table 3: Performance and memory consumption comparison across evaluation datasets. Perf.: task-specific metrics (F1/Accuracy), Mem.: memory in thousands of tokens. All methods use BM25 retrieval with qwen3-32b. Bold indicates best results.
+
+4.4 Ablation Studies
+
+Our reward function, defined in Eq. (1), comprises four components: [MATH] (accuracy), [MATH] (tool call format), [MATH] (compression), and [MATH] (memory content quality). We fix the weights of the primary components [MATH] and [MATH] to 1.0, as they directly measure task performance, and tune only the compression weight [MATH] and memory content weight [MATH] . Our experiments employ [MATH] and [MATH] as default values. Table 4 presents ablation studies (The results on the test dataset MemoryAgentBench is shown in Appendix C.4.) examining the impact of these hyperparameters, yielding two key findings. First, the memory content reward ( [MATH] ) proves critical for effective learning: setting [MATH] leads to catastrophic performance degradation, as the model fails to acquire meaningful memory construction strategies, resulting in disorganized memory representations that cannot support downstream tasks. Second, the compression reward ( [MATH] ) exhibits task-dependent effects. While maintaining [MATH] , increasing [MATH] produces shorter memories at the cost of reduced performance. Notably, comparing configurations ( [MATH] ) and ( [MATH] ), we observe substantial memory reduction on BookSum (2.2K vs. 4.5K tokens) while maintaining comparable memory lengths on other datasets. This demonstrates that our chosen configuration ( [MATH] ) achieves an optimal balance between memory efficiency and task performance.
+
+AR
+TTL
+LRU
+Avg.
+
+ [MATH] 
+ [MATH] 
+Metric
+SQuAD
+HotpotQA
+PerLTQA
+TREC-C
+NLU
+Pubmed
+BookSum
+
+0.05
+0.0
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.701
+
+\cellcolorblue!100.802
+
+\cellcolorblue!100.652
+
+\cellcolorblue!100.423
+
+\cellcolorblue!100.542
+
+\cellcolorblue!100.501
+
+\cellcolorblue!100.183
+
+\cellcolorblue!100.543
+
+\cellcolororange!10Mem.
+
+\cellcolororange!109.2K
+
+\cellcolororange!108.2K
+
+\cellcolororange!1010.8K
+
+\cellcolororange!103.0K
+
+\cellcolororange!103.5K
+
+\cellcolororange!1011.0K
+
+\cellcolororange!104.9K
+
+\cellcolororange!107.5K
+
+0.0
+0.1
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.817
+
+\cellcolorblue!100.853
+
+\cellcolorblue!100.678
+
+\cellcolorblue!100.605
+
+\cellcolorblue!100.629
+
+\cellcolorblue!100.572
+
+\cellcolorblue!100.183
+
+\cellcolorblue!100.630
+
+\cellcolororange!10Mem.
+
+\cellcolororange!109.7K
+
+\cellcolororange!108.1K
+
+\cellcolororange!1011.7K
+
+\cellcolororange!103.7K
+
+\cellcolororange!105.4K
+
+\cellcolororange!1012.5K
+
+\cellcolororange!104.5K
+
+\cellcolororange!107.9K
+
+0.05
+0.1
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.786
+
+\cellcolorblue!100.832
+
+\cellcolorblue!100.659
+
+\cellcolorblue!100.666
+
+\cellcolorblue!100.658
+
+\cellcolorblue!100.545
+
+\cellcolorblue!100.187
+
+\cellcolorblue!100.642
+
+\cellcolororange!10Mem.
+
+\cellcolororange!1010.1K
+
+\cellcolororange!108.7K
+
+\cellcolororange!1011.2K
+
+\cellcolororange!104.0K
+
+\cellcolororange!106.5K
+
+\cellcolororange!1012.3K
+
+\cellcolororange!102.2K
+
+\cellcolororange!107.9K
+
+0.2
+0.1
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.822
+
+\cellcolorblue!100.838
+
+\cellcolorblue!100.615
+
+\cellcolorblue!100.558
+
+\cellcolorblue!100.176
+
+\cellcolorblue!100.401
+
+\cellcolorblue!100.193
+
+\cellcolorblue!100.525
+
+\cellcolororange!10Mem.
+
+\cellcolororange!109.8K
+
+\cellcolororange!107.8K
+
+\cellcolororange!1010.4K
+
+\cellcolororange!100.4K
+
+\cellcolororange!100.8K
+
+\cellcolororange!100.4K
+
+\cellcolororange!103.0K
+
+\cellcolororange!104.7K
+
+0.4
+0.1
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.691
+
+\cellcolorblue!100.810
+
+\cellcolorblue!100.533
+
+\cellcolorblue!100.475
+
+\cellcolorblue!100.405
+
+\cellcolorblue!100.455
+
+\cellcolorblue!100.201
+
+\cellcolorblue!100.509
+
+\cellcolororange!10Mem.
+
+\cellcolororange!108.8K
+
+\cellcolororange!108.1K
+
+\cellcolororange!105.2K
+
+\cellcolororange!100.7K
+
+\cellcolororange!101.4K
+
+\cellcolororange!101.3K
+
+\cellcolororange!101.5K
+
+\cellcolororange!103.6K
+
+Table 4: Performance and memory consumption comparison across evaluation datasets. Perf.: task-specific metrics (F1/Accuracy), Mem.: memory in thousands of tokens. All methods use BM25 retrieval with qwen3-32b. Bold indicates best results.
+
+4.5 Case Studies
+
+In this section, we report some memory construction traces obtained from Mem- [MATH] and compare them with baseline approaches to demonstrate the effectiveness of our memory management strategy. Table 5 illustrates critical differences in how different models handle memory construction. Qwen3-4B exhibits severe limitations: it fails to update the core memory entirely (leaving it empty), and only maintains a single semantic memory entry, resulting in significant information loss as multiple distinct concepts are compressed into one generic statement. GPT-4.1-mini demonstrates better semantic organization with three distinct entries, but suffers from inefficient episodic memory management by creating multiple entries with identical timestamps that should be merged to conserve memory space. Meanwhile, GPT-4.1-mini is only storing the user behavior, completely ignoring the responses from the assistant. In contrast, Mem- [MATH] demonstrates better memory construction by maintaining informative core memory, organizing semantic information into detailed, distinct entries, efficiently consolidating episodic events with the same timestamp into a single comprehensive entry, paying attention to both the user behavior and the assistant response. This superior memory organization enables Mem- [MATH] to retain more information while using memory space more efficiently.
+
+Memory Type
+
+Qwen3-4B
+
+GPT-4.1-mini
+
+Qwen3-4B w/ Mem- [MATH] 
+
+Core
+
+ [MATH] ✗ Should not be empty
+
+User is … focusing on minimizing noise pollution … currently looking for condos, particularly in downtown areas … ✓
+
+User is looking to get some advice on condo living … looking at options for condo in the downtown area … ✓
+
+Semantic
+
+User is seeking advice on … noise pollution … amenities. ✗ Should record more
+
+3 distinct entries:
+- Noise pollution tips
+- Neighborhood evaluation
+- Research importance 
+(✓ Complete)
+
+2 distinct entries:
+- Noise proof tips …
+- Research methods … 
+(✓ Complete)
+
+Episodic
+
+At 2023/03/08 01:55, User asked … Assistant provided … (✓ Concise and Complete)
+
+At 2023/03/08 01:55, Asked for noise tips
+At 2023/03/08 01:55, Requested neighborhood eval
+At 2023/03/08 01:55, Inquired about research 
+✗  Multiple events with same timestamps, can be consolidated; Only records user behavior, missing all assistant behaviors.
+
+At 2023/03/08 (Wed) 01:55 user looked to get some advice on condo living… assistant responded with … 
+(✓ Concise and Complete)
+
+Table 5: Comparison of Memory Management Strategies Across Models
+
+5 Conclusion, Limitation and Future Work
+
+In this work, we presented Mem- [MATH] , a reinforcement learning framework that enables LLM agents to learn effective memory management strategies through interaction and feedback. By moving beyond pre-defined heuristics, our approach allows agents to discover optimal memory operations for diverse scenarios through a carefully designed training dataset and reward mechanism based on question-answering correctness. Our experiments demonstrate that Mem- [MATH] achieves significant improvements over existing memory-augmented baselines, with agents developing robust memory management strategies that generalize well to much longer interaction patterns. While our framework shows strong performance, several promising directions remain for future exploration. Our current memory architecture could benefit from integration with more sophisticated systems like MIRIX, which may provide additional structural advantages for complex reasoning tasks. Furthermore, extending Mem- [MATH] from simulated environments to real-world applications would require connecting the reinforcement learning framework with actual databases and production systems, introducing challenges around latency, scalability, and safety that warrant careful investigation. These directions represent exciting opportunities to bridge the gap between learned memory management and practical deployment of memory-augmented LLM agents in real-world applications.
+
+References
+
+Anokhin et al. (2024)
+
+Petr Anokhin, Nikita Semenov, Artyom Sorokin, Dmitry Evseev, Andrey Kravchenko, Mikhail Burtsev, and Evgeny Burnaev.
+
+Arigraph: Learning knowledge graph world models with episodic memory for llm agents.
+
+arXiv preprint arXiv:2407.04363, 2024.
+
+Behrouz et al. (2024)
+
+Ali Behrouz, Peilin Zhong, and Vahab Mirrokni.
+
+Titans: Learning to memorize at test time.
+
+arXiv preprint arXiv:2501.00663, 2024.
+
+Berges et al. (2024)
+
+Vincent-Pierre Berges, Barlas Oğuz, Daniel Haziza, Wen-tau Yih, Luke Zettlemoyer, and Gargi Ghosh.
+
+Memory layers at scale.
+
+arXiv preprint arXiv:2412.09764, 2024.
+
+Bulatov et al. (2022)
+
+Aydar Bulatov, Yuri Kuratov, and Mikhail S. Burtsev.
+
+Recurrent memory transformer.
+
+In NeurIPS, 2022.
+
+Burtsev & Sapunov (2020)
+
+Mikhail S. Burtsev and Grigory V. Sapunov.
+
+Memory transformer.
+
+CoRR, abs/2006.11527, 2020.
+
+URL https://arxiv.org/abs/2006.11527.
+
+Cai et al. (2025)
+
+Linyue Cai, Yuyang Cheng, Xiaoding Shao, Huiming Wang, Yong Zhao, Wei Zhang, and Kang Li.
+
+A scenario-driven cognitive approach to next-generation ai memory.
+
+arXiv preprint arXiv:2509.13235, 2025.
+
+Casanueva et al. (2020)
+
+Iñigo Casanueva, Tadas Temčinas, Daniela Gerz, Matthew Henderson, and Ivan Vulić.
+
+Efficient intent detection with dual sentence encoders.
+
+In Tsung-Hsien Wen, Asli Celikyilmaz, Zhou Yu, Alexandros Papangelis, Mihail Eric, Anuj Kumar, Iñigo Casanueva, and Rushin Shah (eds.), Proceedings of the 2nd Workshop on Natural Language Processing for Conversational AI, pp. 38–45, Online, July 2020. Association for Computational Linguistics.
+
+doi: 10.18653/v1/2020.nlp4convai-1.5.
+
+URL https://aclanthology.org/2020.nlp4convai-1.5/.
+
+Chhikara et al. (2025)
+
+Prateek Chhikara, Dev Khant, Saket Aryan, Taranjeet Singh, and Deshraj Yadav.
+
+Mem0: Building production-ready ai agents with scalable long-term memory.
+
+arXiv preprint arXiv:2504.19413, 2025.
+
+Das et al. (2024)
+
+Payel Das, Subhajit Chaudhury, Elliot Nelson, Igor Melnyk, Sarathkrishna Swaminathan, Sihui Dai, Aurélie C. Lozano, Georgios Kollias, Vijil Chenthamarakshan, Jirí Navrátil, Soham Dan, and Pin-Yu Chen.
+
+Larimar: Large language models with episodic memory control.
+
+In ICML. OpenReview.net, 2024.
+
+Dernoncourt & Lee (2017)
+
+Franck Dernoncourt and Ji Young Lee.
+
+Pubmed 200k rct: a dataset for sequential sentence classification in medical abstracts.
+
+arXiv preprint arXiv:1710.06071, 2017.
+
+Du et al. (2024)
+
+Yiming Du, Hongru Wang, Zhengyi Zhao, Bin Liang, Baojun Wang, Wanjun Zhong, Zezhong Wang, and Kam-Fai Wong.
+
+Perltqa: A personal long-term memory dataset for memory classification, retrieval, and fusion in question answering.
+
+In Proceedings of the 10th SIGHAN Workshop on Chinese Language Processing (SIGHAN-10), pp. 152–164, Bangkok, Thailand, August 2024. Association for Computational Linguistics.
+
+URL https://aclanthology.org/2024.sighan-1.18/.
+
+Fang et al. (2025)
+
+Jinyuan Fang, Yanwen Peng, Xi Zhang, Yingxu Wang, Xinhao Yi, Guibin Zhang, Yi Xu, Bin Wu, Siwei Liu, Zihao Li, et al.
+
+A comprehensive survey of self-evolving ai agents: A new paradigm bridging foundation models and lifelong agentic systems.
+
+arXiv preprint arXiv:2508.07407, 2025.
+
+Fountas et al. (2024)
+
+Zafeirios Fountas, Martin A Benfeghoul, Adnan Oomerjee, Fenia Christopoulou, Gerasimos Lampouras, Haitham Bou-Ammar, and Jun Wang.
+
+Human-like episodic memory for infinite context llms.
+
+arXiv preprint arXiv:2407.09450, 2024.
+
+Ge et al. (2023)
+
+Tao Ge, Jing Hu, Lei Wang, Xun Wang, Si-Qing Chen, and Furu Wei.
+
+In-context autoencoder for context compression in a large language model.
+
+arXiv preprint arXiv:2307.06945, 2023.
+
+He et al. (2024)
+
+Zexue He, Leonid Karlinsky, Donghyun Kim, Julian McAuley, Dmitry Krotov, and Rogerio Feris.
+
+Camelot: Towards large language models with training-free consolidated associative memory.
+
+arXiv preprint arXiv:2402.13449, 2024.
+
+Hsieh et al. (2024)
+
+Cheng-Ping Hsieh, Simeng Sun, Samuel Kriman, Shantanu Acharya, Dima Rekesh, Fei Jia, Yang Zhang, and Boris Ginsburg.
+
+RULER: What’s the Real Context Size of Your Long-Context Language Models?, August 2024.
+
+URL http://arxiv.org/abs/2404.06654.
+
+arXiv:2404.06654 [cs].
+
+Hu et al. (2025)
+
+Yuanzhe Hu, Yu Wang, and Julian McAuley.
+
+Evaluating memory in llm agents via incremental multi-turn interactions.
+
+arXiv preprint arXiv:2507.05257, 2025.
+
+Kryściński et al. (2021)
+
+Wojciech Kryściński, Nazneen Rajani, Divyansh Agarwal, Caiming Xiong, and Dragomir Radev.
+
+Booksum: A collection of datasets for long-form narrative summarization.
+
+arXiv preprint arXiv:2105.08209, 2021.
+
+Larson et al. (2019)
+
+Stefan Larson, Anish Mahendran, Joseph J. Peper, Christopher Clarke, Andrew Lee, Parker Hill, Jonathan K. Kummerfeld, Kevin Leach, Michael A. Laurenzano, Lingjia Tang, and Jason Mars.
+
+An evaluation dataset for intent classification and out-of-scope prediction.
+
+In Kentaro Inui, Jing Jiang, Vincent Ng, and Xiaojun Wan (eds.), Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing and the 9th International Joint Conference on Natural Language Processing (EMNLP-IJCNLP), pp. 1311–1316, Hong Kong, China, November 2019. Association for Computational Linguistics.
+
+doi: 10.18653/v1/D19-1131.
+
+URL https://aclanthology.org/D19-1131/.
+
+Li & Li (2024)
+
+Jitang Li and Jinzheng Li.
+
+Memory, consciousness and large language model.
+
+arXiv preprint arXiv:2401.02509, 2024.
+
+Li & Roth (2002)
+
+Xin Li and Dan Roth.
+
+Learning question classifiers.
+
+In COLING 2002: The 19th International Conference on Computational Linguistics, 2002.
+
+URL https://aclanthology.org/C02-1150/.
+
+Li et al. (2024)
+
+Yuhong Li, Yingbing Huang, Bowen Yang, Bharat Venkitesh, Acyr Locatelli, Hanchen Ye, Tianle Cai, Patrick Lewis, and Deming Chen.
+
+Snapkv: LLM knows what you are looking for before generation.
+
+CoRR, abs/2404.14469, 2024.
+
+doi: 10.48550/ARXIV.2404.14469.
+
+URL https://doi.org/10.48550/arXiv.2404.14469.
+
+Lin et al. (2025)
+
+Kevin Lin, Charlie Snell, Yu Wang, Charles Packer, Sarah Wooders, Ion Stoica, and Joseph E Gonzalez.
+
+Sleep-time compute: Beyond inference scaling at test-time.
+
+arXiv preprint arXiv:2504.13171, 2025.
+
+Liu et al. (2025)
+
+WenTao Liu, Ruohua Zhang, Aimin Zhou, Feng Gao, and JiaLi Liu.
+
+Echo: A large language model with temporal episodic memory.
+
+arXiv preprint arXiv:2502.16090, 2025.
+
+Liu et al. (2019)
+
+Xingkun Liu, Arash Eshghi, Pawel Swietojanski, and Verena Rieser.
+
+Benchmarking natural language understanding services for building conversational agents, 2019.
+
+URL https://arxiv.org/abs/1903.05566.
+
+Lu et al. (2023)
+
+Junru Lu, Siyu An, Mingbao Lin, Gabriele Pergola, Yulan He, Di Yin, Xing Sun, and Yunsheng Wu.
+
+Memochat: Tuning llms to use memos for consistent long-range open-domain conversation.
+
+arXiv preprint arXiv:2308.08239, 2023.
+
+Maharana et al. (2024)
+
+Adyasha Maharana, Dong-Ho Lee, Sergey Tulyakov, Mohit Bansal, Francesco Barbieri, and Yuwei Fang.
+
+Evaluating very long-term conversational memory of llm agents.
+
+arXiv preprint arXiv:2402.17753, 2024.
+
+Nan et al. (2025)
+
+Jiayan Nan, Wenquan Ma, Wenlong Wu, and Yize Chen.
+
+Nemori: Self-organizing agent memory inspired by cognitive science.
+
+arXiv preprint arXiv:2508.03341, 2025.
+
+Packer et al. (2023)
+
+Charles Packer, Vivian Fang, Shishir_G Patil, Kevin Lin, Sarah Wooders, and Joseph_E Gonzalez.
+
+Memgpt: Towards llms as operating systems.
+
+2023.
+
+Pink et al. (2025)
+
+Mathis Pink, Qinyuan Wu, Vy Ai Vo, Javier Turek, Jianing Mu, Alexander Huth, and Mariya Toneva.
+
+Position: Episodic memory is the missing piece for long-term llm agents.
+
+arXiv preprint arXiv:2502.06975, 2025.
+
+Qian et al. (2025)
+
+Hongjin Qian, Zheng Liu, Peitian Zhang, Kelong Mao, Defu Lian, Zhicheng Dou, and Tiejun Huang.
+
+Memorag: Boosting long context processing with global memory-enhanced retrieval augmentation.
+
+In Proceedings of the ACM on Web Conference 2025, pp. 2366–2377, 2025.
+
+Rajpurkar et al. (2016)
+
+Pranav Rajpurkar, Jian Zhang, Konstantin Lopyrev, and Percy Liang.
+
+Squad: 100,000+ questions for machine comprehension of text.
+
+arXiv preprint arXiv:1606.05250, 2016.
+
+Rasmussen et al. (2025)
+
+Preston Rasmussen, Pavlo Paliychuk, Travis Beauvais, Jack Ryan, and Daniel Chalef.
+
+Zep: A temporal knowledge graph architecture for agent memory.
+
+arXiv preprint arXiv:2501.13956, 2025.
+
+Rezazadeh et al. (2024)
+
+Alireza Rezazadeh, Zichao Li, Wei Wei, and Yujia Bao.
+
+From isolated conversations to hierarchical schemas: Dynamic tree memory representation for llms.
+
+arXiv preprint arXiv:2410.14052, 2024.
+
+Shao et al. (2024)
+
+Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, YK Li, Yang Wu, et al.
+
+Deepseekmath: Pushing the limits of mathematical reasoning in open language models.
+
+arXiv preprint arXiv:2402.03300, 2024.
+
+Wang et al. (2023)
+
+Bing Wang, Xinnian Liang, Jian Yang, Hui Huang, Shuangzhi Wu, Peihao Wu, Lu Lu, Zejun Ma, and Zhoujun Li.
+
+Enhancing large language model with self-controlled memory framework.
+
+arXiv preprint arXiv:2304.13343, 2023.
+
+Wang & Chen (2025)
+
+Yu Wang and Xi Chen.
+
+Mirix: Multi-agent memory system for llm-based agents.
+
+arXiv preprint arXiv:2507.07957, 2025.
+
+(38)
+
+Yu Wang, Xinshuang Liu, Xiusi Chen, Sean O’Brien, Junda Wu, and Julian McAuley.
+
+Self-updatable large language models by integrating context into model parameters.
+
+In The Thirteenth International Conference on Learning Representations.
+
+Wang et al. (2024)
+
+Yu Wang, Yifan Gao, Xiusi Chen, Haoming Jiang, Shiyang Li, Jingfeng Yang, Qingyu Yin, Zheng Li, Xian Li, Bing Yin, et al.
+
+Memoryllm: Towards self-updatable large language models.
+
+arXiv preprint arXiv:2402.04624, 2024.
+
+Wang et al. (2025a)
+
+Yu Wang, Dmitry Krotov, Yuanzhe Hu, Yifan Gao, Wangchunshu Zhou, Julian McAuley, Dan Gutfreund, Rogerio Feris, and Zexue He.
+
+M+: Extending memoryLLM with scalable long-term memory.
+
+In Forty-second International Conference on Machine Learning, 2025a.
+
+URL https://openreview.net/forum?id=OcqbkROe8J.
+
+Wang et al. (2025/02)
+
+Yu Wang, Chi Han, Tongtong Wu, Xiaoxin He, Wangchunshu Zhou, Nafis Sadeq, Xiusi Chen, Zexue He, Wei Wang, Gholamreza Haffari, Heng Ji, and Julian J. McAuley.
+
+Towards lifespan cognitive systems.
+
+TMLR, 2025/02.
+
+Wang et al. (2025b)
+
+Zhenting Wang, Qi Chang, Hemani Patel, Shashank Biju, Cheng-En Wu, Quan Liu, Aolin Ding, Alireza Rezazadeh, Ankit Shah, Yujia Bao, et al.
+
+Mcp-bench: Benchmarking tool-using llm agents with complex real-world tasks via mcp servers.
+
+arXiv preprint arXiv:2508.20453, 2025b.
+
+Wei et al. (2025)
+
+Jiale Wei, Xiang Ying, Tao Gao, Fangyi Bao, Felix Tao, and Jingbo Shang.
+
+Ai-native memory 2.0: Second me.
+
+arXiv preprint arXiv:2503.08102, 2025.
+
+Wen et al. (2024)
+
+Bosi Wen, Pei Ke, Xiaotao Gu, Lindong Wu, Hao Huang, Jinfeng Zhou, Wenchuang Li, Binxin Hu, Wendy Gao, Jiaxing Xu, et al.
+
+Benchmarking complex instruction-following with multiple constraints composition.
+
+Advances in Neural Information Processing Systems, 37:137610–137645, 2024.
+
+Wu et al. (2024)
+
+Di Wu, Hongwei Wang, Wenhao Yu, Yuwei Zhang, Kai-Wei Chang, and Dong Yu.
+
+Longmemeval: Benchmarking chat assistants on long-term interactive memory.
+
+arXiv preprint arXiv:2410.10813, 2024.
+
+Xu et al. (2025a)
+
+Derong Xu, Yi Wen, Pengyue Jia, Yingyi Zhang, Yichao Wang, Huifeng Guo, Ruiming Tang, Xiangyu Zhao, Enhong Chen, Tong Xu, et al.
+
+Towards multi-granularity memory association and selection for long-term conversational agents.
+
+arXiv preprint arXiv:2505.19549, 2025a.
+
+Xu et al. (2025b)
+
+Wujiang Xu, Kai Mei, Hang Gao, Juntao Tan, Zujie Liang, and Yongfeng Zhang.
+
+A-mem: Agentic memory for llm agents.
+
+arXiv preprint arXiv:2502.12110, 2025b.
+
+Yan et al. (2025)
+
+Sikuan Yan, Xiufeng Yang, Zuchao Huang, Ercong Nie, Zifeng Ding, Zonggen Li, Xiaowen Ma, Hinrich Schütze, Volker Tresp, and Yunpu Ma.
+
+Memory-r1: Enhancing large language model agents to manage and utilize memories via reinforcement learning.
+
+arXiv preprint arXiv:2508.19828, 2025.
+
+Yang et al. (2018)
+
+Zhilin Yang, Peng Qi, Saizheng Zhang, Yoshua Bengio, William W Cohen, Ruslan Salakhutdinov, and Christopher D Manning.
+
+Hotpotqa: A dataset for diverse, explainable multi-hop question answering.
+
+arXiv preprint arXiv:1809.09600, 2018.
+
+Yao et al. (2025)
+
+Yiqun Yao, Naitong Yu, Xiang Li, Xin Jiang, Xuezhi Fang, Wenjia Ma, Xuying Meng, Jing Li, Aixin Sun, and Yequan Wang.
+
+Egomem: Lifelong memory agent for full-duplex omnimodal models.
+
+arXiv preprint arXiv:2509.11914, 2025.
+
+Yu et al. (2025)
+
+Hongli Yu, Tinghong Chen, Jiangtao Feng, Jiangjie Chen, Weinan Dai, Qiying Yu, Ya-Qin Zhang, Wei-Ying Ma, Jingjing Liu, Mingxuan Wang, et al.
+
+Memagent: Reshaping long-context llm with multi-conv rl-based memory agent.
+
+arXiv preprint arXiv:2507.02259, 2025.
+
+Zhang et al. (2023a)
+
+Danyang Zhang, Lu Chen, Situo Zhang, Hongshen Xu, Zihan Zhao, and Kai Yu.
+
+Large language models are semi-parametric reinforcement learning agents.
+
+Advances in Neural Information Processing Systems, 36:78227–78239, 2023a.
+
+Zhang et al. (2024)
+
+Xinrong Zhang, Yingfa Chen, Shengding Hu, Zihang Xu, Junhao Chen, Moo Hao, Xu Han, Zhen Thai, Shuo Wang, Zhiyuan Liu, et al.
+
+ [MATH] bench: Extending long context evaluation beyond 100k tokens.
+
+In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), pp. 15262–15277, 2024.
+
+Zhang et al. (2025a)
+
+Zeyu Zhang, Quanyu Dai, Xu Chen, Rui Li, Zhongyang Li, and Zhenhua Dong.
+
+Memengine: A unified and modular library for developing advanced memory of llm-based agents.
+
+In Companion Proceedings of the ACM on Web Conference 2025, pp. 821–824, 2025a.
+
+Zhang et al. (2025b)
+
+Zeyu Zhang, Quanyu Dai, Rui Li, Xiaohe Bo, Xu Chen, and Zhenhua Dong.
+
+Learn to memorize: Optimizing llm-based agents with adaptive memory framework.
+
+arXiv preprint arXiv:2508.16629, 2025b.
+
+Zhang et al. (2023b)
+
+Zhenyu Zhang, Ying Sheng, Tianyi Zhou, Tianlong Chen, Lianmin Zheng, Ruisi Cai, Zhao Song, Yuandong Tian, Christopher Ré, Clark W. Barrett, Zhangyang Wang, and Beidi Chen.
+
+H2O: heavy-hitter oracle for efficient generative inference of large language models.
+
+In NeurIPS, 2023b.
+
+Zhong et al. (2023)
+
+Wanjun Zhong, Lianghong Guo, Qiqi Gao, and Yanlin Wang.
+
+Memorybank: Enhancing large language models with long-term memory.
+
+arXiv preprint arXiv:2305.10250, 2023.
+
+Zhou et al. (2025)
+
+Zijian Zhou, Ao Qu, Zhaoxuan Wu, Sunghwan Kim, Alok Prakash, Daniela Rus, Jinhua Zhao, Bryan Kian Hsiang Low, and Paul Pu Liang.
+
+Mem1: Learning to synergize memory and reasoning for efficient long-horizon agents.
+
+arXiv preprint arXiv:2506.15841, 2025.
+
+Appendix A Datasets Details
+
+A.1 Training Dataset
+
+We organize our training data into three categories based on the memory capabilities they target, as illustrated in Section 3.4. The detailed dataset statistics are provided in Table 6.
+
+Dataset
+Cat.
+Metric
+Training Set
+Validation Set
+
+Ins.
+Tok/Ch
+Ch/Ins
+Q/Ins
+Ins.
+Tok/Ch
+Ch/Ins
+Q/Ins
+
+SQuAD
+AR
+SubEM
+264
+1,078
+10.0
+95.5
+30
+1,057
+10.0
+96.8
+
+HotpotQA
+AR
+SubEM
+1,966
+1,051
+9.3
+17.0
+219
+1,052
+9.2
+17.0
+
+PerLTQA
+AR
+SubEM
+27
+517
+23.3
+100.0
+4
+568
+23.0
+100.0
+
+LME-Train
+AR
+LLM-J
+45
+1,522
+15.6
+4.0
+5
+1,576
+13.4
+4.0
+
+NLU
+TTL
+EM
+180
+610
+10.0
+100.0
+20
+606
+10.0
+100.0
+
+TREC-C
+TTL
+EM
+180
+390
+10.0
+100.0
+20
+390
+10.0
+100.0
+
+PubMed
+TTL
+EM
+90
+1,676
+10.0
+100.0
+10
+1,673
+10.0
+100.0
+
+BookSum
+LRU
+KW Hit
+1,387
+1,916
+8.0
+1.0
+155
+1,914
+8.1
+1.0
+
+Total
+
+4,139
+–
+–
+–
+463
+–
+–
+–
+
+Table 6: Dataset statistics across 8 data sources. Each dataset is evaluated with specific metrics suitable for its task type. Column abbreviations: Cat. = Category (AR: Accurate Retrieval, TTL: Test-Time-Learning, LRU: Long Range Understanding); Ins. = Number of Instances; Tok/Ch = Average Tokens per Chunk; Ch/Ins = Average Chunks per Instance; Q/Ins = Average Questions per Instance.
+
+Accurate Retrieval (AR)
+
+This category focuses on training the model’s ability to store and precisely retrieve information from memory. We employ the following datasets:
+
+(1) SQuAD (Rajpurkar et al., 2016): We adapt this single-document question answering dataset by combining multiple documents into single instances. The agent must memorize these documents and subsequently answer questions based on the constructed memory, testing its ability to accurately retrieve specific information.
+
+(2) HotPotQA (Yang et al., 2018): This multi-document question answering dataset presents the agent with sequential chunks, each potentially containing multiple documents. The agent must memorize the documents, identify relationships between them, and answer questions requiring information synthesis across independent chunks.
+
+(3) PerLTQA (Du et al., 2024): This dataset challenges the agent to reason over memory chunks containing both episodic and semantic information about users. The agent must identify relevant memories, integrate information across different memory types, maintain user profile consistency, and perform multi-hop reasoning to answer questions.
+
+(4) LongMemEval-Train (Wu et al., 2024): We construct a training subset from LongMemEval by collecting 200 questions from longmemeval_oracle.json333(https://huggingface.co/datasets/xiaowu0162/longmemeval/tree/main), ensuring no overlap with the evaluation data in MemoryAgentBench. We concatenate haystack dialogues into contexts ranging from 10K to 30K tokens, with each context paired with 4-5 questions, resulting in 50 training samples.
+
+Test-Time Learning (TTL)
+
+This category trains the model’s ability to learn new classification patterns from examples and apply them to new instances. We employ the following datasets:
+
+(1) PubMed-RCT (Dernoncourt & Lee, 2017): We adapt this large-scale dataset of randomized controlled trial abstracts from medical literature for test-time learning. Each sentence is originally annotated with semantic roles (Background, Objective, Method, Result, or Conclusion). We transform this into a classification learning task by segmenting the data into conversational chunks containing multiple sentence-label pairs as training examples. To evaluate the agent’s ability to learn abstract patterns, we replace semantic labels with numeric labels (0-4). Each instance ensures coverage of all five categories across chunks, with questions prompting classification of new examples.
+
+(2) NLU and TREC-C: These datasets are adapted from MemoryAgentBench (Hu et al., 2025), containing documents with labeled sentences across 68 classes (NLU) and 6 classes (TREC-C). Given the original instances contain approximately 100K tokens, we partition them into manageable chunks. We create 200 instances per dataset, each containing 10 chunks with roughly 500 [MATH] 2,000 tokens distributed across chunks. Each instance preserves all original labels while redistributing training examples to ensure complete label coverage within each instance.
+
+Long Range Understanding (LRU)
+
+This category focuses on training the model’s ability to comprehend and summarize information across extended contexts. We employ the following dataset:
+
+BookSum (Kryściński et al., 2021): We utilize the cleaned version of this dataset444https://huggingface.co/datasets/ubaada/booksum-complete-cleaned, where each item consists of a book chapter paired with its summary. We segment each chapter into 10-20 conversational chunks to simulate incremental information processing. For evaluation, we extract keywords from ground-truth summaries using the prompt shown in Figure 4. The evaluation metric is the ratio of correctly identified keywords in generated summaries compared to the ground-truth keyword set.
+
+Dataset
+Cat.
+Metric
+Training Set
+Validation Set
+
+Ins.
+Ch/Ins
+Tok/Ch
+Q/Ins
+Ins.
+Ch/Ins
+Tok/Ch
+Q/Ins
+
+SQuAD
+AR
+SubEM
+100
+9.9
+1,084.1
+94.8
+30
+10.0
+1,057.0
+96.8
+
+HotpotQA
+AR
+SubEM
+100
+9.7
+1,005.4
+16.7
+219
+9.2
+1,051.6
+17.0
+
+PerLTQA
+AR
+SubEM
+27
+23.3
+517.1
+100.0
+4
+23.0
+567.8
+100.0
+
+LME-Train
+AR
+LLM-J
+50
+15.4
+1527.7
+4.0
+-
+-
+-
+-
+
+NLU
+TTL
+EM
+49
+10.0
+610.9
+100.0
+20
+10.0
+606.2
+100.0
+
+TREC-Coarse
+TTL
+EM
+51
+10.0
+390.1
+100.0
+20
+10.0
+390.2
+100.0
+
+PubMed-RCT
+TTL
+EM
+90
+10.0
+1,676.1
+100.0
+10
+10.0
+1,673.3
+100.0
+
+BookSum
+LRU
+KW Hit
+100
+7.8
+1,909.7
+1.0
+155
+8.1
+1,914.3
+1.0
+
+Total
+
+562
+–
+–
+–
+463
+–
+–
+–
+
+Table 7: Dataset statistics across 8 data sources. Each dataset is evaluated with specific metrics suitable for its task type. Column abbreviations: Cat. = Category (AR: Accurate Retrieval, TTL: Test-Time-Learning, LRU: Long Range Understanding); Ins. = Number of Instances; Tok/Ch = Average Number of Tokens per Chunk; Ch/Ins = Average Number of Chunks per Instance; Q/Ins = Average Questions per Instance.
+
+Figure 4: The prompt used to extract keywords in the summaries of BookSum and InfBench-Sum. 
+
+Figure 5: The examples in the training dataset. For SQuAD, HotpotQA, PerLTQA, LME-Train, we show the examples directly; for Test-Time-Learning datasets (Pubmed-RCT, NLU, and Trec-C) and BookSum, we demonstrate the format for clarity.
+
+Due to computational constraints and dataset imbalance, we limit each dataset to a maximum of 100 instances. Despite training for three days with 32 H100 GPUs, we could only process a small portion of the complete datasets. The final dataset composition and statistics are presented in Table 7. We process every chunk into the format of conversations, with the examples or formats of each dataset shown in Figure 5.
+
+A.2 Evaluation Dataset
+
+To comprehensively evaluate our model’s memory capabilities across different scenarios, we adopt the evaluation framework from MemoryAgentBench (Hu et al., 2025) and select representative datasets from three core categories. This evaluation suite encompasses 9 datasets with 112 test instances, designed to assess accurate retrieval, test-time learning, and long-range understanding capabilities. The detailed statistics for each dataset are presented in Table 8.
+
+Dataset
+Category
+
+Evaluation
+
+Metric
+
+Test Set
+
+# of Ins.
+Avg. Chunks
+Avg. Tokens
+Avg. Q’s
+
+per Instance
+per Chunk
+per Instance
+
+Banking77
+ICL
+Source-based
+1
+111.0
+1,150.3
+100.0
+
+Clinic150
+ICL
+Source-based
+1
+38.0
+3,440.5
+100.0
+
+NLU
+ICL
+EM
+1
+115.0
+1,166.7
+100.0
+
+TREC-Coarse
+ICL
+EM
+1
+111.0
+1,114.6
+100.0
+
+TREC-Fine
+ICL
+EM
+1
+108.0
+1,163.3
+100.0
+
+InfBench-Sum
+LRU
+Source-based
+100
+88.9
+2,034.1
+1.0
+
+LongMemEval
+AR
+LLM judge
+5
+218.6
+1,591.4
+60.0
+
+RULER-QA1
+AR
+Source-based
+1
+103.0
+2,103.9
+100.0
+
+RULER-QA2
+AR
+Source-based
+1
+219.0
+2,163.5
+100.0
+
+Total
+
+112
+–
+–
+–
+
+Table 8: Test dataset statistics across 9 data sources. Each dataset is evaluated with specific metrics suitable for its task type.
+
+Accurate Retrieval (AR)
+
+This category evaluates the model’s ability to precisely locate and retrieve specific information from memory. We employ the following datasets:
+
+(1) RULER-QA1 (Single-Hop) and RULER-QA2 (Multi-Hop): These datasets test single-hop and multi-hop question answering capabilities respectively. RULER-QA1 (Hsieh et al., 2024) requires direct information retrieval, while RULER-QA2 demands reasoning across multiple memory chunks to synthesize answers.
+
+(2) LME(S*): Originally from LongMemEval (Wu et al., 2024), this dataset was processed by Hu et al. (2025) to create a more evaluation-efficient format where multiple questions are posed against fewer contexts, testing the model’s ability to maintain and query complex memory representations over extended interactions.
+
+Test-Time Learning (TTL)
+
+This category assesses the model’s ability to learn new classification patterns from examples and apply them to novel instances. The context used in this dataset includes thousands of labeled examples. Each example is labeled with a number to indicate the category. We employ the following datasets:
+
+(1) TREC-Coerse: A question classification dataset with 6 broad categories, testing the model’s ability to learn coarse-grained classification patterns from limited examples. The original dataset (Li & Roth, 2002) contains 5,452 training questions and 500 test questions and it is a standard benchmark for QA question-type classification.
+
+(2) TREC-Fine: A fine-grained version with 50 specific question types, evaluating the model’s capacity to distinguish between subtle classification boundaries. The original dataset (Li & Roth, 2002) keeps the same size (5,452 train / 500 test) but refines labels into 50 subtypes under the 6 top-level categories, increasing granularity for few-shot intent learning.
+
+(3) NLU: A natural language understanding dataset with 68 intent categories, challenging the model to learn complex semantic patterns from conversational examples. The original released corpus has 25,715 utterances across 18 scenarios and 68 intents (Liu et al., 2019).
+
+(4) CLINIC150: A medical intent classification dataset with 150 categories, testing domain-specific learning capabilities in healthcare scenarios. The official full split provides 150 in-scope intents across 10 domains with 100/20/30 train/validation/test examples per intent (Larson et al., 2019).
+
+(5) Banking77: A financial services dataset with 77 intent categories, evaluating the model’s ability to learn domain-specific classification patterns in banking contexts.  Casanueva et al. (2020) comprises 13,083 customer-service queries (77 intents) with a 10,003/3,080 train/test split and targets fine-grained single-domain intent detection.
+
+Long Range Understanding (LRU)
+
+This category evaluates the model’s ability to comprehend and synthesize information across extended contexts. We employ the following dataset:
+
+InfBench-Sum: A summarization dataset from InfBench (Zhang et al., 2024), requiring the model to process long-form content across multiple chunks and generate coherent summaries. This tests the model’s capacity to maintain contextual understanding over extended sequences and synthesize information from distributed memory representations. This dataset includes 100 novels, with an average context length of 172k tokens. During evaluation, the model is required to read a long novel and generate a corresponding high-level summary.
+
+Appendix B Formal Definitions of Reward Components
+
+This section provides the formal mathematical definitions of the four reward components used in our reinforcement learning framework.
+
+Correctness Reward ( [MATH] )
+
+Given a final memory state [MATH] after processing all chunks [MATH] , and a set of questions [MATH] with ground truth answers [MATH] , the correctness reward is defined as:
+
+ [MATH] 
+
+where [MATH] is the predicted answer generated by the RAG pipeline, [MATH] is the dataset-specific evaluation metric (e.g., exact match, F1 score), and [MATH] is the indicator function.
+
+Tool Call Format Reward ( [MATH] )
+
+For each time step [MATH] with action [MATH] , define the tool call format correctness indicator:
+
+ [MATH] 
+
+The tool call format reward at time step [MATH] is:
+
+ [MATH] 
+
+Compression Reward ( [MATH] )
+
+Given the total length of input chunks [MATH] and the total memory length [MATH] (sum of all memory entries), the compression reward is:
+
+ [MATH] 
+
+This reward encourages the agent to maintain compact memory representations while preserving essential information. The reward approaches 1 when memory is highly compressed and approaches 0 when memory size equals input size.
+
+Memory Content Reward ( [MATH] )
+
+For each time step [MATH] with action [MATH] , define the validity indicator using a language model judge:
+
+ [MATH] 
+
+The memory content reward at time step [MATH] is:
+
+ [MATH] 
+
+The overall reward combines these components as: [MATH] , where [MATH] and [MATH] are global rewards shared across all time steps, while [MATH] and [MATH] are computed per time step.
+
+Appendix C Experimental Details
+
+C.1 Justification of Backbone Model Selection
+
+We also evaluated Qwen3-8B but encountered critical instruction-following issues that made it unsuitable for our experiments. Despite explicit function signature specifications requiring the argument memory_type to accept only the values ’semantic’, ’core’, or ’episodic’, Qwen3-8B consistently generated malformed function calls such as new_memory_insert(memory_type=’semantic_memory’), appending an unnecessary ’_memory’ suffix to the argument values. This systematic failure to adhere to the specified API format occurred reliably across multiple trials.
+To investigate whether this was a formatting preference rather than a fundamental limitation, we modified our function signatures to accommodate the model’s apparent preference, changing the valid arguments to ’semantic_memory’, ’core_memory’, and ’episodic_memory’. While this adaptation did not impact Qwen3-4B’s performance (which handled both formats correctly), Qwen3-8B continued to exhibit lower reward values compared to Qwen3-4B even with this accommodation. This counterintuitive result—where the larger model demonstrated both poorer instruction-following capabilities and lower overall performance than the 4B variant—led us to exclude Qwen3-8B from our final experiments.
+
+Figure 6: The universal prompt used in the training of Mem- [MATH] .
+
+C.2 Baseline Introduction and Implementation Details
+
+We compare with the following baselines:
+
+(1) Long-Context: We simply use Qwen3-32B as the long-context model. In our experiments, this model always has the maximum context window as 32k. For the dataset with a total chunk length exceeding 32k, we truncate the combined chunk to keep the last 32k tokens.
+
+(2) RAG-Top2: We use BM25 as the retrieval method, and use the question as the query, retrieve top two chunks from all the previous chunks, and then use Qwen3-32B as the model to answer the questions.
+
+(3) MemAgent: We adopt the code from https://github.com/BytedTsinghua-SIA/MemAgent and use the 14B version BytedTsinghua-SIA/RL-MemoryAgent-14B to construct the memory.
+
+(4) MEM1: We use the code from https://github.com/MIT-MI/MEM1 and use the model https://huggingface.co/Mem-Lab/Qwen2.5-7B-RL-RAG-Q2-EM-Release to construct the memory.
+
+For both baselines MemAgent and MEM1, we let the model go over all the chunks [MATH] with the instruction including the task description, then with the obtained memory, we let the model answer questions. For MemAgent, we use the original model to answer the questions, for MEM1, after obtaining the memory, we use Qwen3-32B as the model to answer the questions based on the question and the obtained memory.
+
+C.3 Prompts Used in Training
+
+Instruction to Memorize the Chunk
+
+In our training, we use a universal prompt for the whole dataset, and we show the prompt in Figure 6. During update, when processing each chunk, we use this prompt to ask the agent to memorize the information in the chunk.
+
+Prompt to Measure Memory Content
+
+When computing the memory content reward [MATH] , we use the model Qwen3-32B as the judge. For Core Memory, Episodic Memory and Semantic Memory, we use the prompt in Figure 7, 8, 9, respectively.
+
+Prompt to Answer the Questions
+
+When using the final model Qwen3-32B to answer the questions, we use the prompt as shown in Figure 10.
+
+Figure 7: The prompt used to measure the content of the Core Memory during training.
+
+Figure 8: The prompt used to measure the content of the Episodic Memory during training.
+
+Figure 9: The prompt used to measure the content of the Semantic Memory during training.
+
+Figure 10: The prompt used to answer questions in Mem- [MATH] .
+
+C.4 Additional Ablation Study
+
+In Section 4.4, we show the performance comparison of different [MATH] on the validation dataset. We also compare these settings on the test dataset (MemoryAgentBench), shown in Table 9. The observations are consistent with Section 4.4.
+
+AR
+TTL
+LRU
+Avg.
+
+ [MATH] 
+ [MATH] 
+Metric
+Single-Doc
+Multi-Doc
+LME(S)
+TREC-C
+NLU
+TREC-F
+CLINIC
+BANKING77
+InfBench-Sum
+
+0.05
+0.0
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.420
+
+\cellcolorblue!100.340
+
+\cellcolorblue!100.527
+
+\cellcolorblue!100.480
+
+\cellcolorblue!100.640
+
+\cellcolorblue!100.200
+
+\cellcolorblue!100.720
+
+\cellcolorblue!100.550
+
+\cellcolorblue!100.108
+
+\cellcolorblue!100.445
+
+\cellcolororange!10Mem.
+
+\cellcolororange!1086K
+
+\cellcolororange!10123K
+
+\cellcolororange!10159K
+
+\cellcolororange!1075K
+
+\cellcolororange!10100K
+
+\cellcolororange!1065K
+
+\cellcolororange!1020K
+
+\cellcolororange!1097K
+
+\cellcolororange!1054K
+
+\cellcolororange!1087K
+
+0.0
+0.1
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.770
+
+\cellcolorblue!100.610
+
+\cellcolorblue!100.387
+
+\cellcolorblue!100.690
+
+\cellcolorblue!100.730
+
+\cellcolorblue!100.370
+
+\cellcolorblue!100.780
+
+\cellcolorblue!100.770
+
+\cellcolorblue!100.109
+
+\cellcolorblue!100.580
+
+\cellcolororange!10Mem.
+
+\cellcolororange!10160K
+
+\cellcolororange!10362K
+
+\cellcolororange!1047K
+
+\cellcolororange!10124K
+
+\cellcolororange!10113K
+
+\cellcolororange!10127K
+
+\cellcolororange!1047K
+
+\cellcolororange!10119K
+
+\cellcolororange!1041K
+
+\cellcolororange!10127K
+
+0.05
+0.1
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.740
+
+\cellcolorblue!100.680
+
+\cellcolorblue!100.520
+
+\cellcolorblue!100.710
+
+\cellcolorblue!100.710
+
+\cellcolorblue!100.410
+
+\cellcolorblue!100.730
+
+\cellcolorblue!100.700
+
+\cellcolorblue!100.129
+
+\cellcolorblue!100.592
+
+\cellcolororange!10Mem.
+
+\cellcolororange!10160K
+
+\cellcolororange!10323K
+
+\cellcolororange!10127K
+
+\cellcolororange!10120K
+
+\cellcolororange!10142K
+
+\cellcolororange!10123K
+
+\cellcolororange!1018K
+
+\cellcolororange!10133K
+
+\cellcolororange!1019K
+
+\cellcolororange!10129K
+
+0.2
+0.1
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.710
+
+\cellcolorblue!100.730
+
+\cellcolorblue!100.367
+
+\cellcolorblue!100.810
+
+\cellcolorblue!100.270
+
+\cellcolorblue!100.280
+
+\cellcolorblue!100.140
+
+\cellcolorblue!100.020
+
+\cellcolorblue!100.113
+
+\cellcolorblue!100.351
+
+\cellcolororange!10Mem.
+
+\cellcolororange!10160K
+
+\cellcolororange!10344K
+
+\cellcolororange!10139K
+
+\cellcolororange!103K
+
+\cellcolororange!103K
+
+\cellcolororange!103K
+
+\cellcolororange!101K
+
+\cellcolororange!105K
+
+\cellcolororange!10118K
+
+\cellcolororange!1087K
+
+0.4
+0.1
+
+\cellcolorblue!10Perf.
+
+\cellcolorblue!100.590
+
+\cellcolorblue!100.610
+
+\cellcolorblue!100.453
+
+\cellcolorblue!100.500
+
+\cellcolorblue!100.360
+
+\cellcolorblue!100.190
+
+\cellcolorblue!100.170
+
+\cellcolorblue!100.380
+
+\cellcolorblue!100.119
+
+\cellcolorblue!100.375
+
+\cellcolororange!10Mem.
+
+\cellcolororange!10138K
+
+\cellcolororange!10312K
+
+\cellcolororange!1027K
+
+\cellcolororange!101K
+
+\cellcolororange!101K
+
+\cellcolororange!101K
+
+\cellcolororange!102K
+
+\cellcolororange!101K
+
+\cellcolororange!1016K
+
+\cellcolororange!1055K
+
+Table 9: Performance and memory consumption on MemoryAgentBench. Perf.: task-specific metrics (F1/Accuracy), Mem.: memory in thousands of tokens. AR: Accurate Retrieval, TTL: Time Time Learning, LRU: Long Range Understanding. Best performance values are shown in bold.
+
+Generated on Tue Sep 30 07:31:29 2025 by LaTeXML
+

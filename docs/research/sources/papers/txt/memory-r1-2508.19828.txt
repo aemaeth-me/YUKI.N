@@ -1,0 +1,955 @@
+
+
+Memory-R1: Enhancing Large Language Model Agents to Manage and Utilize Memories via Reinforcement Learning
+
+1 Introduction
+
+2 Related Work
+
+2.1 Memory Augmented LLM-based Agents
+
+2.2 LLM and Reinforcement Learning
+
+3 Method
+
+3.1 Memory-R1 Pipeline
+
+3.2 RL Fine-tuning for Memory Manager Agent
+
+Task Formulation
+
+PPO for Memory Manager
+
+GRPO for Memory Manager
+
+Reward Design for Memory Manager
+
+3.3 RL Fine-tuning for Answer Agent
+
+Task Formulation
+
+PPO for Answer Agent
+
+GRPO for Answer Agent
+
+Reward Design for Answer Agent
+
+4 Experiments
+
+4.1 Experimental Setup
+
+Dataset and Model
+
+Evaluation Metrics
+
+Baselines
+
+Implementation Details
+
+4.2 Main Results
+
+4.3 Ablation Studies
+
+Effect of Memory Manager
+
+Effect of Answer Agent
+
+Effect of Memory Distillation
+
+RL‑fine-tuned Answer Agent Gains More with Stronger Memory Manager
+
+Comparison of RL Policies
+
+5 Conclusion
+
+A Case Study of Behavior of Agents before and after Fine-tuning
+
+A.1 From In-context Memory Manager to RL fine-tuned Memory Manager
+
+A.2 From Vanilla LLM to Memory‑Distilled RL Answer Agent
+
+B Data Construction
+
+C Prompts
+
+C.1 Memory Manager Prompt
+
+C.2 Answer Agent Prompt
+
+C.3 LLM-as-a-Judge (J) Prompt
+
+D Alogirthm
+
+\nocopyright\affiliations
+1Ludwig Maximilian University of Munich  2Technical University of Munich 
+3University of Cambridge  4University of Hong Kong 
+s.yan@campus.lmu.de, cognitive.yunpu@gmail.com
+
+Memory-R1: Enhancing Large Language Model Agents to Manage and Utilize Memories via Reinforcement Learning
+
+Sikuan Yan\equalcontrib1,
+Xiufeng Yang\equalcontrib2,
+Zuchao Huang1,
+Ercong Nie1,
+Zifeng Ding3,
+Zonggen Li4,
+Xiaowen Ma1,
+Hinrich Schütze1,
+Volker Tresp1,
+Yunpu Ma1
+Corresponding author
+
+Abstract
+
+Large Language Models (LLMs) have demonstrated impressive capabilities across a wide range of NLP tasks, but they remain fundamentally stateless, constrained by limited context windows that hinder long-horizon reasoning. Recent efforts to address this limitation often augment LLMs with an external memory bank, yet most existing pipelines are static and heuristic-driven, lacking any learned mechanism for deciding what to store, update, or retrieve. We present Memory-R1, a reinforcement learning (RL) framework that equips LLMs with the ability to actively manage and utilize external memory through two specialized agents: a Memory Manager that learns to perform structured memory operations, including adding, updating, deleting, or taking no operation on memory entries; and an Answer Agent that selects the most relevant entries and reasons over them to produce an answer. Both agents are fine-tuned with outcome-driven RL (PPO and GRPO), enabling adaptive memory management and utilization with minimal supervision.
+With as few as 152 question-answer pairs and a corresponding temporal memory bank for training, Memory-R1 outperforms the strongest existing baseline and demonstrates strong generalization across diverse question types and LLM backbones. Beyond presenting an effective approach, this work provides insights into how RL can unlock more agentic, memory-aware behavior in LLMs, pointing toward richer, more persistent reasoning systems.
+
+Figure 1: 
+Comparison of Memory‑R1 and a vanilla LLM memory system. (Left) In a multi‑session dialogue, the user mentions the adoption of two dogs in separate sessions. (Middle) The vanilla Memory Manager misinterprets the second adoption as a contradiction and issues DELETE+ADD, fragmenting memory. (Right) The RL‑trained Memory Manager issues a single UPDATE to consolidate the memory, and the Answer Agent applies Memory Distillation: from 60 memories retrieved via RAG (e.g., <Memory 1> “Andrew adopted 2 dogs named Buddy and Scout”; <Memory 2> “Andrew feels a bit jealous of Audrey’s dogs”; etc.), answer agent first filters the memories that are truly useful to answer the question, which is <Memory 1>, then reasons over the selected entry to produce the correct answer (“2 dogs”).
+
+1 Introduction
+
+Large Language Models (LLMs) have shown remarkable ability in understanding and generating natural language, making them central to recent advances in AI openai2024gpt4technicalreport; qwen2025qwen25technicalreport. Yet, they remain fundamentally stateless yu2025stateful; fan2025if; goodyear2025effect: each incoming query is processed independently of other interactions, because LLMs are constrained by a finite context window that prevents them from retaining and leveraging information across long conversations or evolving tasks wang2024adaptingllmsefficientcontext; fei2023extendingcontextwindowlarge.
+
+To overcome these limits, recent work augments LLMs with external memory modules zhang2024survey. Most adopt a retrieval-augmented generation (RAG) paradigm pan2025memory; salama2025meminsightautonomousmemoryaugmentation, appending retrieved memory entries to the model’s input prompt. While this extends access to past information, it also creates a fundamental retrieval challenge: heuristics may return too few entries, omitting crucial context, or too many, flooding the model with irrelevant information and degrading performance liu2023lostmiddlelanguagemodels. In this paradigm, retrieved memories are passed to the LLM without meaningful filtering or prioritization, forcing the model to reason over both relevant and irrelevant content, which makes it prone to distraction by noise. Humans, by contrast, retrieve broadly but then filter selectively, integrating only the most useful pieces to maintain coherent, evolving knowledge.
+
+Equally important is the challenge of memory management: deciding what to remember, update, or discard. Some systems packer2023memgpt; modarressi2024memllm; xiong2025memory adopt CRUD-style operations—create, read, update, and delete—which were originally introduced in database systems martin1983database; sulemani2021crud. A more recent work aios2024sdk augments this paradigm with a search operator, while Mem0 chhikara2025mem0 investigates the operator set {ADD, UPDATE, DELETE, NOOP}. We adopt this setting, as it provides a minimal yet expressive framework for modeling memory dynamics. However, existing approaches mainly rely on vanilla LLMs to choose operations from in-context instructions without any learning signal tied to correctness packer2023memgpt; chhikara2025mem0. Even simple cases can fail. Figure 1, a simplified example drawn from a LOCOMO conversation (maharana-etal-2024-evaluating), shows how a user first says “I adopted a dog named Buddy” and later adds “I adopted another dog named Scout”. A vanilla system misinterprets this as a contradiction, issuing DELETE+ADD and overwriting the original memory. A trained agent, however, consolidates with an UPDATE: “Andrew adopted two dogs, Buddy and Scout.” Appendix A.1 provides a real dialogue trace illustrating this case in practice.
+
+These challenges of retrieving and managing memory remain largely unsolved. Supervised fine-tuning provides limited help because it is impractical to label every memory operation or retrieval decision. Reinforcement learning (RL), by contrast, has recently shown strong potential for aligning LLM behavior with high-level objectives, including tool use qian2025toolrlrewardtoollearning; wang2025actingreasoningmoreteaching, web navigation wei2025webagentr1trainingwebagents, and search optimization jin2025search; song2025r1. Building on this success, we argue that RL is the missing ingredient for adaptive memory in LLM agents. By optimizing outcome-based rewards, models can learn when to add, update, delete, or retain information and how to use retrieved memories for reasoning.
+
+In this paper, we present Memory-R1, an RL fine-tuned, memory-augmented LLM framework with two specialized agents: (1) a Memory Manager that learns to perform structured memory operations, including adding, updating, deleting, and taking no operation, to maintain and evolve the memory bank, and (2) an Answer Agent that applies a Memory Distillation policy to filter memories retrieved via Retrieval‑Augmented Generation (RAG) and reason over the selected entries to produce answers. Both agents are fine-tuned using PPO schulman2017proximal or GRPO shao2024deepseekmath, achieving strong performance with as few as 152 question–answer pairs. On the LOCOMO benchmark (maharana-etal-2024-evaluating), Memory-R1 delivers substantial gains over the most competitive baseline, Mem0 chhikara2025mem0. Using the LLaMA‑3.1‑8B‑Instruct backbone, Memory-R1-GRPO improves overall F1 from 30.41 to 45.02 (+14.61 absolute, 48% relative), BLEU-1 from 22.22 to 37.51 (+15.29 absolute, +69% relative), and LLM-as-a-Judge from 45.68 to 62.74 (+17.06 absolute, +37% relative).
+
+These improvements set a new state of the art on LOCOMO and underscore Memory‑R1’s ability to achieve large performance gains with minimal supervision, highlighting its efficiency.
+
+Our contributions are summarized as follows:
+
+•
+
+We introduce Memory-R1, the first RL framework for memory-augmented LLMs, consisting of a Memory Manager to perform structured memory operations and an Answer Agent to filter and reason over memories retrieved via RAG.
+
+•
+
+We develop a data-efficient fine-tuning strategy using PPO and GRPO that enables Memory-R1 to achieve strong performance with as few as 152 question–answer pairs, demonstrating that large memory improvements can be achieved with minimal supervision.
+
+•
+
+We provide in-depth analysis of RL choices, model size, and memory design, offering actionable insights for building the next generation of memory-aware, reasoning-capable LLM agents.
+
+2 Related Work
+
+2.1 Memory Augmented LLM-based Agents
+
+LLMs have emerged as powerful general-purpose reasoners, capable of engaging in multi-turn dialogues, decomposing tasks into actionable steps, and leveraging prior context to guide decision making  brown2020languagemodelsfewshotlearners; chowdhery2022palmscalinglanguagemodeling; openai2024gpt4technicalreport. Building on these capabilities, LLM-based agents have been proposed to solve complex tasks in interactive settings, such as conversational assistance  thoppilan2022lamdalanguagemodelsdialog; ouyang2022traininglanguagemodelsfollow, tool-augmented reasoning  schick2023toolformerlanguagemodelsteach; yao2023reactsynergizingreasoningacting, and autonomous decision making in structured or partially observable environments  park2023generativeagentsinteractivesimulacra; wang2023voyageropenendedembodiedagent; shinn2023reflexion.
+
+To address the limitations of fixed-length context windows and short-term memory, recent works have explored augmenting LLM agents with external memory modules. These memory-augmented agents aim to support long-horizon reasoning and persistent knowledge accumulation by selectively storing, retrieving, and updating relevant information. Notable approaches include LOCOMO maharana2024evaluating, a benchmark model that evaluates agents’ ability to retrieve and reason over temporally distant conversational history; ReadAgent lee2024readagent, which incorporates retrieval mechanisms for memory-grounded dialogue; MemoryBank zhong2024memorybank, a compositional memory controller for lifelong agent memory; MemGPT packer2023memgpt, which introduces working and long-term memory buffers with memory scheduling policies; and A-Mem xu2025amemagenticmemoryllm, a hybrid architecture that combines dynamic memory access with reinforcement learning(RL). These systems represent key steps toward building LLM agents with scalable, interpretable, and persistent memory capabilities. For a comprehensive overview of memory in AI agents, we refer readers to the recent survey du2025rethinkingmemoryaitaxonomy.
+
+2.2 LLM and Reinforcement Learning
+
+The intersection of LLM and RL has received increasing attention as researchers seek to move beyond static supervised fine-tuning and enable models to learn from dynamic, interactive feedback. Reinforcement Learning from Human Feedback (RLHF) ouyang2022traininglanguagemodelsfollow is a foundational method used to align LLM outputs with human preferences. Recent works extend RL to more structured decision-making tasks for LLMs. For instance, Toolformer schick2023toolformerlanguagemodelsteach and ReAct-style agents yao2023reactsynergizingreasoningacting frame tool use as an RL problem, where the LLM learns when to query external tools or APIs. Search-R1 jin2025search trains LLMs to issue web search queries using RL to maximize final answer correctness. Similarly, the Trial and Error approach song2024trialerrorexplorationbasedtrajectory optimizes agents to select better reasoning paths. These approaches demonstrate that RL can improve complex behavior sequences in LLMs. However, memory management and utilization in LLMs remain underexplored in the RL setting. Existing memory-augmented LLM systems chhikara2025mem0; packer2023memgpt; lee2024readagent typically rely on heuristics to control memory operations, lacking adaptability and long-term optimization. Our work, Memory-R1, is among the first to frame memory operation selection, and the utilization of relevant memories as an RL problem.
+
+3 Method
+
+In this section, we describe the Memory‑R1 approach for multi‑session dialogue tasks, where each dialogue contains multiple sessions (separate interactions occurring at different times) and each session consists of several turns (a back‑and‑forth exchange between two users). Answering a question often requires synthesizing information spread across these sessions, posing a strong challenge for long‑horizon memory management and reasoning. We first present the overall pipeline (Section 3.1), followed by RL fine‑tuning of the Memory Manager (Section 3.2) and the Answer Agent (Section 3.3).
+
+3.1 Memory-R1 Pipeline
+
+This section provides an overview of the Memory‑R1 pipeline. Figure 2 outlines the pipeline. At each dialogue turn, an LLM determines information that is worth to remember and summarize it into a piece of information. Then it triggers a retrieval step using Retrieval-Augmented Generation (RAG) to locate related entries in the memory bank. The Memory Manager then decides whether to ADD, UPDATE, DELETE, or NOOP, maintaining and evolving the memory state.
+
+For question answering, the user’s query retrieves up to 60 candidate memories, following the setup of chhikara2025mem0. The Answer Agent applies a Memory Distillation policy to filter the most relevant entries and generate an answer. Both agents are fine-tuned with PPO and GRPO, enabling outcome-driven learning of memory operations and selective utilization.
+
+Algorithm 1 Memory-R1 Pipeline for Memory Manager
+
+1:Input: Dataset [MATH] of tuples: dialogue turns [MATH] , temp memory bank [MATH] , question-answer pairs [MATH] ;
+Memory Manager LLM [MATH] ; Answer LLM [MATH] ; Reward Function [MATH] 
+
+2:Output: Fine-tuned Memory Manager LLM [MATH] 
+
+3:procedure TrainMemoryManager( [MATH] )
+
+4:  for each tuple [MATH]  do
+
+5:   for  [MATH]  do
+
+6:     Facts Extraction: [MATH] 
+
+7:     Memory Retrieval: [MATH] 
+
+8:     Determine operation: [MATH] 
+
+9:     if  [MATH]  then
+
+10:       [MATH] 
+
+11:     else if  [MATH]  then
+
+12:       [MATH] 
+
+13:     else if  [MATH]  then
+
+14:       [MATH] 
+
+15:     else if  [MATH]  then
+
+16:       [MATH] 
+
+17:     end if
+
+18:   end for
+
+19:   Get Context: [MATH] 
+
+20:   Get Response: [MATH] 
+
+21:   Policy Update: [MATH] ,
+
+22:   where RL [MATH] 
+
+23:  end for
+
+24:  return [MATH] 
+
+25:end procedure
+
+Figure 2: 
+Overview of the Memory-R1 framework. Stage 1 (blue) constructs and updates the memory bank via the RL‑fine‑tuned Memory Manager, which chooses operations {ADD, UPDATE, DELETE, NOOP} for each new dialogue turn. Stage 2 (green) answers user questions via the Answer Agent, which applies a Memory Distillation policy to reason over retrieved memories.
+
+3.2 RL Fine-tuning for Memory Manager Agent
+
+Task Formulation
+
+The Memory Manager maintains and updates the memory bank by selecting the appropriate operation from {ADD, UPDATE, DELETE, or NOOP} for each new piece of information extracted from a dialogue. It outputs both the operation and the updated memory content [MATH] .
+
+Training uses (i) a partially constructed memory bank and (ii) a new dialogue turn containing information relevant to downstream question answering. The Memory Manager learns which operation produces a memory state that enables the Answer Agent to answer correctly. Training data is drawn from the LOCOMO dataset to ensure realistic multi-session dialogue settings (details in Appendix B).
+
+As shown in Algorithm 1, the Memory Manager is formalized as a policy [MATH] that takes the extracted information [MATH] and retrieved memories [MATH] as input, and outputs an operation [MATH] with associated content [MATH] :
+
+ [MATH] 
+
+(1)
+
+where [MATH] is the extracted information and [MATH] the current memory bank.
+
+PPO for Memory Manager
+
+We fine‑tune the Memory Manager using Proximal Policy Optimization (PPO, schulman2017proximal). Given a candidate memory [MATH] and an existing memory bank [MATH] , the Memory Manager outputs a memory operation [MATH] along with content [MATH] . These actions are sampled from the current policy [MATH] and applied to update the memory bank, which is then passed to the frozen Answer Agent. The correctness of the answer provides the reward signal. PPO optimizes a clipped surrogate objective to stabilize training:
+
+ [MATH] 
+
+(2)
+
+where
+ [MATH] 
+is the importance ratio between the new and old policies, and [MATH] is the advantage computed from the improvement in the Answer Agent’s final answer accuracy. The clipping range [MATH] constrains policy updates and ensures stable learning.
+
+GRPO for Memory Manager
+
+We also apply Group Relative Policy Optimization (GRPO, shao2024deepseekmath) as an alternative to PPO for training the Memory Manager. GRPO samples a group of [MATH] candidate actions and assigns relative advantages within the group, eliminating the need for a learned value function while preserving PPO‑style stability.
+
+Given a state [MATH] , the old policy [MATH] generates [MATH] candidate actions. The GRPO objective is:
+
+ [MATH] 
+
+(3)
+
+where [MATH] follows the same importance ratio definition as in PPO, now applied per sampled action. The group‑relative advantage is computed by standardizing the QA rewards of all sampled actions:
+
+ [MATH] 
+
+(4)
+
+The KL term [MATH] constrains updates, preventing drift from the reference policy.
+
+Reward Design for Memory Manager
+
+We adopt an outcome‑driven reward design for the Memory Manager. At each step, the Memory Manager selects an operation [MATH] and proposes new content [MATH] for the memory bank. Rather than scoring individual edits, we evaluate the updated memory bank by its impact on downstream question answering: the Answer Agent can only produce the correct answer if the Memory Manager’s operations were effective. The reward is defined as:
+
+ [MATH] 
+
+(5)
+
+where [MATH] is the Answer Agent’s prediction after the update and [MATH] is the ground‑truth answer. This outcome‑based signal eliminates the need for manual memory relevance labels and keeps supervision simple and scalable. Freezing the Answer Agent during training avoids attribution ambiguity, and despite the indirect signal, exact‑match rewards alone are sufficient to teach the Memory Manager effective memory operations.
+
+3.3 RL Fine-tuning for Answer Agent
+
+Task Formulation
+
+The Answer Agent leverages a memory bank curated by the Memory Manager to handle questions in long‑horizon, multi‑session dialogues. Following chhikara2025mem0, for each question, 60 candidate memories are retrieved via a similarity‑based RAG search using the question as the query. The agent then performs memory distillation: it filters this retrieved memory set to surface the most relevant entries and generates the final answer conditioned on these distilled memories.
+
+We model the Answer Agent’s behavior as a policy [MATH] that maps the question [MATH] and retrieved memories [MATH] to an answer [MATH] :
+
+ [MATH] 
+
+(6)
+
+where [MATH] is the current question and [MATH] is the subset of the memory bank retrieved by RAG.
+
+PPO for Answer Agent
+
+We fine‑tune the Answer Agent using the same PPO framework as in Section 3.1. While the optimization is identical, the task differs: the Answer Agent takes the current question [MATH] and retrieved memories [MATH] and generates an answer [MATH] token‑by‑token.
+
+The PPO objective mirrors Equation (2), applied over the generated answer sequence. The importance ratio is:
+
+ [MATH] 
+
+(7)
+
+where [MATH] is the full generated answer. Advantages are computed from final answer quality (e.g., exact match with the reference), and clipping keeps updates within a trust region for stability.
+
+GRPO for Answer Agent
+
+We also fine‑tune the Answer Agent with GRPO, following the formulation in Section 3.1. For each input [MATH] , the policy samples [MATH] candidate answers [MATH] . Their Exact Match scores against the ground‑truth answer [MATH] are normalized into group‑relative advantages. GRPO reuses the same importance ratio definition as PPO, applied per candidate answer. By comparing candidates within each group, GRPO provides stable gradient signals without a learned value function, improving sample efficiency and robustness during RL fine-tuning.
+
+Reward Design for Answer Agent
+
+We adopt a simple yet effective reward function for the Answer Agent, using the Exact Match (EM) score between the generated answer and the ground-truth answer as the primary reward signal:
+
+ [MATH] 
+
+(8)
+
+This design directly ties the reward to the correctness of the final answer, encouraging the agent to select and reason over memories in a way that yields accurate outputs rather than optimizing for intermediate steps.
+
+4 Experiments
+
+4.1 Experimental Setup
+
+Dataset and Model
+
+We evaluate our approach on the LOCOMO benchmark maharana2024evaluating. LOCOMO consists of two components: (i) multi-turn dialogues (about 600 turns per dialogue, averaging 26,000 tokens) and (ii) question–answer (QA) pairs grounded in those dialogues. Each dialogue has roughly 200 questions spanning single‑hop, multi‑hop, open‑domain, and temporal reasoning. We exclude the adversarial subset because it lacks ground‑truth answers. LOCOMO is widely used in memory‑augmented LLM research chhikara2025mem0; xu2025amemagenticmemoryllm, as many questions require drawing information from distant or fragmented dialogue turns—making it an ideal testbed for evaluating memory management and utilization. The dataset comprises 10 multi-turn dialogues. We adopt a 1:1:8 train/validation/test split: the first dialogue with 152 questions for training, the second dialogue with 81 questions for validation, and eight dialogues with 1,307 questions for testing, providing broad evaluation coverage while keeping training supervision minimal. A detailed description of the data construction process is provided in Appendix B. All experiments are conducted with LLaMA-3.1‑8B‑Instruct and Qwen2.5‑7B‑Instruct, ensuring consistency and comparability across evaluations.
+
+Evaluation Metrics
+
+We assess performance using three complementary metrics: Token‑level F1 Score (F1), measuring overlap between predicted and ground‑truth answers; BLEU‑1 (B1), capturing unigram‑level lexical similarity; and LLM‑as‑a‑Judge (J), which employs a separate LLM to evaluate factual accuracy, relevance, completeness, and contextual appropriateness. While F1 and B1 provide straightforward string‑based scores, J captures deeper semantic correctness and offers a more human‑aligned assessment. The implementation details and script for LLM‑as‑a‑Judge are provided in Appendix C.
+
+Baselines
+
+To evaluate the effectiveness of Memory‑R1, we compare it against several established baselines for multi‑session dialogue reasoning:
+(1) LOCOMO maharana2024evaluating, the benchmark framework designed to assess LLMs’ ability to retrieve and reason over information from long‑range, multi‑session conversations;
+(3) Zep rasmussen2025zep, a retrieval‑based agent that introduces structured memory access strategies for complex, temporally extended queries;
+(3) A‑Mem xu2025amemagenticmemoryllm, a dynamic agentic memory system that creates, links, and updates structured memories to enhance reasoning across sessions;
+(4) LangMem langmem2024, an open‑source memory framework that links memory chains across sessions to support long‑context reasoning;
+(5) Mem0 chhikara2025mem0, a modular memory system with explicit in context memory operations designed for scalable deployment.
+
+For a fair comparison, we re‑implemented all baselines using both the LLaMA‑3.1‑8B‑Instruct and Qwen‑2.5‑7B‑Instruct models as backbones, with temperature set to 0 and a maximum token limit of 2048. This consistent setup ensures reproducibility and allows us to assess how each method performs across different model architectures.
+
+Implementation Details
+
+We fine-tune Memory-R1 using both the LLaMA-3.1-8B-Instruct and Qwen-2.5-7B-Instruct models to evaluate the framework’s robustness across different architectures. The prompts for memory operation and memory augmented answer generation are adapted from chhikara2025mem0, with details provided in Appendix C. For PPO experiments, we train both actor and critic networks, while for GRPO runs, only the actor is trained since GRPO uses grouped return normalization in place of a critic. Both PPO and GRPO training are implemented using the VERL framework sheng2025hybridflow. Experiments are performed on 4 NVIDIA H100 GPUs (80GB each) with a total batch size of 128 and a micro-batch size of 2 per GPU. The maximum prompt and response lengths are set to 4096 and 2048 tokens, respectively. The actor and critic (for PPO) are optimized with learning rates of [MATH] and [MATH] , using a constant warmup schedule. During RL training, we use a decoding temperature of [MATH] to encourage exploration and capture a wider range of reward signals, which helps stabilize policy learning. For validation and testing, we switch to greedy decoding ( [MATH] ) to eliminate randomness and ensure consistent metric tracking. Each configuration and model variant is evaluated three times, and we report the mean score to reduce variance and provide a more reliable estimate of performance.
+
+Model
+Method
+Single Hop
+Multi-Hop
+Open Domain
+Temporal
+Overall
+
+F1 [MATH] 
+
+B1 [MATH] 
+
+J [MATH] 
+
+F1 [MATH] 
+
+B1 [MATH] 
+
+J [MATH] 
+
+F1 [MATH] 
+
+B1 [MATH] 
+
+J [MATH] 
+
+F1 [MATH] 
+
+B1 [MATH] 
+
+J [MATH] 
+
+F1 [MATH] 
+
+B1 [MATH] 
+
+J [MATH] 
+
+LLaMA-3.1-8B
+
+Instruct
+
+LOCOMO
+12.25
+9.77
+13.81
+13.69
+10.96
+20.48
+11.59
+8.30
+15.96
+9.38
+8.15
+4.65
+11.41
+8.71
+13.62
+
+Zep
+30.15
+17.15
+52.38
+15.04
+11.56
+33.33
+26.67
+18.44
+45.36
+3.49
+2.68
+27.58
+22.60
+15.05
+42.80
+
+A-Mem
+21.62
+16.93
+44.76
+13.82
+11.45
+34.93
+34.67
+29.13
+49.38
+25.77
+22.14
+36.43
+29.20
+24.40
+44.76
+
+LangMem
+22.40
+15.21
+47.26
+18.65
+16.03
+39.81
+31.62
+23.85
+48.38
+27.75
+21.53
+30.94
+28.34
+21.31
+44.18
+
+Mem0
+27.29
+18.63
+43.93
+18.59
+13.86
+37.35
+34.03
+24.77
+52.27
+26.90
+21.06
+31.40
+30.41
+22.22
+45.68
+
+Memory-R1-PPO
+32.52
+24.47
+53.56
+26.86
+23.47
+42.17
+45.30
+39.18
+64.10
+41.57
+26.11
+47.67
+41.05
+32.91
+57.54
+
+Memory-R1-GRPO
+35.73
+27.70
+59.83
+35.65
+30.77
+53.01
+47.42
+41.24
+68.78
+49.86
+38.27
+51.55
+45.02
+37.51
+62.74
+
+Qwen-2.5-7B
+
+Instruct
+
+LOCOMO
+9.57
+7.00
+15.06
+11.84
+10.02
+19.28
+8.67
+6.52
+12.79
+8.35
+8.74
+5.43
+8.97
+7.27
+12.17
+
+Zep
+31.02
+21.39
+42.85
+20.42
+15.76
+23.81
+25.25
+21.34
+42.26
+8.94
+8.42
+29.31
+23.22
+18.78
+38.99
+
+A-Mem
+18.96
+12.86
+40.78
+14.73
+12.66
+31.32
+30.58
+26.14
+46.90
+23.67
+20.67
+28.68
+26.08
+21.78
+40.78
+
+LangMem
+22.84
+16.98
+43.64
+18.98
+16.89
+44.38
+32.47
+25.98
+50.45
+26.62
+20.93
+23.08
+28.69
+22.76
+43.42
+
+Mem0
+24.96
+18.05
+61.92
+20.31
+15.82
+48.19
+32.74
+25.27
+65.20
+33.16
+26.28
+38.76
+30.61
+23.55
+53.30
+
+Memory-R1-PPO
+34.22
+23.61
+57.74
+32.87
+29.48
+53.01
+44.78
+38.72
+66.99
+42.88
+30.30
+42.25
+41.72
+33.70
+59.53
+
+Memory-R1-GRPO
+33.64
+26.06
+62.34
+23.55
+20.71
+40.96
+46.86
+40.92
+67.81
+47.75
+38.49
+49.61
+43.14
+36.44
+61.51
+
+Table 1: Evaluation results of Memory-R1 and baselines across LLaMA‑3.1‑8B‑Instruct and Qwen‑2.5‑7B‑Instruct on the LOCOMO benchmark dataset. Models are evaluated on F1, BLEU‑1 (B1), and LLM‑as‑a‑Judge (J) across Single Hop, Multi‑Hop, Open Domain, and Temporal questions. Higher is better. The best results are marked in Bold.
+
+4.2 Main Results
+
+Table 1 reports the performance of Memory-R1 across LLaMA-3.1-8B-Instruct and Qwen-2.5-7B-Instruct models on the LOCOMO benchmark, covering diverse question types including Single Hop, Multi-Hop, Open Domain, and Temporal reasoning. We evaluate two variants of Memory-R1: one fine-tuned with PPO and another with GRPO, and benchmark them against leading memory-augmented baselines, including LOCOMO, LangMem, A-Mem, and Mem0.
+
+Across both model families, Memory-R1 consistently sets a new state of the art. On LLaMA-3.1-8B, Memory-R1-GRPO delivers the strongest overall performance, improving F1 by 68.9%, B1 by 48.3%, and J by 37.1% over the strongest baseline Mem0. Similarly, Memory-R1-PPO also yields substantial improvements, raising overall F1, B1, and J scores by 47.9%, 35.3%, and 26.5%, respectively.
+
+Notably, the benefits of Memory-R1 transfer robustly to a different backbone. When applied to Qwen-2.5-7B-Instruct, Memory-R1-GRPO again emerges as the top performer, surpassing Mem0 by margins of 57.3% (F1), 41.5% (B1), and 33.8% (J). PPO remains competitive, delivering strong gains over all non-RL baselines.
+
+These consistent improvements across two distinct LLM backbones demonstrate that reinforcement learning(RL) is highly effective for teaching LLMs to manage and leverage long-term memory, independent of model architecture. Moreover, the gains are broad-based—spanning single-hop, multi-hop, open-domain, and temporal questions—highlighting Memory-R1 as a generalizable framework for building adaptive, memory-augmented LLMs capable of long-horizon reasoning.
+
+4.3 Ablation Studies
+
+We conduct ablation studies to examine the contribution of each component in Memory‑R1, isolating the effects of the Memory Manager, the Answer Agent, and the Memory Distillation mechanism. We also compare the training dynamics of PPO and GRPO.
+
+Effect of Memory Manager
+
+To assess the benefit of our RL‑fine‑tuned Memory Manager, we compare it against the in‑context memory manager, with both variants built on the LLaMA‑3.1‑8B‑Instruct base model. As shown in Table 2, RL training delivers consistent gains: PPO improves overall F1 to 24.60, B1 to 32.55, and J to 59.37; GRPO further improves F1 to 24.91, B1 to 33.05, and J to 59.91. These results confirm that outcome‑based RL enables the Memory Manager to execute more accurate and effective operations—reinforcing our central claim that memory control should be learned rather than scripted.
+
+Method
+F1 [MATH] 
+B1 [MATH] 
+J [MATH] 
+
+LLaMA3.1-8B
+26.73
+20.54
+47.82
+
+LLaMA3.1-8B + PPO
+32.55
+24.60
+59.37
+
+LLaMA3.1-8B + GRPO
+33.05
+24.91
+59.91
+
+Table 2: Performance of the LLaMA‑3.1‑8B‑Instruct model and its PPO- and GRPO-fine‑tuned variants as the Memory Manager, with the answer agent fixed to LLaMA‑3.1‑8B‑Instruct.
+
+Method
+F1 [MATH] 
+B1 [MATH] 
+J [MATH] 
+
+LLaMA3.1-8B
+26.73
+20.54
+47.82
+
+LLaMA3.1-8B + PPO
+34.48
+28.13
+49.04
+
+LLaMA3.1-8B + GRPO
+37.54
+30.64
+52.87
+
+Table 3: Performance of the base LLaMA‑3.1‑8B‑Instruct model and its PPO‑ and GRPO‑fine‑tuned variants as the Answer Agent, with the Memory Manager fixed to LLaMA‑3.1‑8B‑Instruct.
+
+Method
+F1 [MATH] 
+B1 [MATH] 
+J [MATH] 
+
+GRPO w/o Memory Distillation
+40.95
+34.37
+60.14
+
+GRPO w. Memory Distillation
+45.02
+37.51
+62.74
+
+Table 4: Performance comparison of GRPO fine-tuned Answer Agent with and without Memory Distillation policy using the LLaMA‑3.1‑8B‑Instruct model.
+
+Figure 3: Performance gains of Answer Agent variants (Base/PPO fine-tuned/GRPO fine-tuned) when paired with different Memory Managers: (a) LLaMA 3.1-8B‑Instruct and (b) the stronger GPT‑4o‑mini.
+
+Effect of Answer Agent
+
+As shown in Table 3, RL significantly improves the performance of the vanilla LLM when used as the answer agent (baseline: F1 20.54, B1 26.73, J 47.82). PPO fine‑tuning raises scores to F1 32.91, B1 41.05, and J 57.54, while GRPO delivers even greater gains, reaching F1 37.51, B1 45.02, and J 62.74. These results demonstrate that reward‑driven fine‑tuning substantially elevates answer quality beyond what static retrieval can achieve. A detailed case study comparing the RL‑fine‑tuned Answer Agent to the vanilla LLM is provided in Appendix A.2.
+
+Effect of Memory Distillation
+
+We evaluate the impact of the proposed memory distillation mechanism by comparing the GRPO‑fine-tuned Answer Agent with and without distillation (Table 4). Without distillation, the agent consumes all retrieved memories; with distillation, it filters for the most relevant ones before answering. Memory distillation consistently improves performance: F1 rises from 34.37 to 37.51, BLEU‑1 from 40.95 to 45.02, and LLM‑as‑a‑Judge from 60.14 to 62.74. These gains show that filtering out irrelevant entries reduces noise and enables the agent to reason more effectively over high‑quality, distilled context.
+
+RL‑fine-tuned Answer Agent Gains More with Stronger Memory Manager
+
+We examine whether the Answer Agent’s improvements from RL fine‑tuning and Memory Distillation depend on the quality of the Memory Manager. Figure 3 compares base, PPO‑fine-tuned, and GRPO‑fine-tuned Answer Agents paired with either a LLaMA 3.1–8B‑Instruct Memory Manager (Figure 3a) or a stronger GPT‑4o‑mini Memory Manager (Figure 3b). Our RL fine‑tuned Answer Agent yields larger gains with the stronger manager: F1 improves by 10.10 points with the LLaMA memory manager vs. 19.72 with GPT‑4o‑mini memory manager; BLEU‑1 by 10.81 vs. 18.19; and LLM‑as‑a‑Judge by 5.05 vs. 15.76. This demonstrates that Memory‑R1’s benefits compound with stronger upstream memory manager, showing the Answer Agent scales effectively with memory quality.
+
+Comparison of RL Policies
+
+We compare PPO and GRPO for training the Answer Agent, using exact match against ground‑truth answers as the reward signal. As shown in Figure 4, GRPO exhibits faster initial convergence, likely due to its grouped return normalization providing stronger early guidance. However, as training progresses, both methods steadily improve and ultimately reach comparable final reward levels.
+
+Figure 4: Training reward curves for PPO and GRPO on the Answer Agent using exact match as the reward. GRPO converges faster initially, and both reach similar final rewards.
+
+5 Conclusion
+
+We introduced Memory‑R1, a reinforcement learning (RL) framework that enables large language model agents to manage and utilize external memory effectively. By training two specialized agents, one for memory operations and another for selective reasoning over retrieved memories, our approach overcomes the limitations of static, heuristic‑driven memory pipelines. On the LOCOMO benchmark, Memory‑R1 outperforms strong baselines across F1, BLEU, and LLM‑as‑a‑Judge scores, achieving these gains with as few as 152 training examples. Ablation studies further confirm that RL enhances every component of the system. Memory‑R1 opens new directions for research on compositional memory architectures, long‑term knowledge retention, and more agentic LLM behavior, underscoring RL as a path to adaptive memory capabilities.
+
+Appendix A Case Study of Behavior of Agents before and after Fine-tuning
+
+A.1 From In-context Memory Manager to RL fine-tuned Memory Manager
+
+To demonstrate how RL fine-tuning improves memory operations, we present two real representative example. In the first case, the user initially mentions adopting a dog named Buddy, and later states that they have adopted another dog named Scout.
+
+Dialogue Excerpts:
+
+• Audrey: That’s great news! What’s the pup’s name?
+• Andrew: It took us a while to decide, but we ended up going with ’Scout’ for our pup - it seemed perfect for their adventurous spirit.
+
+Vanilla Memory Manager Actions (failed):
+
+**Operations Issued:**
+• DELETE: "Andrew adopted a new dog from a shelter and named him Buddy because he is his buddy."
+• DELETE: "Andrew enjoys taking walks with his newly adopted dog, Buddy, as a way to spend quality time together and get fresh air."
+• ADD: "Andrew adopted a new dog and named the pup ’Scout’ because the name seemed perfect for their adventurous spirit."
+
+Memory-R1 Memory Manager Actions (successful):
+
+**Operations Issued:**
+• UPDATE:
+"Andrew adopted a new dog from a shelter and named him Buddy because he is his buddy." ->
+"Andrew adopted a dog from a shelter and named him Buddy because he is his buddy, and later adopted another dog named Scout."
+
+Discussion:
+The vanilla LLM-based memory manager misinterpreted the second adoption as a contradiction because it saw two separate statements: “adopted a dog named Buddy” and “adopted another dog named Scout”, and assumed that the differing dog names implied the new statement replaced the old one. As a result, it deleted the first dog (“Buddy”) and added the second (“Scout”), leaving the memory fragmented and inaccurate. In contrast, the RL fine-tuned Memory Manager recognized the events as complementary and consolidated them with a single UPDATE, maintaining a coherent memory bank and enabling the system to answer correctly. This case illustrates how reinforcement learning enhances the Agent to understand the nuance between ADD, UPDATE, and DELETE, allowing the model to handle overlapping or related information more intelligently.
+
+To further demonstrate how RL fine-tuning improves memory operations, we present another real-world example from a user-agent dialogue involving Joanna’s feelings about pets and her allergies, particularly toward turtles.
+
+Dialogue Excerpts:
+
+• Joanna: I wish I wasn’t allergic! I would get two turtles today if I could! I found out recently I’m allergic to cockroaches as well, so who knows if I’ll ever get a pet. • Nate: Sorry! Maybe there are other animals you could consider! In the meantime though, I’ll be sure to send you pics of my turtles so you can still watch them grow without getting too close.
+
+Vanilla Memory Manager Actions (failed):
+
+**Operations Issued:**
+• DELETE: "Joanna is allergic to most reptiles and animals with fur, which causes her face to get puffy and itchy. Despite this, she finds other ways to be happy."
+• DELETE: "Joanna finds turtles peaceful and believes they bring calm and joy."
+• DELETE: "Joanna thinks having pets must be a wonderful experience."
+• ADD: "Joanna is allergic to turtles and cockroaches, which affects her ability to have pets."
+
+Memory-R1 Memory Manager Actions (successful):
+
+**Operations Issued:**
+• UPDATE: "Joanna is allergic to most reptiles and animals with fur, which causes her face to get puffy and itchy. Despite this, she finds other ways to be happy." -> "Joanna is allergic to most reptiles, including turtles and cockroaches, and animals with fur, which causes her face to get puffy and itchy. Additionally, she is also allergic to turtles and cockroaches, which affects her ability to have pets."
+• UPDATE: "Joanna finds turtles peaceful and believes they bring calm and joy." -> "Joanna finds turtles peaceful and believes they bring calm and joy, but she is allergic to them."
+
+Discussion:
+The vanilla Memory Manager misinterpreted the new allergy information in two aspects. First, it viewed the difference between “allergic to most reptiles and animals with fur” and “allergic to turtles and cockroaches” as a contradiction in allergy type—failing to recognize the latter as a more specific elaboration rather than a conflicting statement. Second, it interpreted Joanna’s expressed fondness for turtles as incompatible with her allergy to them, incorrectly assuming that emotional attachment and physical limitations cannot coexist. As a result, it issued a series of DELETE operations followed by a single ADD, discarding valuable emotional context such as Joanna’s admiration for turtles and her general enthusiasm toward pets. In contrast, the RL fine-tuned Memory Manager recognized that these pieces of information were complementary: Joanna likes turtles but cannot keep them due to her allergies. It updated the relevant memories accordingly using targeted UPDATE operations, preserving both factual accuracy and emotional nuance. This case demonstrates how reinforcement learning equips the model to reason about overlapping and evolving information more intelligently, favoring memory consolidation over fragmentation.
+
+A.2 From Vanilla LLM to Memory‑Distilled RL Answer Agent
+
+To illustrate how RL fine-tuned Answer Agent with Memory Distillation improves answer accuracy, we compare the original model’s output with the RL fine-tuned model on a representative example from LOCOMO. The prompt provided to the model is shown in Figure 7.
+
+Question: Does John live close to a beach or the mountains?
+
+Original Model Output (Before Fine-Tuning):
+
+**Answer:** He lives near mountains.
+
+Memory-R1 Output (After RL Fine-Tuning with Memory Distillation):
+
+**Memories selected as relevant:**
+• 8:30 pm on 1 January, 2023: John has a nostalgic memory of having a film camera as a kid and taking many pictures at the beach.
+• 1:24 pm on 25 May, 2023: John shared a picture of his family at the beach, expressing a sense of making a difference and commitment to continue their efforts.
+
+**Answer:** beach
+
+Discussion: The original model consumed all retrieved memories indiscriminately and defaulted to “mountains,” likely influenced by irrelevant mentions of mountaineering. In contrast, Memory-R1 filtered out distractors, surfaced only beach-related memories, and generated the correct answer. This case highlights how Memory Distillation helps the model discard noise, focus on true signals, and improve factual accuracy.
+
+Appendix B Data Construction
+
+To train Memory-R1, we construct separate training data for the Memory Manager and the Answer Agent from the LOCOMO multi-turn dialogues.
+
+Memory Manager Training Data.
+For every dialogue turn [MATH] , GPT‑4o‑mini builds a temporal memory bank from
+the preceding 50 turns. The current turn [MATH] is then fused with this
+snapshot, and we annotate the correct memory operation
+(ADD, UPDATE, DELETE, or NOOP).
+Each annotated tuple [MATH] 
+serves as a supervised signal for the Memory Manager to learn how to
+incrementally update the memory state. The details can be found in Algorithm 2.
+
+Answer Agent Training Data.
+For each question [MATH] in LOCOMO, we retrieve 60 candidate memories using
+retrieval‑augmented search (RAG) over the temporal memory bank. The retrieved set, paired with the question and its gold answer, becomes the training input for the Answer Agent, which learns to distill the relevant entries and generate a concise, correct response.
+
+Algorithm 2 Data Construction for Memory-R1 Training
+
+1:Input: LOCOMO multi-turn dialogues [MATH] 
+
+2:Output: Training tuples for the Memory Manager
+ [MATH] 
+
+3:for each dialogue [MATH]  do
+
+4:  for each turn [MATH] in [MATH]  do
+
+5:   Build a temporal memory bank using the previous 50 turns with GPT-4o-mini
+
+6:   Combine (i) the temporal memory bank, (ii) the current turn [MATH] , and (iii) any QA pairs linked to [MATH] 
+
+7:   Store the combined package as a single training tuple
+
+8:  end for
+
+9:end for
+
+Algorithm 3 Data Construction for Answer Agent Training
+
+1:Input: LOCOMO multi-turn dialogues [MATH] , trained Memory Manager
+
+2:Output: Training tuples for the Answer Agent
+ [MATH] 
+
+3:for each dialogue [MATH]  do
+
+4:  Use the Memory Manager to maintain an up-to-date memory bank across turns
+
+5:end for
+
+6:for each question [MATH] in [MATH]  do
+
+7:  Use the question [MATH] as a query to retrieve the top 30 most relevant candidate memories for each participant from the memory bank
+
+8:  Pair (i) the question [MATH] , (ii) the 60 retrieved memories, and (iii) the gold answer [MATH] 
+
+9:  Store the triplet as a single training tuple for Answer Agent fine-tuning
+
+10:end for
+
+Appendix C Prompts
+
+In developing our Memory Manager Prompt, answer generation agent prompt, and LLM-as-a-Judge prompt, we adapt elements from the prompt released by prior work packer2023memgpt; chhikara2025mem0
+
+C.1 Memory Manager Prompt
+
+For training the Memory Manager, we use a detailed prompt that instructs the model how to perform four memory operations: ADD, UPDATE, DELETE, and NOOP. The full prompt spans multiple figures for readability.
+
+Figure 5: Memory Manager Prompt (Part 1): Overview and ADD/UPDATE operation instruction.
+
+Figure 6: Memory Manager Prompt (Part 2): DELETE/NO_OPERATION instructions.
+
+C.2 Answer Agent Prompt
+
+We provide the full prompt used to instruct the Answer Agent in our case study. This prompt defines the reasoning process, memory selection criteria, and formatting requirements for the model’s responses. Figure 7 shows the complete instructions, context, and representative retrieved memories.
+
+Figure 7: Prompt and retrieved memories used in the case study, showing all instructions, context, and memory entries provided to the model.
+
+C.3 LLM-as-a-Judge (J) Prompt
+
+For evaluating the correctness of generated answers, we employ an LLM-as-a-Judge prompt. The judge model is asked to label each answer as CORRECT or WRONG based on comparison with the gold answer. The complete prompt template is shown in Figure 8.
+
+Figure 8: LLM-as-a-Judge prompt used to evaluate model answers. The judge model labels each generated answer as CORRECT or WRONG based on comparison with the gold answer, with explicit instructions for handling time references and topic matching.
+
+Appendix D Alogirthm
+
+The overall Memory-R1 pipeline contains two complementary procedures, outlined in Algorithm  4 and Algorithm 5. Algorithm 4 (Memory Bank Construction) governs how the system incrementally builds and refines the external memory bank as new dialogue turns arrive. For each dialogue input, an LLM extracts key information, retrieves semantically related entries from the memory bank via retrieval-augmented generation (RAG), and invokes the RL fine-tuned Memory Manager to classify the update action as one of {ADD, UPDATE, DELETE, NOOP}. Depending on the chosen action, the memory store is updated accordingly—either inserting a new entry, merging information into an existing one, pruning contradictory content, or leaving the memory unchanged.
+
+Algorithm 5 (Memory-augmented Answer Generation) describes how the system leverages the constructed memory bank to generate answers. Given an incoming question, the model retrieves the top‑k relevant memory candidates, concatenates them with the question to form a memory-augmented prompt, and applies the Answer Agent’s Memory Distillation policy to filter for the most relevant facts. The distilled memory context, along with the query, is then passed to the Answer Agent to produce the final response, which is added to the answer set. Together, these algorithms enable Memory-R1 to jointly manage memory and generate memory augmented answers.
+
+Algorithm 4 Memory Bank Construction via Memory Manager
+
+1:Input: Multi-turn Dialogue [MATH] , Initial empty memory bank [MATH] 
+
+2:Output: Updated memory bank [MATH] 
+
+3:procedure ConstructMemoryBank( [MATH] )
+
+4:  for each dialogue turn [MATH]  do
+
+5:   Extract key info: [MATH] 
+
+6:   Retrieve memories: [MATH] 
+
+7:   Determine operation:
+
+8:    [MATH] where [MATH] 
+
+9:   if  [MATH]  then
+
+10:      [MATH] 
+
+11:   else if  [MATH]  then
+
+12:      [MATH] 
+
+13:   else if  [MATH]  then
+
+14:      [MATH] 
+
+15:   else if  [MATH]  then
+
+16:      [MATH] 
+
+17:   end if
+
+18:  end for
+
+19:  return [MATH] 
+
+20:end procedure
+
+Algorithm 5 Memory-augmented Generation via Answer Agent
+
+1:Input: Question set [MATH] , Memory bank [MATH] 
+
+2:Output: Answer set [MATH] 
+
+3:procedure GenerateAnswers( [MATH] )
+
+4:  for each question [MATH]  do
+
+5:    [MATH] 
+
+6:    [MATH] [MATH] [MATH] is the memory augmented prompt
+
+7:    [MATH] 
+
+8:  end for
+
+9:  return [MATH] 
+
+10:end procedure
+
+Generated on Fri Aug 29 04:43:47 2025 by LaTeXML
+

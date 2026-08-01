@@ -1,0 +1,979 @@
+<!DOCTYPE html><html lang="en">
+<head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+<title>[2305.10250] MemoryBank: Enhancing Large Language Models with Long-Term Memory</title><meta property="og:description" content="Revolutionary advancements in Large Language Models (LLMs) have drastically reshaped our interactions with artificial intelligence (AI) systems, showcasing impressive performance across an extensive array of tasks. Des…">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="MemoryBank: Enhancing Large Language Models with Long-Term Memory">
+<meta name="twitter:image:src" content="https://ar5iv.labs.arxiv.org/assets/ar5iv_card.png">
+<meta name="twitter:image:alt" content="ar5iv logo">
+<meta property="og:title" content="MemoryBank: Enhancing Large Language Models with Long-Term Memory">
+<meta property="og:site_name" content="ar5iv">
+<meta property="og:image" content="https://ar5iv.labs.arxiv.org/assets/ar5iv_card.png">
+<meta property="og:type" content="article">
+<meta property="og:url" content="https://ar5iv.labs.arxiv.org/html/2305.10250">
+<link rel="canonical" target="_blank" href="https://ar5iv.labs.arxiv.org/html/2305.10250">
+
+<!--Generated on Thu Feb 29 07:34:12 2024 by LaTeXML (version 0.8.8) http://dlmf.nist.gov/LaTeXML/.-->
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+<script>
+  function detectColorScheme(){
+    var theme="light";
+    var current_theme = localStorage.getItem("ar5iv_theme");
+    if(current_theme){
+      if(current_theme == "dark"){
+        theme = "dark";
+      } }
+    else if(!window.matchMedia) { return false; }
+    else if(window.matchMedia("(prefers-color-scheme: dark)").matches) {
+      theme = "dark"; }
+    if (theme=="dark") {
+      document.documentElement.setAttribute("data-theme", "dark");
+    } else {
+      document.documentElement.setAttribute("data-theme", "light"); } }
+
+  detectColorScheme();
+
+  function toggleColorScheme(){
+    var current_theme = localStorage.getItem("ar5iv_theme");
+    if (current_theme) {
+      if (current_theme == "light") {
+        localStorage.setItem("ar5iv_theme", "dark"); }
+      else {
+        localStorage.setItem("ar5iv_theme", "light"); } }
+    else {
+        localStorage.setItem("ar5iv_theme", "dark"); }
+    detectColorScheme(); }
+</script>
+<link media="all" rel="stylesheet" href="/assets/ar5iv-fonts.0.8.4.css"><link media="all" rel="stylesheet" href="/assets/ar5iv.0.8.5.css"><link media="all" rel="stylesheet" href="/assets/ar5iv-site.0.2.2.css">
+</head>
+<body>
+<div class="ltx_page_main">
+<div class="ltx_page_content">
+<article class="ltx_document ltx_authors_1line">
+<h1 class="ltx_title ltx_title_document">MemoryBank: Enhancing Large Language Models with Long-Term Memory</h1>
+<div class="ltx_authors">
+<span class="ltx_creator ltx_role_author">
+<span class="ltx_personname">
+Wanjun Zhong<sup id="id9.9.id1" class="ltx_sup"><span id="id9.9.id1.1" class="ltx_text ltx_font_italic">1</span></sup>, Lianghong Guo<sup id="id10.10.id2" class="ltx_sup"><span id="id10.10.id2.1" class="ltx_text ltx_font_italic">1</span></sup>, Qiqi Gao<sup id="id11.11.id3" class="ltx_sup"><span id="id11.11.id3.1" class="ltx_text ltx_font_italic">2</span></sup>, He Ye<sup id="id12.12.id4" class="ltx_sup"><span id="id12.12.id4.1" class="ltx_text ltx_font_italic">3</span></sup>, Yanlin Wang<sup id="id13.13.id5" class="ltx_sup"><span id="id13.13.id5.1" class="ltx_text ltx_font_italic">1</span></sup>
+<br class="ltx_break"><sup id="id14.14.id6" class="ltx_sup">1</sup> Sun Yat-Sen University
+<sup id="id15.15.id7" class="ltx_sup">2</sup> Harbin Institute of Technology 
+<br class="ltx_break"><sup id="id16.16.id8" class="ltx_sup">3</sup> KTH Royal Institute of Technology 
+<br class="ltx_break"><span id="id17.17.id9" class="ltx_text ltx_font_typewriter">{zhongwj25@mail2, wangylin36@mail}.sysu.edu.com</span> 
+<br class="ltx_break"><span id="id18.18.id10" class="ltx_text ltx_font_typewriter">2231612405@qq.com, 18b903026@stu.hit.edu.cn
+<br class="ltx_break">heye@kth.se</span>
+</span></span>
+</div>
+
+<div class="ltx_abstract">
+<h6 class="ltx_title ltx_title_abstract">Abstract</h6>
+<p id="id19.id1" class="ltx_p">Revolutionary advancements in Large Language Models (LLMs) have drastically reshaped our interactions with artificial intelligence (AI) systems, showcasing impressive performance across an extensive array of tasks. Despite this, a notable hindrance remains—the deficiency of a long-term memory mechanism within these models. This shortfall becomes increasingly evident in situations demanding sustained interaction, such as personal companion systems, psychological counseling, and secretarial assistance.
+Recognizing the necessity for long-term memory, we propose MemoryBank, a novel memory mechanism tailored for LLMs. MemoryBank enables the models to summon relevant memories, continually evolve through continuous memory updates, comprehend, and adapt to a user’s personality over time by synthesizing information from previous interactions.
+To mimic anthropomorphic behaviors and selectively preserve memory, MemoryBank incorporates a memory updating mechanism, inspired by the Ebbinghaus Forgetting Curve theory. This mechanism permits the AI to forget and reinforce memory based on time elapsed and the relative significance of the memory, thereby offering a more human-like memory mechanism and enriched user experience.
+MemoryBank is versatile in accommodating both closed-source models like ChatGPT and open-source models such as ChatGLM.
+To validate MemoryBank’s effectiveness, we exemplify its application through the creation of an LLM-based chatbot named SiliconFriend in a long-term AI Companion scenario. Further tuned with psychological dialog data, SiliconFriend displays heightened empathy and discernment in its interactions.
+Experiment involves both qualitative analysis with real-world user dialogs and quantitative analysis with simulated dialogs.
+In the latter, ChatGPT acts as multiple users with diverse characteristics and generates long-term dialog contexts covering a wide array of topics. The results of our analysis reveal that SiliconFriend, equipped with MemoryBank, exhibits a strong capability for long-term companionship as it can provide emphatic response, recall relevant memories and understand user personality. This underscores the effectiveness of MemoryBank<span id="footnote1" class="ltx_note ltx_role_footnote"><sup class="ltx_note_mark">1</sup><span class="ltx_note_outer"><span class="ltx_note_content"><sup class="ltx_note_mark">1</sup><span class="ltx_tag ltx_tag_note">1</span>The materials are released in <a target="_blank" href="https://github.com/zhongwanjun/MemoryBank-SiliconFriend" title="" class="ltx_ref ltx_url ltx_font_typewriter">https://github.com/zhongwanjun/MemoryBank-SiliconFriend</a>. The corresponding author is Yanlin Wang.</span></span></span>.</p>
+</div>
+<section id="S1" class="ltx_section">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">1 </span>Introduction</h2>
+
+<div id="S1.p1" class="ltx_para">
+<p id="S1.p1.1" class="ltx_p">The advent of Large Language Models (LLMs) such as ChatGPT <cite class="ltx_cite ltx_citemacro_citep">(OpenAI, <a href="#bib.bib12" title="" class="ltx_ref">2022</a>)</cite> and GPT-4 <cite class="ltx_cite ltx_citemacro_citep">(OpenAI, <a href="#bib.bib13" title="" class="ltx_ref">2023</a>)</cite> has led to increasing influence across various sectors, from education and healthcare to customer service and entertainment.
+These powerful AI systems have demonstrated a remarkable ability to understand and generate human-like responses. Despite the remarkable capabilities of LLMs, a key limitation is their lack of long-term memory, an essential aspect of human-like communication, particularly noticeable in scenarios requiring sustained interactions like personal companionship, psychological counseling, and secretarial tasks.
+Long-term memory in AI is vital to maintain contextual understanding, ensure meaningful interactions and understand user behaviors over time. For instance, personal AI companions need to recall past conversations for rapport building. In psychological counseling, an AI can provide more effective support with knowledge of the user’s history and past emotional states. Similarly, secretarial AI requires memory for task management and preference recognition. The absence of long-term memory in LLMs hinders their performance and user experience. Therefore, it is essential to develop AI systems with improved memory capabilities for a more seamless and personalized interaction.</p>
+</div>
+<div id="S1.p2" class="ltx_para">
+<p id="S1.p2.1" class="ltx_p">Therefore, we introduce MemoryBank, a novel mechanism designed to provide LLMs with the ability to retain long-term memory and draw user portraits. MemoryBank enables LLMs to recall historical interactions, continually evolve their understanding of context, and adapt to a user’s personality based on past interactions, thereby enhancing their performance in long-term interaction scenarios.
+Inspired by the Ebbinghaus Forgetting Curve theory, a well-established psychological principle that describes how the strength of memory decreases over time, MemoryBank further incorporates a dynamic memory mechanism closely mirroring human cognitive process. This mechanism empowers the AI to remember, selectively forget, and strengthen memories based on time elapsed, offering more natural and engaging user experience.
+Specifically, MemoryBank is built on a memory storage with memory retrieval and updating mechanism, and ability to summarize past events and users’ personality.</p>
+</div>
+<div id="S1.p3" class="ltx_para">
+<p id="S1.p3.1" class="ltx_p">MemoryBank is versatile as it can accommodate both closed-source LLMs like ChatGPT and open-source LLMs like ChatGLM <cite class="ltx_cite ltx_citemacro_citep">(Zeng et al., <a href="#bib.bib20" title="" class="ltx_ref">2022</a>)</cite> or BELLE <cite class="ltx_cite ltx_citemacro_citep">(Yunjie Ji &amp; Li, <a href="#bib.bib19" title="" class="ltx_ref">2023</a>)</cite>.</p>
+</div>
+<div id="S1.p4" class="ltx_para">
+<p id="S1.p4.1" class="ltx_p">To exemplify the practical implications of MemoryBank, we develop SiliconFriend, an LLM-based AI Companion chatbot integrated with this innovative memory mechanism.
+SiliconFriend is designed to retain and reference past interactions, reinforcing the transformative influence of MemoryBank in crafting a more personable AI companion.
+A distinctive features of SiliconFriend is its tuning with 38k psychological conversations, collected from various online sources, which enables it to exhibit empathy, carefulness, and provide useful guidance, making it adept at handling emotionally charged dialogues.
+Moreover, one of the standout capabilities of SiliconFriend is to understand a user’s personality by summarizing from past interactions, which empowers it to tailor responses to the user’s individual traits, thereby enhancing user experience.
+Additionally, SiliconFriend supports bilingual functionality, catering to users who communicate in English and Chinese. This multi-language support broadens its accessibility and usability across different user groups.
+SiliconFriend is implemented with two open-source models, ChatGLM and BELLE, along with one closed-source model, ChatGPT, showcasing the versatility of MemoryBank in accommodating different LLMs.</p>
+</div>
+<div id="S1.p5" class="ltx_para">
+<p id="S1.p5.1" class="ltx_p">To evaluate the effectiveness of MemoryBank, we conduct evaluations covering both qualitative and quantitative analyses, where the former involves real-world user dialogs and the latter employs simulated dialogs.
+For the quantitative analysis, we create a memory storage consisting of 10 days of conversations encompassing a diverse range of topics. These conversations involve 15 virtual users with diverse personalities, for which ChatGPT plays the role of users and generates dialog contexts according to their personalities.
+Based on this memory storage, we design 194 probing questions to assess whether the model could successfully recall pertinent memories and provide appropriate responses.
+Experiment results showcase the capabilities of SiliconFriend in memory recall, provision of empathetic companionship, and understanding of user portraits. These findings corroborate the potential of MemoryBank to significantly improve the performance of LLMs in long-term interaction scenarios.
+In this paper, we summarize the key contributions as follows:</p>
+<ul id="S1.I1" class="ltx_itemize">
+<li id="S1.I1.i1" class="ltx_item" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item">•</span> 
+<div id="S1.I1.i1.p1" class="ltx_para">
+<p id="S1.I1.i1.p1.1" class="ltx_p">We introduce MemoryBank, a novel human-like long-term memory mechanism, which enables LLMs to store, recall, update memory, and draw user portrait.</p>
+</div>
+</li>
+<li id="S1.I1.i2" class="ltx_item" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item">•</span> 
+<div id="S1.I1.i2.p1" class="ltx_para">
+<p id="S1.I1.i2.p1.1" class="ltx_p">We demonstrate the practical applicability of MemoryBank through SiliconFriend, an LLM-based AI companion equipped with MemoryBank and tuned with psychological dialogs.
+It can recall past memories, provide empathetic companionship, and understand user behaviors.</p>
+</div>
+</li>
+<li id="S1.I1.i3" class="ltx_item" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item">•</span> 
+<div id="S1.I1.i3.p1" class="ltx_para">
+<p id="S1.I1.i3.p1.1" class="ltx_p">We show the generalizability of MemoryBank in three key aspects: (1) Accommodation of both open-source and closed-source LLMs; (2) Bilingual ability in both Chinese and English; (3) Applicability with and without memory forgetting mechanism.</p>
+</div>
+</li>
+</ul>
+</div>
+</section>
+<section id="S2" class="ltx_section">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">2 </span>MemoryBank: A Novel Memory Mechanism Tailored for LLMs</h2>
+
+<div id="S2.p1" class="ltx_para">
+<p id="S2.p1.1" class="ltx_p">In this section, we provide a detailed description of MemoryBank, our novel memory mechanism designed for LLMs. As shown in Fig. <a href="#S2.F1" title="Figure 1 ‣ 2 MemoryBank: A Novel Memory Mechanism Tailored for LLMs ‣ MemoryBank: Enhancing Large Language Models with Long-Term Memory" class="ltx_ref"><span class="ltx_text ltx_ref_tag">1</span></a>, MemoryBank is a unified mechanism structured around three central pillars: (1) a memory storage (§ <a href="#S2.SS1" title="2.1 Memory Storage: The Warehouse of MemoryBank ‣ 2 MemoryBank: A Novel Memory Mechanism Tailored for LLMs ‣ MemoryBank: Enhancing Large Language Models with Long-Term Memory" class="ltx_ref"><span class="ltx_text ltx_ref_tag">2.1</span></a>) serving as the primary data repository, (2) a memory retriever (§ <a href="#S2.SS2" title="2.2 Memory Retrieval ‣ 2 MemoryBank: A Novel Memory Mechanism Tailored for LLMs ‣ MemoryBank: Enhancing Large Language Models with Long-Term Memory" class="ltx_ref"><span class="ltx_text ltx_ref_tag">2.2</span></a>) for context-specific memory recollection, and (3) a memory updater (§ <a href="#S2.SS3" title="2.3 Memory Updating Mechanism ‣ 2 MemoryBank: A Novel Memory Mechanism Tailored for LLMs ‣ MemoryBank: Enhancing Large Language Models with Long-Term Memory" class="ltx_ref"><span class="ltx_text ltx_ref_tag">2.3</span></a>) drawing inspiration from the Ebbinghaus Forgetting Curve theory, a time-tested psychological principle pertaining to memory retention and forgetting.</p>
+</div>
+<figure id="S2.F1" class="ltx_figure"><img src="/html/2305.10250/assets/x1.png" id="S2.F1.1.g1" class="ltx_graphics ltx_centering ltx_img_landscape" width="457" height="177" alt="Refer to caption">
+<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_figure"><span id="S2.F1.3.1.1" class="ltx_text" style="font-size:90%;">Figure 1</span>: </span><span id="S2.F1.4.2" class="ltx_text" style="font-size:90%;">Overview of MemoryBank. The memory storage (§ <a href="#S2.SS1" title="2.1 Memory Storage: The Warehouse of MemoryBank ‣ 2 MemoryBank: A Novel Memory Mechanism Tailored for LLMs ‣ MemoryBank: Enhancing Large Language Models with Long-Term Memory" class="ltx_ref"><span class="ltx_text ltx_ref_tag">2.1</span></a>) stores past conversations, summarized events and user portraits, while the memory updating mechanism (§ <a href="#S2.SS3" title="2.3 Memory Updating Mechanism ‣ 2 MemoryBank: A Novel Memory Mechanism Tailored for LLMs ‣ MemoryBank: Enhancing Large Language Models with Long-Term Memory" class="ltx_ref"><span class="ltx_text ltx_ref_tag">2.3</span></a>) updates the memory storage. Memory retrieval (§ <a href="#S2.SS2" title="2.2 Memory Retrieval ‣ 2 MemoryBank: A Novel Memory Mechanism Tailored for LLMs ‣ MemoryBank: Enhancing Large Language Models with Long-Term Memory" class="ltx_ref"><span class="ltx_text ltx_ref_tag">2.2</span></a>) recall relevant memory. SiliconFriend (§ <a href="#S3" title="3 SiliconFriend: An AI Chatbot Companion Powered by MemoryBank ‣ MemoryBank: Enhancing Large Language Models with Long-Term Memory" class="ltx_ref"><span class="ltx_text ltx_ref_tag">3</span></a>) serves as an LLM-based AI companion augmented with MemoryBank. </span></figcaption>
+</figure>
+<section id="S2.SS1" class="ltx_subsection">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">2.1 </span>Memory Storage: The Warehouse of MemoryBank</h3>
+
+<div id="S2.SS1.p1" class="ltx_para">
+<p id="S2.SS1.p1.1" class="ltx_p">Memory storage, the warehouse of MemoryBank, is a robust data repository holding a meticulous array of information. As shown in Fig. <a href="#S2.F1" title="Figure 1 ‣ 2 MemoryBank: A Novel Memory Mechanism Tailored for LLMs ‣ MemoryBank: Enhancing Large Language Models with Long-Term Memory" class="ltx_ref"><span class="ltx_text ltx_ref_tag">1</span></a>,
+it stores daily conversations records, summaries of past events, and evolving assessments of user personalities, thereby constructing a dynamic and multi-layered memory landscape.</p>
+</div>
+<section id="S2.SS1.SSS0.Px1" class="ltx_paragraph">
+<h4 class="ltx_title ltx_title_paragraph">In-Depth Memory Storage:</h4>
+
+<div id="S2.SS1.SSS0.Px1.p1" class="ltx_para">
+<p id="S2.SS1.SSS0.Px1.p1.1" class="ltx_p">MemoryBank’s storage system captures the richness of AI-user interactions by recording multi-turn conversations in a detailed, chronological fashion. Each piece of dialogue is stored with timestamps, creating an ordered narrative of past interactions. This detailed record not only aids in precise memory retrieval but also facilitates the memory updating process afterwards, offering a detailed index of conversational history.</p>
+</div>
+</section>
+<section id="S2.SS1.SSS0.Px2" class="ltx_paragraph">
+<h4 class="ltx_title ltx_title_paragraph">Hierarchical Event Summary:</h4>
+
+<div id="S2.SS1.SSS0.Px2.p1" class="ltx_para">
+<p id="S2.SS1.SSS0.Px2.p1.1" class="ltx_p">Reflecting the intricacies of human memory, MemoryBank goes beyond mere detailed storage. It processes and distills conversations into a high-level summary of daily events, much like how humans remember key aspects of their experiences. We condense verbose dialogues into a concise daily event summary, which is further synthesized into a global summary. This process results in a hierarchical memory structure, providing a bird’s eye view of past interactions and significant events. Specifically, taken previous daily conversations or daily events as input, we ask the LLMs to summarize daily events or global events with the prompt “<span id="S2.SS1.SSS0.Px2.p1.1.1" class="ltx_text ltx_font_italic">Summarize the events and key information in the content</span> <span id="S2.SS1.SSS0.Px2.p1.1.2" class="ltx_text ltx_font_typewriter">[dialog/events]</span>”.</p>
+</div>
+</section>
+<section id="S2.SS1.SSS0.Px3" class="ltx_paragraph">
+<h4 class="ltx_title ltx_title_paragraph">Dynamic Personality Understanding:</h4>
+
+<div id="S2.SS1.SSS0.Px3.p1" class="ltx_para">
+<p id="S2.SS1.SSS0.Px3.p1.1" class="ltx_p">MemoryBank focuses on user personality understanding. It continuously assesses and updates these understandings with the long-term interactions and creates daily personality insights. These insights are further aggregated to form a global understanding of the user’s personality. This multi-tiered approach results in an AI companion that learns, adapts, and tailors its responses to the unique traits of each user, enhancing user experience. Specially, taken the daily conversations or personality analysis, we ask the LLM to deduce with prompts: “<span id="S2.SS1.SSS0.Px3.p1.1.1" class="ltx_text ltx_font_italic">Based on the following dialogue, please summarize the user’s personality traits and emotions.</span><span id="S2.SS1.SSS0.Px3.p1.1.2" class="ltx_text ltx_font_typewriter">[dialog]</span>” or “<span id="S2.SS1.SSS0.Px3.p1.1.3" class="ltx_text ltx_font_italic">The following are the user’s exhibited personality traits and emotions throughout multiple days. Please provide a highly concise and general summary of the user’s personality</span><span id="S2.SS1.SSS0.Px3.p1.1.4" class="ltx_text ltx_font_typewriter">[daily Personalities]</span>”.</p>
+</div>
+</section>
+</section>
+<section id="S2.SS2" class="ltx_subsection">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">2.2 </span>Memory Retrieval</h3>
+
+<div id="S2.SS2.p1" class="ltx_para">
+<p id="S2.SS2.p1.11" class="ltx_p">Built on the robust infrastructure of memory storage, our memory retrieval mechanism operates akin to a knowledge retrieval task. In this context, we adopt a dual-tower dense retrieval model similar to Dense Passage Retrieval <cite class="ltx_cite ltx_citemacro_citep">(Karpukhin et al., <a href="#bib.bib8" title="" class="ltx_ref">2020</a>)</cite>.
+In this paradigm, every turn of conversations and event summaries is considered as a memory piece <math id="S2.SS2.p1.1.m1.1" class="ltx_Math" alttext="m" display="inline"><semantics id="S2.SS2.p1.1.m1.1a"><mi id="S2.SS2.p1.1.m1.1.1" xref="S2.SS2.p1.1.m1.1.1.cmml">m</mi><annotation-xml encoding="MathML-Content" id="S2.SS2.p1.1.m1.1b"><ci id="S2.SS2.p1.1.m1.1.1.cmml" xref="S2.SS2.p1.1.m1.1.1">𝑚</ci></annotation-xml><annotation encoding="application/x-tex" id="S2.SS2.p1.1.m1.1c">m</annotation></semantics></math>, which is pre-encoded into a contextual representation <math id="S2.SS2.p1.2.m2.1" class="ltx_Math" alttext="h_{m}" display="inline"><semantics id="S2.SS2.p1.2.m2.1a"><msub id="S2.SS2.p1.2.m2.1.1" xref="S2.SS2.p1.2.m2.1.1.cmml"><mi id="S2.SS2.p1.2.m2.1.1.2" xref="S2.SS2.p1.2.m2.1.1.2.cmml">h</mi><mi id="S2.SS2.p1.2.m2.1.1.3" xref="S2.SS2.p1.2.m2.1.1.3.cmml">m</mi></msub><annotation-xml encoding="MathML-Content" id="S2.SS2.p1.2.m2.1b"><apply id="S2.SS2.p1.2.m2.1.1.cmml" xref="S2.SS2.p1.2.m2.1.1"><csymbol cd="ambiguous" id="S2.SS2.p1.2.m2.1.1.1.cmml" xref="S2.SS2.p1.2.m2.1.1">subscript</csymbol><ci id="S2.SS2.p1.2.m2.1.1.2.cmml" xref="S2.SS2.p1.2.m2.1.1.2">ℎ</ci><ci id="S2.SS2.p1.2.m2.1.1.3.cmml" xref="S2.SS2.p1.2.m2.1.1.3">𝑚</ci></apply></annotation-xml><annotation encoding="application/x-tex" id="S2.SS2.p1.2.m2.1c">h_{m}</annotation></semantics></math> using the encoder model <math id="S2.SS2.p1.3.m3.1" class="ltx_Math" alttext="E(\cdot)" display="inline"><semantics id="S2.SS2.p1.3.m3.1a"><mrow id="S2.SS2.p1.3.m3.1.2" xref="S2.SS2.p1.3.m3.1.2.cmml"><mi id="S2.SS2.p1.3.m3.1.2.2" xref="S2.SS2.p1.3.m3.1.2.2.cmml">E</mi><mo lspace="0em" rspace="0em" id="S2.SS2.p1.3.m3.1.2.1" xref="S2.SS2.p1.3.m3.1.2.1.cmml">​</mo><mrow id="S2.SS2.p1.3.m3.1.2.3.2" xref="S2.SS2.p1.3.m3.1.2.cmml"><mo stretchy="false" id="S2.SS2.p1.3.m3.1.2.3.2.1" xref="S2.SS2.p1.3.m3.1.2.cmml">(</mo><mo lspace="0em" rspace="0em" id="S2.SS2.p1.3.m3.1.1" xref="S2.SS2.p1.3.m3.1.1.cmml">⋅</mo><mo stretchy="false" id="S2.SS2.p1.3.m3.1.2.3.2.2" xref="S2.SS2.p1.3.m3.1.2.cmml">)</mo></mrow></mrow><annotation-xml encoding="MathML-Content" id="S2.SS2.p1.3.m3.1b"><apply id="S2.SS2.p1.3.m3.1.2.cmml" xref="S2.SS2.p1.3.m3.1.2"><times id="S2.SS2.p1.3.m3.1.2.1.cmml" xref="S2.SS2.p1.3.m3.1.2.1"></times><ci id="S2.SS2.p1.3.m3.1.2.2.cmml" xref="S2.SS2.p1.3.m3.1.2.2">𝐸</ci><ci id="S2.SS2.p1.3.m3.1.1.cmml" xref="S2.SS2.p1.3.m3.1.1">⋅</ci></apply></annotation-xml><annotation encoding="application/x-tex" id="S2.SS2.p1.3.m3.1c">E(\cdot)</annotation></semantics></math>. Consequently, the entire memory storage <math id="S2.SS2.p1.4.m4.1" class="ltx_Math" alttext="M" display="inline"><semantics id="S2.SS2.p1.4.m4.1a"><mi id="S2.SS2.p1.4.m4.1.1" xref="S2.SS2.p1.4.m4.1.1.cmml">M</mi><annotation-xml encoding="MathML-Content" id="S2.SS2.p1.4.m4.1b"><ci id="S2.SS2.p1.4.m4.1.1.cmml" xref="S2.SS2.p1.4.m4.1.1">𝑀</ci></annotation-xml><annotation encoding="application/x-tex" id="S2.SS2.p1.4.m4.1c">M</annotation></semantics></math> is pre-encoded into <math id="S2.SS2.p1.5.m5.4" class="ltx_Math" alttext="\bm{M}=\{\bm{h}^{0}_{m},\bm{h}^{1}_{m},...\bm{h}^{|M|}_{m}\}" display="inline"><semantics id="S2.SS2.p1.5.m5.4a"><mrow id="S2.SS2.p1.5.m5.4.4" xref="S2.SS2.p1.5.m5.4.4.cmml"><mi id="S2.SS2.p1.5.m5.4.4.5" xref="S2.SS2.p1.5.m5.4.4.5.cmml">𝑴</mi><mo id="S2.SS2.p1.5.m5.4.4.4" xref="S2.SS2.p1.5.m5.4.4.4.cmml">=</mo><mrow id="S2.SS2.p1.5.m5.4.4.3.3" xref="S2.SS2.p1.5.m5.4.4.3.4.cmml"><mo stretchy="false" id="S2.SS2.p1.5.m5.4.4.3.3.4" xref="S2.SS2.p1.5.m5.4.4.3.4.cmml">{</mo><msubsup id="S2.SS2.p1.5.m5.2.2.1.1.1" xref="S2.SS2.p1.5.m5.2.2.1.1.1.cmml"><mi id="S2.SS2.p1.5.m5.2.2.1.1.1.2.2" xref="S2.SS2.p1.5.m5.2.2.1.1.1.2.2.cmml">𝒉</mi><mi id="S2.SS2.p1.5.m5.2.2.1.1.1.3" xref="S2.SS2.p1.5.m5.2.2.1.1.1.3.cmml">m</mi><mn id="S2.SS2.p1.5.m5.2.2.1.1.1.2.3" xref="S2.SS2.p1.5.m5.2.2.1.1.1.2.3.cmml">0</mn></msubsup><mo id="S2.SS2.p1.5.m5.4.4.3.3.5" xref="S2.SS2.p1.5.m5.4.4.3.4.cmml">,</mo><msubsup id="S2.SS2.p1.5.m5.3.3.2.2.2" xref="S2.SS2.p1.5.m5.3.3.2.2.2.cmml"><mi id="S2.SS2.p1.5.m5.3.3.2.2.2.2.2" xref="S2.SS2.p1.5.m5.3.3.2.2.2.2.2.cmml">𝒉</mi><mi id="S2.SS2.p1.5.m5.3.3.2.2.2.3" xref="S2.SS2.p1.5.m5.3.3.2.2.2.3.cmml">m</mi><mn id="S2.SS2.p1.5.m5.3.3.2.2.2.2.3" xref="S2.SS2.p1.5.m5.3.3.2.2.2.2.3.cmml">1</mn></msubsup><mo id="S2.SS2.p1.5.m5.4.4.3.3.6" xref="S2.SS2.p1.5.m5.4.4.3.4.cmml">,</mo><mrow id="S2.SS2.p1.5.m5.4.4.3.3.3" xref="S2.SS2.p1.5.m5.4.4.3.3.3.cmml"><mi mathvariant="normal" id="S2.SS2.p1.5.m5.4.4.3.3.3.2" xref="S2.SS2.p1.5.m5.4.4.3.3.3.2.cmml">…</mi><mo lspace="0em" rspace="0em" id="S2.SS2.p1.5.m5.4.4.3.3.3.1" xref="S2.SS2.p1.5.m5.4.4.3.3.3.1.cmml">​</mo><msubsup id="S2.SS2.p1.5.m5.4.4.3.3.3.3" xref="S2.SS2.p1.5.m5.4.4.3.3.3.3.cmml"><mi id="S2.SS2.p1.5.m5.4.4.3.3.3.3.2.2" xref="S2.SS2.p1.5.m5.4.4.3.3.3.3.2.2.cmml">𝒉</mi><mi id="S2.SS2.p1.5.m5.4.4.3.3.3.3.3" xref="S2.SS2.p1.5.m5.4.4.3.3.3.3.3.cmml">m</mi><mrow id="S2.SS2.p1.5.m5.1.1.1.3" xref="S2.SS2.p1.5.m5.1.1.1.2.cmml"><mo stretchy="false" id="S2.SS2.p1.5.m5.1.1.1.3.1" xref="S2.SS2.p1.5.m5.1.1.1.2.1.cmml">|</mo><mi id="S2.SS2.p1.5.m5.1.1.1.1" xref="S2.SS2.p1.5.m5.1.1.1.1.cmml">M</mi><mo stretchy="false" id="S2.SS2.p1.5.m5.1.1.1.3.2" xref="S2.SS2.p1.5.m5.1.1.1.2.1.cmml">|</mo></mrow></msubsup></mrow><mo stretchy="false" id="S2.SS2.p1.5.m5.4.4.3.3.7" xref="S2.SS2.p1.5.m5.4.4.3.4.cmml">}</mo></mrow></mrow><annotation-xml encoding="MathML-Content" id="S2.SS2.p1.5.m5.4b"><apply id="S2.SS2.p1.5.m5.4.4.cmml" xref="S2.SS2.p1.5.m5.4.4"><eq id="S2.SS2.p1.5.m5.4.4.4.cmml" xref="S2.SS2.p1.5.m5.4.4.4"></eq><ci id="S2.SS2.p1.5.m5.4.4.5.cmml" xref="S2.SS2.p1.5.m5.4.4.5">𝑴</ci><set id="S2.SS2.p1.5.m5.4.4.3.4.cmml" xref="S2.SS2.p1.5.m5.4.4.3.3"><apply id="S2.SS2.p1.5.m5.2.2.1.1.1.cmml" xref="S2.SS2.p1.5.m5.2.2.1.1.1"><csymbol cd="ambiguous" id="S2.SS2.p1.5.m5.2.2.1.1.1.1.cmml" xref="S2.SS2.p1.5.m5.2.2.1.1.1">subscript</csymbol><apply id="S2.SS2.p1.5.m5.2.2.1.1.1.2.cmml" xref="S2.SS2.p1.5.m5.2.2.1.1.1"><csymbol cd="ambiguous" id="S2.SS2.p1.5.m5.2.2.1.1.1.2.1.cmml" xref="S2.SS2.p1.5.m5.2.2.1.1.1">superscript</csymbol><ci id="S2.SS2.p1.5.m5.2.2.1.1.1.2.2.cmml" xref="S2.SS2.p1.5.m5.2.2.1.1.1.2.2">𝒉</ci><cn type="integer" id="S2.SS2.p1.5.m5.2.2.1.1.1.2.3.cmml" xref="S2.SS2.p1.5.m5.2.2.1.1.1.2.3">0</cn></apply><ci id="S2.SS2.p1.5.m5.2.2.1.1.1.3.cmml" xref="S2.SS2.p1.5.m5.2.2.1.1.1.3">𝑚</ci></apply><apply id="S2.SS2.p1.5.m5.3.3.2.2.2.cmml" xref="S2.SS2.p1.5.m5.3.3.2.2.2"><csymbol cd="ambiguous" id="S2.SS2.p1.5.m5.3.3.2.2.2.1.cmml" xref="S2.SS2.p1.5.m5.3.3.2.2.2">subscript</csymbol><apply id="S2.SS2.p1.5.m5.3.3.2.2.2.2.cmml" xref="S2.SS2.p1.5.m5.3.3.2.2.2"><csymbol cd="ambiguous" id="S2.SS2.p1.5.m5.3.3.2.2.2.2.1.cmml" xref="S2.SS2.p1.5.m5.3.3.2.2.2">superscript</csymbol><ci id="S2.SS2.p1.5.m5.3.3.2.2.2.2.2.cmml" xref="S2.SS2.p1.5.m5.3.3.2.2.2.2.2">𝒉</ci><cn type="integer" id="S2.SS2.p1.5.m5.3.3.2.2.2.2.3.cmml" xref="S2.SS2.p1.5.m5.3.3.2.2.2.2.3">1</cn></apply><ci id="S2.SS2.p1.5.m5.3.3.2.2.2.3.cmml" xref="S2.SS2.p1.5.m5.3.3.2.2.2.3">𝑚</ci></apply><apply id="S2.SS2.p1.5.m5.4.4.3.3.3.cmml" xref="S2.SS2.p1.5.m5.4.4.3.3.3"><times id="S2.SS2.p1.5.m5.4.4.3.3.3.1.cmml" xref="S2.SS2.p1.5.m5.4.4.3.3.3.1"></times><ci id="S2.SS2.p1.5.m5.4.4.3.3.3.2.cmml" xref="S2.SS2.p1.5.m5.4.4.3.3.3.2">…</ci><apply id="S2.SS2.p1.5.m5.4.4.3.3.3.3.cmml" xref="S2.SS2.p1.5.m5.4.4.3.3.3.3"><csymbol cd="ambiguous" id="S2.SS2.p1.5.m5.4.4.3.3.3.3.1.cmml" xref="S2.SS2.p1.5.m5.4.4.3.3.3.3">subscript</csymbol><apply id="S2.SS2.p1.5.m5.4.4.3.3.3.3.2.cmml" xref="S2.SS2.p1.5.m5.4.4.3.3.3.3"><csymbol cd="ambiguous" id="S2.SS2.p1.5.m5.4.4.3.3.3.3.2.1.cmml" xref="S2.SS2.p1.5.m5.4.4.3.3.3.3">superscript</csymbol><ci id="S2.SS2.p1.5.m5.4.4.3.3.3.3.2.2.cmml" xref="S2.SS2.p1.5.m5.4.4.3.3.3.3.2.2">𝒉</ci><apply id="S2.SS2.p1.5.m5.1.1.1.2.cmml" xref="S2.SS2.p1.5.m5.1.1.1.3"><abs id="S2.SS2.p1.5.m5.1.1.1.2.1.cmml" xref="S2.SS2.p1.5.m5.1.1.1.3.1"></abs><ci id="S2.SS2.p1.5.m5.1.1.1.1.cmml" xref="S2.SS2.p1.5.m5.1.1.1.1">𝑀</ci></apply></apply><ci id="S2.SS2.p1.5.m5.4.4.3.3.3.3.3.cmml" xref="S2.SS2.p1.5.m5.4.4.3.3.3.3.3">𝑚</ci></apply></apply></set></apply></annotation-xml><annotation encoding="application/x-tex" id="S2.SS2.p1.5.m5.4c">\bm{M}=\{\bm{h}^{0}_{m},\bm{h}^{1}_{m},...\bm{h}^{|M|}_{m}\}</annotation></semantics></math>, where each <math id="S2.SS2.p1.6.m6.1" class="ltx_Math" alttext="h_{m}" display="inline"><semantics id="S2.SS2.p1.6.m6.1a"><msub id="S2.SS2.p1.6.m6.1.1" xref="S2.SS2.p1.6.m6.1.1.cmml"><mi id="S2.SS2.p1.6.m6.1.1.2" xref="S2.SS2.p1.6.m6.1.1.2.cmml">h</mi><mi id="S2.SS2.p1.6.m6.1.1.3" xref="S2.SS2.p1.6.m6.1.1.3.cmml">m</mi></msub><annotation-xml encoding="MathML-Content" id="S2.SS2.p1.6.m6.1b"><apply id="S2.SS2.p1.6.m6.1.1.cmml" xref="S2.SS2.p1.6.m6.1.1"><csymbol cd="ambiguous" id="S2.SS2.p1.6.m6.1.1.1.cmml" xref="S2.SS2.p1.6.m6.1.1">subscript</csymbol><ci id="S2.SS2.p1.6.m6.1.1.2.cmml" xref="S2.SS2.p1.6.m6.1.1.2">ℎ</ci><ci id="S2.SS2.p1.6.m6.1.1.3.cmml" xref="S2.SS2.p1.6.m6.1.1.3">𝑚</ci></apply></annotation-xml><annotation encoding="application/x-tex" id="S2.SS2.p1.6.m6.1c">h_{m}</annotation></semantics></math> is a vector representation of a memory piece. These vector representations are then indexed using FAISS <cite class="ltx_cite ltx_citemacro_citep">(Johnson et al., <a href="#bib.bib7" title="" class="ltx_ref">2019</a>)</cite> for efficient retrieval.
+Parallel to this, the current context of conversation <math id="S2.SS2.p1.7.m7.1" class="ltx_Math" alttext="c" display="inline"><semantics id="S2.SS2.p1.7.m7.1a"><mi id="S2.SS2.p1.7.m7.1.1" xref="S2.SS2.p1.7.m7.1.1.cmml">c</mi><annotation-xml encoding="MathML-Content" id="S2.SS2.p1.7.m7.1b"><ci id="S2.SS2.p1.7.m7.1.1.cmml" xref="S2.SS2.p1.7.m7.1.1">𝑐</ci></annotation-xml><annotation encoding="application/x-tex" id="S2.SS2.p1.7.m7.1c">c</annotation></semantics></math> is encoded by <math id="S2.SS2.p1.8.m8.1" class="ltx_Math" alttext="E(\cdot)" display="inline"><semantics id="S2.SS2.p1.8.m8.1a"><mrow id="S2.SS2.p1.8.m8.1.2" xref="S2.SS2.p1.8.m8.1.2.cmml"><mi id="S2.SS2.p1.8.m8.1.2.2" xref="S2.SS2.p1.8.m8.1.2.2.cmml">E</mi><mo lspace="0em" rspace="0em" id="S2.SS2.p1.8.m8.1.2.1" xref="S2.SS2.p1.8.m8.1.2.1.cmml">​</mo><mrow id="S2.SS2.p1.8.m8.1.2.3.2" xref="S2.SS2.p1.8.m8.1.2.cmml"><mo stretchy="false" id="S2.SS2.p1.8.m8.1.2.3.2.1" xref="S2.SS2.p1.8.m8.1.2.cmml">(</mo><mo lspace="0em" rspace="0em" id="S2.SS2.p1.8.m8.1.1" xref="S2.SS2.p1.8.m8.1.1.cmml">⋅</mo><mo stretchy="false" id="S2.SS2.p1.8.m8.1.2.3.2.2" xref="S2.SS2.p1.8.m8.1.2.cmml">)</mo></mrow></mrow><annotation-xml encoding="MathML-Content" id="S2.SS2.p1.8.m8.1b"><apply id="S2.SS2.p1.8.m8.1.2.cmml" xref="S2.SS2.p1.8.m8.1.2"><times id="S2.SS2.p1.8.m8.1.2.1.cmml" xref="S2.SS2.p1.8.m8.1.2.1"></times><ci id="S2.SS2.p1.8.m8.1.2.2.cmml" xref="S2.SS2.p1.8.m8.1.2.2">𝐸</ci><ci id="S2.SS2.p1.8.m8.1.1.cmml" xref="S2.SS2.p1.8.m8.1.1">⋅</ci></apply></annotation-xml><annotation encoding="application/x-tex" id="S2.SS2.p1.8.m8.1c">E(\cdot)</annotation></semantics></math> into <math id="S2.SS2.p1.9.m9.1" class="ltx_Math" alttext="\bm{h}_{c}" display="inline"><semantics id="S2.SS2.p1.9.m9.1a"><msub id="S2.SS2.p1.9.m9.1.1" xref="S2.SS2.p1.9.m9.1.1.cmml"><mi id="S2.SS2.p1.9.m9.1.1.2" xref="S2.SS2.p1.9.m9.1.1.2.cmml">𝒉</mi><mi id="S2.SS2.p1.9.m9.1.1.3" xref="S2.SS2.p1.9.m9.1.1.3.cmml">c</mi></msub><annotation-xml encoding="MathML-Content" id="S2.SS2.p1.9.m9.1b"><apply id="S2.SS2.p1.9.m9.1.1.cmml" xref="S2.SS2.p1.9.m9.1.1"><csymbol cd="ambiguous" id="S2.SS2.p1.9.m9.1.1.1.cmml" xref="S2.SS2.p1.9.m9.1.1">subscript</csymbol><ci id="S2.SS2.p1.9.m9.1.1.2.cmml" xref="S2.SS2.p1.9.m9.1.1.2">𝒉</ci><ci id="S2.SS2.p1.9.m9.1.1.3.cmml" xref="S2.SS2.p1.9.m9.1.1.3">𝑐</ci></apply></annotation-xml><annotation encoding="application/x-tex" id="S2.SS2.p1.9.m9.1c">\bm{h}_{c}</annotation></semantics></math>, which serves as the query to search <math id="S2.SS2.p1.10.m10.1" class="ltx_Math" alttext="M" display="inline"><semantics id="S2.SS2.p1.10.m10.1a"><mi id="S2.SS2.p1.10.m10.1.1" xref="S2.SS2.p1.10.m10.1.1.cmml">M</mi><annotation-xml encoding="MathML-Content" id="S2.SS2.p1.10.m10.1b"><ci id="S2.SS2.p1.10.m10.1.1.cmml" xref="S2.SS2.p1.10.m10.1.1">𝑀</ci></annotation-xml><annotation encoding="application/x-tex" id="S2.SS2.p1.10.m10.1c">M</annotation></semantics></math> for the most relevant memory. In practice, the encoder <math id="S2.SS2.p1.11.m11.1" class="ltx_Math" alttext="E(\cdot)" display="inline"><semantics id="S2.SS2.p1.11.m11.1a"><mrow id="S2.SS2.p1.11.m11.1.2" xref="S2.SS2.p1.11.m11.1.2.cmml"><mi id="S2.SS2.p1.11.m11.1.2.2" xref="S2.SS2.p1.11.m11.1.2.2.cmml">E</mi><mo lspace="0em" rspace="0em" id="S2.SS2.p1.11.m11.1.2.1" xref="S2.SS2.p1.11.m11.1.2.1.cmml">​</mo><mrow id="S2.SS2.p1.11.m11.1.2.3.2" xref="S2.SS2.p1.11.m11.1.2.cmml"><mo stretchy="false" id="S2.SS2.p1.11.m11.1.2.3.2.1" xref="S2.SS2.p1.11.m11.1.2.cmml">(</mo><mo lspace="0em" rspace="0em" id="S2.SS2.p1.11.m11.1.1" xref="S2.SS2.p1.11.m11.1.1.cmml">⋅</mo><mo stretchy="false" id="S2.SS2.p1.11.m11.1.2.3.2.2" xref="S2.SS2.p1.11.m11.1.2.cmml">)</mo></mrow></mrow><annotation-xml encoding="MathML-Content" id="S2.SS2.p1.11.m11.1b"><apply id="S2.SS2.p1.11.m11.1.2.cmml" xref="S2.SS2.p1.11.m11.1.2"><times id="S2.SS2.p1.11.m11.1.2.1.cmml" xref="S2.SS2.p1.11.m11.1.2.1"></times><ci id="S2.SS2.p1.11.m11.1.2.2.cmml" xref="S2.SS2.p1.11.m11.1.2.2">𝐸</ci><ci id="S2.SS2.p1.11.m11.1.1.cmml" xref="S2.SS2.p1.11.m11.1.1">⋅</ci></apply></annotation-xml><annotation encoding="application/x-tex" id="S2.SS2.p1.11.m11.1c">E(\cdot)</annotation></semantics></math> can be interchanged to any suitable model.</p>
+</div>
+</section>
+<section id="S2.SS3" class="ltx_subsection">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">2.3 </span>Memory Updating Mechanism</h3>
+
+<div id="S2.SS3.p1" class="ltx_para">
+<p id="S2.SS3.p1.1" class="ltx_p">With the persistent memory storage and the memory retrieval mechanism discussed in § <a href="#S2.SS1" title="2.1 Memory Storage: The Warehouse of MemoryBank ‣ 2 MemoryBank: A Novel Memory Mechanism Tailored for LLMs ‣ MemoryBank: Enhancing Large Language Models with Long-Term Memory" class="ltx_ref"><span class="ltx_text ltx_ref_tag">2.1</span></a> and § <a href="#S2.SS2" title="2.2 Memory Retrieval ‣ 2 MemoryBank: A Novel Memory Mechanism Tailored for LLMs ‣ MemoryBank: Enhancing Large Language Models with Long-Term Memory" class="ltx_ref"><span class="ltx_text ltx_ref_tag">2.2</span></a>, the memorization capability of LLMs can be greatly enhanced. However, for scenarios that expect more anthropopathic memory behavior, memory updating is needed. These scenarios include AI companion, virtual IP, etc.
+Forgetting less important memory pieces that are long time ago and have not been recalled much can make the AI companion more natural.</p>
+</div>
+<div id="S2.SS3.p2" class="ltx_para">
+<p id="S2.SS3.p2.1" class="ltx_p">Our memory forgetting mechanism is inspired from Ebbinghaus Forgetting Curve theory  and follow the following principle rules<span id="footnote2" class="ltx_note ltx_role_footnote"><sup class="ltx_note_mark">2</sup><span class="ltx_note_outer"><span class="ltx_note_content"><sup class="ltx_note_mark">2</sup><span class="ltx_tag ltx_tag_note">2</span>While Ebbinghaus Forgetting Curve theory includes additional features such as <em id="footnote2.1" class="ltx_emph ltx_font_italic">overlearning</em>  and <em id="footnote2.2" class="ltx_emph ltx_font_italic">meaningful material effect</em> , our paper focuses on simulating the listed three principle rules.</span></span></span>:</p>
+<ul id="S2.I1" class="ltx_itemize">
+<li id="S2.I1.i1" class="ltx_item" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item">•</span> 
+<div id="S2.I1.i1.p1" class="ltx_para">
+<p id="S2.I1.i1.p1.1" class="ltx_p"><span id="S2.I1.i1.p1.1.1" class="ltx_text ltx_font_bold">Rate of Forgetting.</span> Ebbinghaus found that memory retention decreases over time. He quantified this in his forgetting curve, showing that information is lost rapidly after learning unless it is consciously reviewed.</p>
+</div>
+</li>
+<li id="S2.I1.i2" class="ltx_item" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item">•</span> 
+<div id="S2.I1.i2.p1" class="ltx_para">
+<p id="S2.I1.i2.p1.1" class="ltx_p"><span id="S2.I1.i2.p1.1.1" class="ltx_text ltx_font_bold">Time and Memory Decay.</span> The curve is steep at the beginning, indicating that a significant amount of learned information is forgotten within the first few hours or days after learning. After this initial period, the rate of memory loss slows down.</p>
+</div>
+</li>
+<li id="S2.I1.i3" class="ltx_item" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item">•</span> 
+<div id="S2.I1.i3.p1" class="ltx_para">
+<p id="S2.I1.i3.p1.1" class="ltx_p"><span id="S2.I1.i3.p1.1.1" class="ltx_text ltx_font_bold">Spacing Effect.</span> Ebbinghaus discovered that relearning information is easier than learning it for the first time. Regularly revisiting and repeating the learned material can reset the forgetting curve, making it less steep and thereby improving memory retention.
+</p>
+</div>
+</li>
+</ul>
+</div>
+<div id="S2.SS3.p3" class="ltx_para">
+<p id="S2.SS3.p3.9" class="ltx_p">The Ebbinghaus forgetting curve is expressed using an exponential decay model: <math id="S2.SS3.p3.1.m1.1" class="ltx_Math" alttext="R=e^{-\frac{t}{S}}" display="inline"><semantics id="S2.SS3.p3.1.m1.1a"><mrow id="S2.SS3.p3.1.m1.1.1" xref="S2.SS3.p3.1.m1.1.1.cmml"><mi id="S2.SS3.p3.1.m1.1.1.2" xref="S2.SS3.p3.1.m1.1.1.2.cmml">R</mi><mo id="S2.SS3.p3.1.m1.1.1.1" xref="S2.SS3.p3.1.m1.1.1.1.cmml">=</mo><msup id="S2.SS3.p3.1.m1.1.1.3" xref="S2.SS3.p3.1.m1.1.1.3.cmml"><mi id="S2.SS3.p3.1.m1.1.1.3.2" xref="S2.SS3.p3.1.m1.1.1.3.2.cmml">e</mi><mrow id="S2.SS3.p3.1.m1.1.1.3.3" xref="S2.SS3.p3.1.m1.1.1.3.3.cmml"><mo id="S2.SS3.p3.1.m1.1.1.3.3a" xref="S2.SS3.p3.1.m1.1.1.3.3.cmml">−</mo><mfrac id="S2.SS3.p3.1.m1.1.1.3.3.2" xref="S2.SS3.p3.1.m1.1.1.3.3.2.cmml"><mi id="S2.SS3.p3.1.m1.1.1.3.3.2.2" xref="S2.SS3.p3.1.m1.1.1.3.3.2.2.cmml">t</mi><mi id="S2.SS3.p3.1.m1.1.1.3.3.2.3" xref="S2.SS3.p3.1.m1.1.1.3.3.2.3.cmml">S</mi></mfrac></mrow></msup></mrow><annotation-xml encoding="MathML-Content" id="S2.SS3.p3.1.m1.1b"><apply id="S2.SS3.p3.1.m1.1.1.cmml" xref="S2.SS3.p3.1.m1.1.1"><eq id="S2.SS3.p3.1.m1.1.1.1.cmml" xref="S2.SS3.p3.1.m1.1.1.1"></eq><ci id="S2.SS3.p3.1.m1.1.1.2.cmml" xref="S2.SS3.p3.1.m1.1.1.2">𝑅</ci><apply id="S2.SS3.p3.1.m1.1.1.3.cmml" xref="S2.SS3.p3.1.m1.1.1.3"><csymbol cd="ambiguous" id="S2.SS3.p3.1.m1.1.1.3.1.cmml" xref="S2.SS3.p3.1.m1.1.1.3">superscript</csymbol><ci id="S2.SS3.p3.1.m1.1.1.3.2.cmml" xref="S2.SS3.p3.1.m1.1.1.3.2">𝑒</ci><apply id="S2.SS3.p3.1.m1.1.1.3.3.cmml" xref="S2.SS3.p3.1.m1.1.1.3.3"><minus id="S2.SS3.p3.1.m1.1.1.3.3.1.cmml" xref="S2.SS3.p3.1.m1.1.1.3.3"></minus><apply id="S2.SS3.p3.1.m1.1.1.3.3.2.cmml" xref="S2.SS3.p3.1.m1.1.1.3.3.2"><divide id="S2.SS3.p3.1.m1.1.1.3.3.2.1.cmml" xref="S2.SS3.p3.1.m1.1.1.3.3.2"></divide><ci id="S2.SS3.p3.1.m1.1.1.3.3.2.2.cmml" xref="S2.SS3.p3.1.m1.1.1.3.3.2.2">𝑡</ci><ci id="S2.SS3.p3.1.m1.1.1.3.3.2.3.cmml" xref="S2.SS3.p3.1.m1.1.1.3.3.2.3">𝑆</ci></apply></apply></apply></apply></annotation-xml><annotation encoding="application/x-tex" id="S2.SS3.p3.1.m1.1c">R=e^{-\frac{t}{S}}</annotation></semantics></math>, where <math id="S2.SS3.p3.2.m2.1" class="ltx_Math" alttext="R" display="inline"><semantics id="S2.SS3.p3.2.m2.1a"><mi id="S2.SS3.p3.2.m2.1.1" xref="S2.SS3.p3.2.m2.1.1.cmml">R</mi><annotation-xml encoding="MathML-Content" id="S2.SS3.p3.2.m2.1b"><ci id="S2.SS3.p3.2.m2.1.1.cmml" xref="S2.SS3.p3.2.m2.1.1">𝑅</ci></annotation-xml><annotation encoding="application/x-tex" id="S2.SS3.p3.2.m2.1c">R</annotation></semantics></math> is the memory retention, or what fraction of the information can be retained.
+<math id="S2.SS3.p3.3.m3.1" class="ltx_Math" alttext="t" display="inline"><semantics id="S2.SS3.p3.3.m3.1a"><mi id="S2.SS3.p3.3.m3.1.1" xref="S2.SS3.p3.3.m3.1.1.cmml">t</mi><annotation-xml encoding="MathML-Content" id="S2.SS3.p3.3.m3.1b"><ci id="S2.SS3.p3.3.m3.1.1.cmml" xref="S2.SS3.p3.3.m3.1.1">𝑡</ci></annotation-xml><annotation encoding="application/x-tex" id="S2.SS3.p3.3.m3.1c">t</annotation></semantics></math> is the time elapsed since learning the information. <math id="S2.SS3.p3.4.m4.1" class="ltx_Math" alttext="e" display="inline"><semantics id="S2.SS3.p3.4.m4.1a"><mi id="S2.SS3.p3.4.m4.1.1" xref="S2.SS3.p3.4.m4.1.1.cmml">e</mi><annotation-xml encoding="MathML-Content" id="S2.SS3.p3.4.m4.1b"><ci id="S2.SS3.p3.4.m4.1.1.cmml" xref="S2.SS3.p3.4.m4.1.1">𝑒</ci></annotation-xml><annotation encoding="application/x-tex" id="S2.SS3.p3.4.m4.1c">e</annotation></semantics></math> is approximately equal to 2.71828. <math id="S2.SS3.p3.5.m5.1" class="ltx_Math" alttext="S" display="inline"><semantics id="S2.SS3.p3.5.m5.1a"><mi id="S2.SS3.p3.5.m5.1.1" xref="S2.SS3.p3.5.m5.1.1.cmml">S</mi><annotation-xml encoding="MathML-Content" id="S2.SS3.p3.5.m5.1b"><ci id="S2.SS3.p3.5.m5.1.1.cmml" xref="S2.SS3.p3.5.m5.1.1">𝑆</ci></annotation-xml><annotation encoding="application/x-tex" id="S2.SS3.p3.5.m5.1c">S</annotation></semantics></math> is the memory strength, which changes based on factors such as the depth of learning and the amount of repetition. To simply memory updating process, we model <math id="S2.SS3.p3.6.m6.1" class="ltx_Math" alttext="S" display="inline"><semantics id="S2.SS3.p3.6.m6.1a"><mi id="S2.SS3.p3.6.m6.1.1" xref="S2.SS3.p3.6.m6.1.1.cmml">S</mi><annotation-xml encoding="MathML-Content" id="S2.SS3.p3.6.m6.1b"><ci id="S2.SS3.p3.6.m6.1.1.cmml" xref="S2.SS3.p3.6.m6.1.1">𝑆</ci></annotation-xml><annotation encoding="application/x-tex" id="S2.SS3.p3.6.m6.1c">S</annotation></semantics></math> as a discrete value and initialize it with <math id="S2.SS3.p3.7.m7.1" class="ltx_Math" alttext="1" display="inline"><semantics id="S2.SS3.p3.7.m7.1a"><mn id="S2.SS3.p3.7.m7.1.1" xref="S2.SS3.p3.7.m7.1.1.cmml">1</mn><annotation-xml encoding="MathML-Content" id="S2.SS3.p3.7.m7.1b"><cn type="integer" id="S2.SS3.p3.7.m7.1.1.cmml" xref="S2.SS3.p3.7.m7.1.1">1</cn></annotation-xml><annotation encoding="application/x-tex" id="S2.SS3.p3.7.m7.1c">1</annotation></semantics></math> upon its first mention in a conversation. When a memory item is recalled during conversations, it will persist longer in memory. We increase <math id="S2.SS3.p3.8.m8.1" class="ltx_Math" alttext="S" display="inline"><semantics id="S2.SS3.p3.8.m8.1a"><mi id="S2.SS3.p3.8.m8.1.1" xref="S2.SS3.p3.8.m8.1.1.cmml">S</mi><annotation-xml encoding="MathML-Content" id="S2.SS3.p3.8.m8.1b"><ci id="S2.SS3.p3.8.m8.1.1.cmml" xref="S2.SS3.p3.8.m8.1.1">𝑆</ci></annotation-xml><annotation encoding="application/x-tex" id="S2.SS3.p3.8.m8.1c">S</annotation></semantics></math> by 1 and reset <math id="S2.SS3.p3.9.m9.1" class="ltx_Math" alttext="t" display="inline"><semantics id="S2.SS3.p3.9.m9.1a"><mi id="S2.SS3.p3.9.m9.1.1" xref="S2.SS3.p3.9.m9.1.1.cmml">t</mi><annotation-xml encoding="MathML-Content" id="S2.SS3.p3.9.m9.1b"><ci id="S2.SS3.p3.9.m9.1.1.cmml" xref="S2.SS3.p3.9.m9.1.1">𝑡</ci></annotation-xml><annotation encoding="application/x-tex" id="S2.SS3.p3.9.m9.1c">t</annotation></semantics></math> to 0, hence forget it with a lower probability.</p>
+</div>
+<div id="S2.SS3.p4" class="ltx_para">
+<p id="S2.SS3.p4.1" class="ltx_p">It is important to note that this is an exploratory and highly simplified memory updating model. Real-life memory processes are more complex and can be influenced by a variety of factors. The forgetting curve will look different for different people and different types of information.
+In summary, MemoryBank weaves together these critical components to form a more comprehensive memory management system for LLMs. It enhances their ability to provide meaningful and personalized interactions over extended periods, opening up new possibilities for AI applications.</p>
+</div>
+</section>
+</section>
+<section id="S3" class="ltx_section">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">3 </span>SiliconFriend: An AI Chatbot Companion Powered by MemoryBank</h2>
+
+<div id="S3.p1" class="ltx_para">
+<p id="S3.p1.1" class="ltx_p">To demonstrate the practicality of MemoryBank in the field of long-term personal AI companionship, we create an AI chatbot named SiliconFriend. It is designed to serve as an emotional companion for users, recalling pertinent user memories, and understanding users’ personalities and emotional states. Our implementation demonstrates adaptability by integrating three powerful LLMs that originally lack long-term memory and specific adaptation to the psychology domain.
+<span id="S3.p1.1.1" class="ltx_text ltx_font_bold">1) ChatGPT</span> <cite class="ltx_cite ltx_citemacro_citep">(OpenAI, <a href="#bib.bib12" title="" class="ltx_ref">2022</a>)</cite>, a closed-source conversation model built by OpenAI, is a proprietary conversational AI model known for its ability to facilitate dynamic and interactive conversations. This model is trained on vast amount of data and further fine-tuned with reinforcement learning from human feedback. This approach enables ChatGPT to generate responses that are not only contextually appropriate but also closely align with human conversational expectations.
+<span id="S3.p1.1.2" class="ltx_text ltx_font_bold">2) ChatGLM</span> <cite class="ltx_cite ltx_citemacro_citep">(Zeng et al., <a href="#bib.bib20" title="" class="ltx_ref">2022</a>)</cite>: ChatGLM is an open-source bilingual language model founded on the General Language Model (GLM) framework. This model is characterized by its 6.2 billion parameters and its specific optimization for Chinese dialogue data. The model’s training involves processing approximately one trillion tokens of Chinese and English text, supplemented by supervised fine-tuning, feedback bootstrap, and reinforcement learning with human feedback.
+<span id="S3.p1.1.3" class="ltx_text ltx_font_bold">3) BELLE</span> <cite class="ltx_cite ltx_citemacro_citep">(Yunjie Ji &amp; Li, <a href="#bib.bib19" title="" class="ltx_ref">2023</a>)</cite>: BELLE is an open-source bilingual language model that is continuously fine-tuned from 7B LLaMA <cite class="ltx_cite ltx_citemacro_citep">(Touvron et al., <a href="#bib.bib15" title="" class="ltx_ref">2023</a>)</cite>. BELLE’s feature is its automated instruction data synthesis using ChatGPT, which enhances its Chinese conversation ability.</p>
+</div>
+<div id="S3.p2" class="ltx_para">
+<p id="S3.p2.1" class="ltx_p">The development of SiliconFriend is divided into two stages.
+The first stage (only for open-source LLMs) involves parameter-efficient tuning of the LLM with psychological dialogue data.
+This step is crucial as it allows SiliconFriend to offer useful and empathetic emotional support to users, mirroring the understanding and compassionate responses one would expect from a human companion.
+The second stage is to integrate MemoryBank into SiliconFriend, thereby instilling it with a robust memory system. MemoryBank allows the chatbot to retain, recall, and leverage past interactions and user portrait, providing a richer, more personalized user experience.</p>
+</div>
+<section id="S3.SS0.SSS0.Px1" class="ltx_paragraph">
+<h4 class="ltx_title ltx_title_paragraph">Parameter-efficient Tuning with Psychological Dialogue Data:</h4>
+
+<div id="S3.SS0.SSS0.Px1.p1" class="ltx_para">
+<p id="S3.SS0.SSS0.Px1.p1.1" class="ltx_p">The initial stage of SiliconFriend’s development involves tuning the LLMs using a dataset of 38k psychological dialogues. This data, parsed from online sources, comprises a range of conversations that cover an array of emotional states and responses.
+This tuning process enables SiliconFriend to understand and respond to emotional cues effectively, mimicking the empathy, understanding, and support of a human companion. It equips the AI with the ability to handle emotionally guided conversations with psychological knowledge, provide meaningful emotional support to users based on their emotional state.</p>
+</div>
+<div id="S3.SS0.SSS0.Px1.p2" class="ltx_para">
+<p id="S3.SS0.SSS0.Px1.p2.8" class="ltx_p">To adapt LLMs to scenarios with limited computational resources, we utilize a computation-efficient tuning approach, known as the Low-Rank Adaptation (LoRA) method <cite class="ltx_cite ltx_citemacro_citep">(Hu et al., <a href="#bib.bib6" title="" class="ltx_ref">2021</a>)</cite>. LoRA significantly reduces the quantity of trainable parameters by learning pairs of rank-decomposition matrices, while keeping the original weights frozen.
+Formally, consider a linear layer defined as <math id="S3.SS0.SSS0.Px1.p2.1.m1.1" class="ltx_Math" alttext="y=Wx" display="inline"><semantics id="S3.SS0.SSS0.Px1.p2.1.m1.1a"><mrow id="S3.SS0.SSS0.Px1.p2.1.m1.1.1" xref="S3.SS0.SSS0.Px1.p2.1.m1.1.1.cmml"><mi id="S3.SS0.SSS0.Px1.p2.1.m1.1.1.2" xref="S3.SS0.SSS0.Px1.p2.1.m1.1.1.2.cmml">y</mi><mo id="S3.SS0.SSS0.Px1.p2.1.m1.1.1.1" xref="S3.SS0.SSS0.Px1.p2.1.m1.1.1.1.cmml">=</mo><mrow id="S3.SS0.SSS0.Px1.p2.1.m1.1.1.3" xref="S3.SS0.SSS0.Px1.p2.1.m1.1.1.3.cmml"><mi id="S3.SS0.SSS0.Px1.p2.1.m1.1.1.3.2" xref="S3.SS0.SSS0.Px1.p2.1.m1.1.1.3.2.cmml">W</mi><mo lspace="0em" rspace="0em" id="S3.SS0.SSS0.Px1.p2.1.m1.1.1.3.1" xref="S3.SS0.SSS0.Px1.p2.1.m1.1.1.3.1.cmml">​</mo><mi id="S3.SS0.SSS0.Px1.p2.1.m1.1.1.3.3" xref="S3.SS0.SSS0.Px1.p2.1.m1.1.1.3.3.cmml">x</mi></mrow></mrow><annotation-xml encoding="MathML-Content" id="S3.SS0.SSS0.Px1.p2.1.m1.1b"><apply id="S3.SS0.SSS0.Px1.p2.1.m1.1.1.cmml" xref="S3.SS0.SSS0.Px1.p2.1.m1.1.1"><eq id="S3.SS0.SSS0.Px1.p2.1.m1.1.1.1.cmml" xref="S3.SS0.SSS0.Px1.p2.1.m1.1.1.1"></eq><ci id="S3.SS0.SSS0.Px1.p2.1.m1.1.1.2.cmml" xref="S3.SS0.SSS0.Px1.p2.1.m1.1.1.2">𝑦</ci><apply id="S3.SS0.SSS0.Px1.p2.1.m1.1.1.3.cmml" xref="S3.SS0.SSS0.Px1.p2.1.m1.1.1.3"><times id="S3.SS0.SSS0.Px1.p2.1.m1.1.1.3.1.cmml" xref="S3.SS0.SSS0.Px1.p2.1.m1.1.1.3.1"></times><ci id="S3.SS0.SSS0.Px1.p2.1.m1.1.1.3.2.cmml" xref="S3.SS0.SSS0.Px1.p2.1.m1.1.1.3.2">𝑊</ci><ci id="S3.SS0.SSS0.Px1.p2.1.m1.1.1.3.3.cmml" xref="S3.SS0.SSS0.Px1.p2.1.m1.1.1.3.3">𝑥</ci></apply></apply></annotation-xml><annotation encoding="application/x-tex" id="S3.SS0.SSS0.Px1.p2.1.m1.1c">y=Wx</annotation></semantics></math> with weight <math id="S3.SS0.SSS0.Px1.p2.2.m2.1" class="ltx_Math" alttext="W" display="inline"><semantics id="S3.SS0.SSS0.Px1.p2.2.m2.1a"><mi id="S3.SS0.SSS0.Px1.p2.2.m2.1.1" xref="S3.SS0.SSS0.Px1.p2.2.m2.1.1.cmml">W</mi><annotation-xml encoding="MathML-Content" id="S3.SS0.SSS0.Px1.p2.2.m2.1b"><ci id="S3.SS0.SSS0.Px1.p2.2.m2.1.1.cmml" xref="S3.SS0.SSS0.Px1.p2.2.m2.1.1">𝑊</ci></annotation-xml><annotation encoding="application/x-tex" id="S3.SS0.SSS0.Px1.p2.2.m2.1c">W</annotation></semantics></math>. LoRA modifies this into <math id="S3.SS0.SSS0.Px1.p2.3.m3.1" class="ltx_Math" alttext="y=Wx+BAx" display="inline"><semantics id="S3.SS0.SSS0.Px1.p2.3.m3.1a"><mrow id="S3.SS0.SSS0.Px1.p2.3.m3.1.1" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.cmml"><mi id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.2" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.2.cmml">y</mi><mo id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.1" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.1.cmml">=</mo><mrow id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.cmml"><mrow id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.2" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.2.cmml"><mi id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.2.2" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.2.2.cmml">W</mi><mo lspace="0em" rspace="0em" id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.2.1" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.2.1.cmml">​</mo><mi id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.2.3" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.2.3.cmml">x</mi></mrow><mo id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.1" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.1.cmml">+</mo><mrow id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3.cmml"><mi id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3.2" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3.2.cmml">B</mi><mo lspace="0em" rspace="0em" id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3.1" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3.1.cmml">​</mo><mi id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3.3" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3.3.cmml">A</mi><mo lspace="0em" rspace="0em" id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3.1a" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3.1.cmml">​</mo><mi id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3.4" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3.4.cmml">x</mi></mrow></mrow></mrow><annotation-xml encoding="MathML-Content" id="S3.SS0.SSS0.Px1.p2.3.m3.1b"><apply id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.cmml" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1"><eq id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.1.cmml" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.1"></eq><ci id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.2.cmml" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.2">𝑦</ci><apply id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.cmml" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3"><plus id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.1.cmml" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.1"></plus><apply id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.2.cmml" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.2"><times id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.2.1.cmml" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.2.1"></times><ci id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.2.2.cmml" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.2.2">𝑊</ci><ci id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.2.3.cmml" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.2.3">𝑥</ci></apply><apply id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3.cmml" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3"><times id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3.1.cmml" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3.1"></times><ci id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3.2.cmml" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3.2">𝐵</ci><ci id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3.3.cmml" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3.3">𝐴</ci><ci id="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3.4.cmml" xref="S3.SS0.SSS0.Px1.p2.3.m3.1.1.3.3.4">𝑥</ci></apply></apply></apply></annotation-xml><annotation encoding="application/x-tex" id="S3.SS0.SSS0.Px1.p2.3.m3.1c">y=Wx+BAx</annotation></semantics></math>, where <math id="S3.SS0.SSS0.Px1.p2.4.m4.1" class="ltx_Math" alttext="W\in\mathcal{R}^{d\times k}" display="inline"><semantics id="S3.SS0.SSS0.Px1.p2.4.m4.1a"><mrow id="S3.SS0.SSS0.Px1.p2.4.m4.1.1" xref="S3.SS0.SSS0.Px1.p2.4.m4.1.1.cmml"><mi id="S3.SS0.SSS0.Px1.p2.4.m4.1.1.2" xref="S3.SS0.SSS0.Px1.p2.4.m4.1.1.2.cmml">W</mi><mo id="S3.SS0.SSS0.Px1.p2.4.m4.1.1.1" xref="S3.SS0.SSS0.Px1.p2.4.m4.1.1.1.cmml">∈</mo><msup id="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3" xref="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.cmml"><mi class="ltx_font_mathcaligraphic" id="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.2" xref="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.2.cmml">ℛ</mi><mrow id="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.3" xref="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.3.cmml"><mi id="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.3.2" xref="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.3.2.cmml">d</mi><mo lspace="0.222em" rspace="0.222em" id="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.3.1" xref="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.3.1.cmml">×</mo><mi id="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.3.3" xref="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.3.3.cmml">k</mi></mrow></msup></mrow><annotation-xml encoding="MathML-Content" id="S3.SS0.SSS0.Px1.p2.4.m4.1b"><apply id="S3.SS0.SSS0.Px1.p2.4.m4.1.1.cmml" xref="S3.SS0.SSS0.Px1.p2.4.m4.1.1"><in id="S3.SS0.SSS0.Px1.p2.4.m4.1.1.1.cmml" xref="S3.SS0.SSS0.Px1.p2.4.m4.1.1.1"></in><ci id="S3.SS0.SSS0.Px1.p2.4.m4.1.1.2.cmml" xref="S3.SS0.SSS0.Px1.p2.4.m4.1.1.2">𝑊</ci><apply id="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.cmml" xref="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3"><csymbol cd="ambiguous" id="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.1.cmml" xref="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3">superscript</csymbol><ci id="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.2.cmml" xref="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.2">ℛ</ci><apply id="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.3.cmml" xref="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.3"><times id="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.3.1.cmml" xref="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.3.1"></times><ci id="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.3.2.cmml" xref="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.3.2">𝑑</ci><ci id="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.3.3.cmml" xref="S3.SS0.SSS0.Px1.p2.4.m4.1.1.3.3.3">𝑘</ci></apply></apply></apply></annotation-xml><annotation encoding="application/x-tex" id="S3.SS0.SSS0.Px1.p2.4.m4.1c">W\in\mathcal{R}^{d\times k}</annotation></semantics></math>, <math id="S3.SS0.SSS0.Px1.p2.5.m5.1" class="ltx_Math" alttext="B\in\mathcal{R}^{d\times r}" display="inline"><semantics id="S3.SS0.SSS0.Px1.p2.5.m5.1a"><mrow id="S3.SS0.SSS0.Px1.p2.5.m5.1.1" xref="S3.SS0.SSS0.Px1.p2.5.m5.1.1.cmml"><mi id="S3.SS0.SSS0.Px1.p2.5.m5.1.1.2" xref="S3.SS0.SSS0.Px1.p2.5.m5.1.1.2.cmml">B</mi><mo id="S3.SS0.SSS0.Px1.p2.5.m5.1.1.1" xref="S3.SS0.SSS0.Px1.p2.5.m5.1.1.1.cmml">∈</mo><msup id="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3" xref="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.cmml"><mi class="ltx_font_mathcaligraphic" id="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.2" xref="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.2.cmml">ℛ</mi><mrow id="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.3" xref="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.3.cmml"><mi id="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.3.2" xref="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.3.2.cmml">d</mi><mo lspace="0.222em" rspace="0.222em" id="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.3.1" xref="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.3.1.cmml">×</mo><mi id="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.3.3" xref="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.3.3.cmml">r</mi></mrow></msup></mrow><annotation-xml encoding="MathML-Content" id="S3.SS0.SSS0.Px1.p2.5.m5.1b"><apply id="S3.SS0.SSS0.Px1.p2.5.m5.1.1.cmml" xref="S3.SS0.SSS0.Px1.p2.5.m5.1.1"><in id="S3.SS0.SSS0.Px1.p2.5.m5.1.1.1.cmml" xref="S3.SS0.SSS0.Px1.p2.5.m5.1.1.1"></in><ci id="S3.SS0.SSS0.Px1.p2.5.m5.1.1.2.cmml" xref="S3.SS0.SSS0.Px1.p2.5.m5.1.1.2">𝐵</ci><apply id="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.cmml" xref="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3"><csymbol cd="ambiguous" id="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.1.cmml" xref="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3">superscript</csymbol><ci id="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.2.cmml" xref="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.2">ℛ</ci><apply id="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.3.cmml" xref="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.3"><times id="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.3.1.cmml" xref="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.3.1"></times><ci id="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.3.2.cmml" xref="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.3.2">𝑑</ci><ci id="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.3.3.cmml" xref="S3.SS0.SSS0.Px1.p2.5.m5.1.1.3.3.3">𝑟</ci></apply></apply></apply></annotation-xml><annotation encoding="application/x-tex" id="S3.SS0.SSS0.Px1.p2.5.m5.1c">B\in\mathcal{R}^{d\times r}</annotation></semantics></math>, <math id="S3.SS0.SSS0.Px1.p2.6.m6.1" class="ltx_Math" alttext="A\in\mathcal{R}^{r\times k}" display="inline"><semantics id="S3.SS0.SSS0.Px1.p2.6.m6.1a"><mrow id="S3.SS0.SSS0.Px1.p2.6.m6.1.1" xref="S3.SS0.SSS0.Px1.p2.6.m6.1.1.cmml"><mi id="S3.SS0.SSS0.Px1.p2.6.m6.1.1.2" xref="S3.SS0.SSS0.Px1.p2.6.m6.1.1.2.cmml">A</mi><mo id="S3.SS0.SSS0.Px1.p2.6.m6.1.1.1" xref="S3.SS0.SSS0.Px1.p2.6.m6.1.1.1.cmml">∈</mo><msup id="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3" xref="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.cmml"><mi class="ltx_font_mathcaligraphic" id="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.2" xref="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.2.cmml">ℛ</mi><mrow id="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.3" xref="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.3.cmml"><mi id="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.3.2" xref="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.3.2.cmml">r</mi><mo lspace="0.222em" rspace="0.222em" id="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.3.1" xref="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.3.1.cmml">×</mo><mi id="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.3.3" xref="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.3.3.cmml">k</mi></mrow></msup></mrow><annotation-xml encoding="MathML-Content" id="S3.SS0.SSS0.Px1.p2.6.m6.1b"><apply id="S3.SS0.SSS0.Px1.p2.6.m6.1.1.cmml" xref="S3.SS0.SSS0.Px1.p2.6.m6.1.1"><in id="S3.SS0.SSS0.Px1.p2.6.m6.1.1.1.cmml" xref="S3.SS0.SSS0.Px1.p2.6.m6.1.1.1"></in><ci id="S3.SS0.SSS0.Px1.p2.6.m6.1.1.2.cmml" xref="S3.SS0.SSS0.Px1.p2.6.m6.1.1.2">𝐴</ci><apply id="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.cmml" xref="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3"><csymbol cd="ambiguous" id="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.1.cmml" xref="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3">superscript</csymbol><ci id="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.2.cmml" xref="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.2">ℛ</ci><apply id="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.3.cmml" xref="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.3"><times id="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.3.1.cmml" xref="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.3.1"></times><ci id="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.3.2.cmml" xref="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.3.2">𝑟</ci><ci id="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.3.3.cmml" xref="S3.SS0.SSS0.Px1.p2.6.m6.1.1.3.3.3">𝑘</ci></apply></apply></apply></annotation-xml><annotation encoding="application/x-tex" id="S3.SS0.SSS0.Px1.p2.6.m6.1c">A\in\mathcal{R}^{r\times k}</annotation></semantics></math>, and <math id="S3.SS0.SSS0.Px1.p2.7.m7.2" class="ltx_Math" alttext="r\ll\text{min}(d,k)" display="inline"><semantics id="S3.SS0.SSS0.Px1.p2.7.m7.2a"><mrow id="S3.SS0.SSS0.Px1.p2.7.m7.2.3" xref="S3.SS0.SSS0.Px1.p2.7.m7.2.3.cmml"><mi id="S3.SS0.SSS0.Px1.p2.7.m7.2.3.2" xref="S3.SS0.SSS0.Px1.p2.7.m7.2.3.2.cmml">r</mi><mo id="S3.SS0.SSS0.Px1.p2.7.m7.2.3.1" xref="S3.SS0.SSS0.Px1.p2.7.m7.2.3.1.cmml">≪</mo><mrow id="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3" xref="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.cmml"><mtext id="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.2" xref="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.2a.cmml">min</mtext><mo lspace="0em" rspace="0em" id="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.1" xref="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.1.cmml">​</mo><mrow id="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.3.2" xref="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.3.1.cmml"><mo stretchy="false" id="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.3.2.1" xref="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.3.1.cmml">(</mo><mi id="S3.SS0.SSS0.Px1.p2.7.m7.1.1" xref="S3.SS0.SSS0.Px1.p2.7.m7.1.1.cmml">d</mi><mo id="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.3.2.2" xref="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.3.1.cmml">,</mo><mi id="S3.SS0.SSS0.Px1.p2.7.m7.2.2" xref="S3.SS0.SSS0.Px1.p2.7.m7.2.2.cmml">k</mi><mo stretchy="false" id="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.3.2.3" xref="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.3.1.cmml">)</mo></mrow></mrow></mrow><annotation-xml encoding="MathML-Content" id="S3.SS0.SSS0.Px1.p2.7.m7.2b"><apply id="S3.SS0.SSS0.Px1.p2.7.m7.2.3.cmml" xref="S3.SS0.SSS0.Px1.p2.7.m7.2.3"><csymbol cd="latexml" id="S3.SS0.SSS0.Px1.p2.7.m7.2.3.1.cmml" xref="S3.SS0.SSS0.Px1.p2.7.m7.2.3.1">much-less-than</csymbol><ci id="S3.SS0.SSS0.Px1.p2.7.m7.2.3.2.cmml" xref="S3.SS0.SSS0.Px1.p2.7.m7.2.3.2">𝑟</ci><apply id="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.cmml" xref="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3"><times id="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.1.cmml" xref="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.1"></times><ci id="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.2a.cmml" xref="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.2"><mtext id="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.2.cmml" xref="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.2">min</mtext></ci><interval closure="open" id="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.3.1.cmml" xref="S3.SS0.SSS0.Px1.p2.7.m7.2.3.3.3.2"><ci id="S3.SS0.SSS0.Px1.p2.7.m7.1.1.cmml" xref="S3.SS0.SSS0.Px1.p2.7.m7.1.1">𝑑</ci><ci id="S3.SS0.SSS0.Px1.p2.7.m7.2.2.cmml" xref="S3.SS0.SSS0.Px1.p2.7.m7.2.2">𝑘</ci></interval></apply></apply></annotation-xml><annotation encoding="application/x-tex" id="S3.SS0.SSS0.Px1.p2.7.m7.2c">r\ll\text{min}(d,k)</annotation></semantics></math>. This method greatly reduce amount of parameters need to be learned, which is crucial for efficiency in resource-limited scenarios. We set LoRA rank <math id="S3.SS0.SSS0.Px1.p2.8.m8.1" class="ltx_Math" alttext="r" display="inline"><semantics id="S3.SS0.SSS0.Px1.p2.8.m8.1a"><mi id="S3.SS0.SSS0.Px1.p2.8.m8.1.1" xref="S3.SS0.SSS0.Px1.p2.8.m8.1.1.cmml">r</mi><annotation-xml encoding="MathML-Content" id="S3.SS0.SSS0.Px1.p2.8.m8.1b"><ci id="S3.SS0.SSS0.Px1.p2.8.m8.1.1.cmml" xref="S3.SS0.SSS0.Px1.p2.8.m8.1.1">𝑟</ci></annotation-xml><annotation encoding="application/x-tex" id="S3.SS0.SSS0.Px1.p2.8.m8.1c">r</annotation></semantics></math> as 16 and train the model for 3 epochs with an A100 GPU.</p>
+</div>
+<div id="S3.SS0.SSS0.Px1.p3" class="ltx_para">
+<p id="S3.SS0.SSS0.Px1.p3.1" class="ltx_p">Noting that this stage is only conducted for open-source LLMs like ChatGLM and BELLE.
+In essence, this stage lays the foundation for SiliconFriend’s role as an empathetic AI companion, ensuring it can respond appropriately and helpfully to users’ emotional needs.</p>
+</div>
+</section>
+<section id="S3.SS0.SSS0.Px2" class="ltx_paragraph">
+<h4 class="ltx_title ltx_title_paragraph">Integration with MemoryBank:</h4>
+
+<div id="S3.SS0.SSS0.Px2.p1" class="ltx_para">
+<p id="S3.SS0.SSS0.Px2.p1.1" class="ltx_p">The second stage in SiliconFriend’s development involves the integration of MemoryBank. This stage is vital as it equips SiliconFriend with the ability to store, retrieve past interactions and understand user portraits, thereby offering a more personalized and engaging user experience.</p>
+</div>
+<div id="S3.SS0.SSS0.Px2.p2" class="ltx_para">
+<p id="S3.SS0.SSS0.Px2.p2.1" class="ltx_p">When it comes to memory storage, the dialogues between SiliconFriend and users are logged and updated in the memory storage, a process that is adaptable across various model backbones.
+The memory updating mechanism operates using principles inspired by the Ebbinghaus Forgetting Curve theory, allowing for a realistic and human-like memory recall process.</p>
+</div>
+<div id="S3.SS0.SSS0.Px2.p3" class="ltx_para">
+<p id="S3.SS0.SSS0.Px2.p3.1" class="ltx_p">During real-time conversation, the user’s conversation serves as the query for memory retrieval. In practice, we use LangChain <cite class="ltx_cite ltx_citemacro_citep">(LangChain Inc., <a href="#bib.bib9" title="" class="ltx_ref">2022</a>)</cite> for memory retrieval. LangChain supports open-source embedding models and FAISS indexing, making it a versatile choice.
+In language-specific implementations of the open-source version of SiliconFriend, we use MiniLM <cite class="ltx_cite ltx_citemacro_citep">(Wang et al., <a href="#bib.bib16" title="" class="ltx_ref">2020</a>)</cite> as the embedding model for English and Text2vec <cite class="ltx_cite ltx_citemacro_citep">(Ming, <a href="#bib.bib11" title="" class="ltx_ref">2022</a>)</cite> for Chinese. It is worth noting that the embedding models can be flexibly interchanged to suit varying needs, even accommodating multi-lingual models.
+Upon memory retrieval, a series of information is organized into the conversation prompt, including relevant memory, global user portrait, and global event summary. Consequently, SiliconFriend can generate responses that refer past memories and deliver interactions tailored to the user’s portrait.</p>
+</div>
+<div id="S3.SS0.SSS0.Px2.p4" class="ltx_para">
+<p id="S3.SS0.SSS0.Px2.p4.1" class="ltx_p">In conclusion, these stages transform SiliconFriend from a standard AI chatbot into a long-term AI companion, capable of remembering and learning from past interactions to provide personalized and empathetic user experience.</p>
+</div>
+</section>
+</section>
+<section id="S4" class="ltx_section">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">4 </span>Experiments</h2>
+
+<figure id="S4.F2" class="ltx_figure"><img src="/html/2305.10250/assets/x2.png" id="S4.F2.1.g1" class="ltx_graphics ltx_centering ltx_img_landscape" width="461" height="234" alt="Refer to caption">
+<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_figure"><span id="S4.F2.4.1.1" class="ltx_text" style="font-size:90%;">Figure 2</span>: </span><span id="S4.F2.5.2" class="ltx_text" style="font-size:90%;">Example of consulting SiliconFriend <sub id="S4.F2.5.2.1" class="ltx_sub">ChatGLM</sub> for psychological companionship. Overall, SiliconFriend can provide more empathic response, offer constructive emotional support to user and help him to face sorrow with positive altitude.</span></figcaption>
+</figure>
+<div id="S4.p1" class="ltx_para">
+<p id="S4.p1.1" class="ltx_p">The primary objective of our experiments is to evaluate the efficacy of MemoryBank within the framework of an LLM, specifically in its ability as an AI companion. We are particularly interested in determining whether embedding a long-term memory module could augment the AI’s proficiency in recalling historical interactions and deepening its understanding of user personalities. Additionally, we aim to testify whether the tuning based on psychological data can bolster the AI’s capability to provide more effective emotional support.</p>
+</div>
+<div id="S4.p2" class="ltx_para">
+<p id="S4.p2.1" class="ltx_p">The qualitative analysis focuses on three aspects: (1) a comparative study between SiliconFriend and baseline LLMs to evaluate their capabilities in providing empathetic and beneficial psychological companionship; (2) an investigation into SiliconFriend’s memory recall ability; (3) an analysis of how the model’s understanding of user profiles influences the responses.
+Moreover, to demonstrate the model’s proficiency in memory recall on a broader scale, we design a qualitative analysis that uses simulated long-term dialog history and 194 memory probing questions.
+This simulated dialog history, spanning a period of 10 days and encompassing a wide array of topics, is produced by ChatGPT through the role-play of 15 distinct virtual users, each embodying the users’ personality.</p>
+</div>
+<section id="S4.SS1" class="ltx_subsection">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">4.1 </span>Qualitative Analysis</h3>
+
+<div id="S4.SS1.p1" class="ltx_para">
+<p id="S4.SS1.p1.1" class="ltx_p">The qualitative analysis is conducted by showcasing practical examples of SiliconFriend’s capabilities. To gather these examples, we have developed an online platform for SiliconFriend and collected real-time conversations from actual users.</p>
+</div>
+<section id="S4.SS1.SSS0.Px1" class="ltx_paragraph">
+<h4 class="ltx_title ltx_title_paragraph">Psychological Companionship</h4>
+
+<div id="S4.SS1.SSS0.Px1.p1" class="ltx_para">
+<p id="S4.SS1.SSS0.Px1.p1.1" class="ltx_p">The ability to exhibit empathy in a conversation is a key attribute of an effective AI companion. To evaluate models’ ability to provide psychological comfort to users, we compared the responses shown by SiliconFriend with that of the baseline LLMs in real-world conversations.
+As demonstrated in Fig. <a href="#S4.F2" title="Figure 2 ‣ 4 Experiments ‣ MemoryBank: Enhancing Large Language Models with Long-Term Memory" class="ltx_ref"><span class="ltx_text ltx_ref_tag">2</span></a>, when a user expresses emotional difficulties and seeks assistance from SiliconFriend, the model is capable of delivering empathetic responses along with constructive suggestions. SiliconFriend’s responses stand out due to their emotional support, showcasing a stark contrast to its baseline ChatGLM.</p>
+</div>
+</section>
+<section id="S4.SS1.SSS0.Px2" class="ltx_paragraph">
+<h4 class="ltx_title ltx_title_paragraph">Memory Recall Analysis</h4>
+
+<figure id="S4.F3" class="ltx_figure"><img src="/html/2305.10250/assets/x3.png" id="S4.F3.1.g1" class="ltx_graphics ltx_centering ltx_img_landscape" width="461" height="145" alt="Refer to caption">
+<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_figure"><span id="S4.F3.4.1.1" class="ltx_text" style="font-size:90%;">Figure 3</span>: </span><span id="S4.F3.5.2" class="ltx_text" style="font-size:90%;">Example responses from SiliconFriend <sub id="S4.F3.5.2.1" class="ltx_sub">BELLE</sub> in memory recall.</span></figcaption>
+</figure>
+<div id="S4.SS1.SSS0.Px2.p1" class="ltx_para">
+<p id="S4.SS1.SSS0.Px2.p1.1" class="ltx_p">To evaluate SiliconFriend’s ability in memory recall, we integrate memory probing questions into the dialogues. These questions are designed to prompt SiliconFriend to retrieve specific details from the chat history.
+As shown in Fig. <a href="#S4.F3" title="Figure 3 ‣ Memory Recall Analysis ‣ 4.1 Qualitative Analysis ‣ 4 Experiments ‣ MemoryBank: Enhancing Large Language Models with Long-Term Memory" class="ltx_ref"><span class="ltx_text ltx_ref_tag">3</span></a>, the user and SiliconFriend engaged in a discussion about programming learning suggestions. Several days later, the user posed several memory probing questions. SiliconFriend successfully recalled previously suggested book and algorithm. Furthermore, it correctly identified an event (i.e., the heap sort algorithm) that had not been discussed before. These instances underscore SiliconFriend’s successful memory recall and recognition capabilities.</p>
+</div>
+<figure id="S4.F4" class="ltx_figure"><img src="/html/2305.10250/assets/x4.png" id="S4.F4.1.g1" class="ltx_graphics ltx_centering ltx_img_landscape" width="456" height="165" alt="Refer to caption">
+<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_figure"><span id="S4.F4.4.1.1" class="ltx_text" style="font-size:90%;">Figure 4</span>: </span><span id="S4.F4.5.2" class="ltx_text" style="font-size:90%;">Example responses from SiliconFriend <sub id="S4.F4.5.2.1" class="ltx_sub">ChatGPT</sub> to users with different personalities.</span></figcaption>
+</figure>
+</section>
+<section id="S4.SS1.SSS0.Px3" class="ltx_paragraph">
+<h4 class="ltx_title ltx_title_paragraph">Personality Interaction Analysis</h4>
+
+<div id="S4.SS1.SSS0.Px3.p1" class="ltx_para">
+<p id="S4.SS1.SSS0.Px3.p1.1" class="ltx_p">As shown in Fig. <a href="#S4.F4" title="Figure 4 ‣ Memory Recall Analysis ‣ 4.1 Qualitative Analysis ‣ 4 Experiments ‣ MemoryBank: Enhancing Large Language Models with Long-Term Memory" class="ltx_ref"><span class="ltx_text ltx_ref_tag">4</span></a>, we examine the capability of SiliconFriend with users of diverse personalities. We observe that it effectively recommend activities tailored to users’ interests based on their character traits. This analysis demonstrates SiliconFriend’s ability to draw interact effectively with various user personalities.</p>
+</div>
+</section>
+</section>
+<section id="S4.SS2" class="ltx_subsection">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">4.2 </span>Quantitative Analysis</h3>
+
+<div id="S4.SS2.p1" class="ltx_para">
+<p id="S4.SS2.p1.1" class="ltx_p">Quantitative analysis is conducted to exemplify the memory recall ability of SiliconFriend in a larger scale.
+We ask the human annotators to score the retrieved memories and responses from the models:
+(1) SiliconFriend <sub id="S4.SS2.p1.1.1" class="ltx_sub">ChatGPT</sub>; (2) SiliconFriend <sub id="S4.SS2.p1.1.2" class="ltx_sub">ChatGLM</sub>; (3) SiliconFriend <sub id="S4.SS2.p1.1.3" class="ltx_sub">BELLE</sub>.</p>
+</div>
+<section id="S4.SS2.SSS0.Px1" class="ltx_paragraph">
+<h4 class="ltx_title ltx_title_paragraph">Memory Storage Construction:</h4>
+
+<div id="S4.SS2.SSS0.Px1.p1" class="ltx_para">
+<p id="S4.SS2.SSS0.Px1.p1.1" class="ltx_p">We initially establish an evaluation foundation with a memory storage of 10 days of conversations involving 15 virtual users. These users have diverse personalities and dialogue on each day covers at least two topics.
+User meta-information, including names, personalities, and interested topics is generated using ChatGPT. Conversations are synthesized by users acted by ChatGPT based on predefined topics and user personalities. We create memory storages in both English and Chinese. After memory storage construction, we manually write 194 probing questions (97 in English and 97 in Chinese) to assess whether the model could accurately recall pertinent memory and appropriately formulate answers. Table <a href="#S4.T1" title="Table 1 ‣ Memory Storage Construction: ‣ 4.2 Quantitative Analysis ‣ 4 Experiments ‣ MemoryBank: Enhancing Large Language Models with Long-Term Memory" class="ltx_ref"><span class="ltx_text ltx_ref_tag">1</span></a> presents an example of user meta-information, generated conversations, and probing questions.</p>
+</div>
+<figure id="S4.T1" class="ltx_table">
+<figcaption class="ltx_caption" style="font-size:80%;"><span class="ltx_tag ltx_tag_table"><span id="S4.T1.4.1.1" class="ltx_text" style="font-size:113%;">Table 1</span>: </span><span id="S4.T1.5.2" class="ltx_text" style="font-size:113%;">An example of one memory piece (on May 3th) in the memory bank, and corresponding probing question asked on May 10th. The outputs from three variances of SiliconFriend are shown for comparison. All these models answer correctly and coherently.</span></figcaption>
+<table id="S4.T1.6" class="ltx_tabular ltx_centering ltx_align_middle">
+<tr id="S4.T1.6.1" class="ltx_tr">
+<td id="S4.T1.6.1.1" class="ltx_td ltx_align_justify ltx_align_top ltx_border_tt">
+<span id="S4.T1.6.1.1.1" class="ltx_inline-block ltx_align_top">
+<span id="S4.T1.6.1.1.1.1" class="ltx_p" style="width:65.4pt;">
+<span id="S4.T1.6.1.1.1.1.1" class="ltx_inline-block ltx_parbox ltx_align_top" style="width:113.8pt;">
+<span id="S4.T1.6.1.1.1.1.1.1" class="ltx_p"><span id="S4.T1.6.1.1.1.1.1.1.1" class="ltx_text ltx_font_bold ltx_font_italic" style="font-size:80%;">Meta-information</span><span id="S4.T1.6.1.1.1.1.1.1.2" class="ltx_text" style="font-size:80%;"></span></span>
+<span id="S4.T1.6.1.1.1.1.1.2" class="ltx_p"><span id="S4.T1.6.1.1.1.1.1.2.1" class="ltx_text ltx_font_bold ltx_font_italic" style="font-size:80%;">of User:</span></span>
+</span></span>
+</span>
+</td>
+<td id="S4.T1.6.1.2" class="ltx_td ltx_align_justify ltx_align_top ltx_border_tt">
+<span id="S4.T1.6.1.2.1" class="ltx_inline-block ltx_align_top">
+<span id="S4.T1.6.1.2.1.1" class="ltx_p" style="width:313.0pt;"><span id="S4.T1.6.1.2.1.1.1" class="ltx_text ltx_font_bold" style="font-size:80%;">Name:</span><span id="S4.T1.6.1.2.1.1.2" class="ltx_text" style="font-size:80%;"> Gary  </span><span id="S4.T1.6.1.2.1.1.3" class="ltx_text ltx_font_bold" style="font-size:80%;">Hobbies:</span><span id="S4.T1.6.1.2.1.1.4" class="ltx_text" style="font-size:80%;"> racing, business, chess, painting, wine</span></span>
+<span id="S4.T1.6.1.2.1.2" class="ltx_p"><span id="S4.T1.6.1.2.1.2.1" class="ltx_text ltx_font_bold" style="font-size:80%;">Personality:</span><span id="S4.T1.6.1.2.1.2.2" class="ltx_text" style="font-size:80%;"> decisive and straightforward, outspoken, helpful</span></span>
+</span>
+</td>
+</tr>
+<tr id="S4.T1.6.2" class="ltx_tr">
+<td id="S4.T1.6.2.1" class="ltx_td ltx_align_justify ltx_align_top ltx_border_t">
+<span id="S4.T1.6.2.1.1" class="ltx_inline-block ltx_align_top">
+<span id="S4.T1.6.2.1.1.1" class="ltx_p" style="width:65.4pt;">
+<span id="S4.T1.6.2.1.1.1.1" class="ltx_inline-block ltx_parbox ltx_align_top" style="width:113.8pt;">
+<span id="S4.T1.6.2.1.1.1.1.1" class="ltx_p"><span id="S4.T1.6.2.1.1.1.1.1.1" class="ltx_text ltx_font_bold ltx_font_italic" style="font-size:80%;">Past Conversation:</span><span id="S4.T1.6.2.1.1.1.1.1.2" class="ltx_text" style="font-size:80%;"></span></span>
+<span id="S4.T1.6.2.1.1.1.1.2" class="ltx_p"><span id="S4.T1.6.2.1.1.1.1.2.1" class="ltx_text ltx_font_bold ltx_font_italic" style="font-size:80%;">(May 3th)</span></span>
+</span></span>
+</span>
+</td>
+<td id="S4.T1.6.2.2" class="ltx_td ltx_align_justify ltx_align_top ltx_border_t">
+<span id="S4.T1.6.2.2.1" class="ltx_inline-block ltx_align_top">
+<span id="S4.T1.6.2.2.1.1" class="ltx_p" style="width:313.0pt;"><span id="S4.T1.6.2.2.1.1.1" class="ltx_text ltx_font_bold" style="font-size:80%;">User</span><span id="S4.T1.6.2.2.1.1.2" class="ltx_text" style="font-size:80%;">: I’ve been feeling a bit stressed out lately and my sleep hasn’t been great. Do you have any good ways to relieve stress?</span></span>
+<span id="S4.T1.6.2.2.1.2" class="ltx_p"><span id="S4.T1.6.2.2.1.2.1" class="ltx_text ltx_font_bold" style="font-size:80%;">AI</span><span id="S4.T1.6.2.2.1.2.2" class="ltx_text" style="font-size:80%;">: It’s true that prolonged work or life stress can affect our physical and mental health. There are many ways to relieve stress, such as doing moderate exercise, listening to music, reading, talking to friends, etc. You can try to add more entertainment and leisure activities into your daily life, and reduce work pressure and negative effects.</span></span>
+<span id="S4.T1.6.2.2.1.3" class="ltx_p"><span id="S4.T1.6.2.2.1.3.1" class="ltx_text" style="font-size:80%;">…</span></span>
+<span id="S4.T1.6.2.2.1.4" class="ltx_p"><span id="S4.T1.6.2.2.1.4.1" class="ltx_text" style="font-size:80%;">(The rest of conversation cover topics about movies and TV shows recommendations.)</span></span>
+</span>
+</td>
+</tr>
+<tr id="S4.T1.6.3" class="ltx_tr">
+<td id="S4.T1.6.3.1" class="ltx_td ltx_align_justify ltx_align_top ltx_border_t">
+<span id="S4.T1.6.3.1.1" class="ltx_inline-block ltx_align_top">
+<span id="S4.T1.6.3.1.1.1" class="ltx_p" style="width:65.4pt;">
+<span id="S4.T1.6.3.1.1.1.1" class="ltx_inline-block ltx_parbox ltx_align_top" style="width:113.8pt;">
+<span id="S4.T1.6.3.1.1.1.1.1" class="ltx_p"><span id="S4.T1.6.3.1.1.1.1.1.1" class="ltx_text ltx_font_bold ltx_font_italic" style="font-size:80%;">Probing Question:</span><span id="S4.T1.6.3.1.1.1.1.1.2" class="ltx_text" style="font-size:80%;"></span></span>
+<span id="S4.T1.6.3.1.1.1.1.2" class="ltx_p"><span id="S4.T1.6.3.1.1.1.1.2.1" class="ltx_text ltx_font_bold ltx_font_italic" style="font-size:80%;">(May 10th)</span></span>
+</span></span>
+</span>
+</td>
+<td id="S4.T1.6.3.2" class="ltx_td ltx_align_justify ltx_align_top ltx_border_t">
+<span id="S4.T1.6.3.2.1" class="ltx_inline-block ltx_align_top">
+<span id="S4.T1.6.3.2.1.1" class="ltx_p" style="width:313.0pt;"><span id="S4.T1.6.3.2.1.1.1" class="ltx_text" style="font-size:80%;">What good ways did you recommend me to relieve stress?</span></span>
+</span>
+</td>
+</tr>
+<tr id="S4.T1.6.4" class="ltx_tr">
+<td id="S4.T1.6.4.1" class="ltx_td ltx_align_justify ltx_align_top ltx_border_t">
+<span id="S4.T1.6.4.1.1" class="ltx_inline-block ltx_align_top">
+<span id="S4.T1.6.4.1.1.1" class="ltx_p" style="width:65.4pt;">
+<span id="S4.T1.6.4.1.1.1.1" class="ltx_inline-block ltx_parbox ltx_align_top" style="width:113.8pt;">
+<span id="S4.T1.6.4.1.1.1.1.1" class="ltx_p"><span id="S4.T1.6.4.1.1.1.1.1.1" class="ltx_text ltx_font_bold ltx_font_italic" style="font-size:80%;color:#0000FF;">Model Output:</span><span id="S4.T1.6.4.1.1.1.1.1.2" class="ltx_text" style="font-size:80%;"></span></span>
+<span id="S4.T1.6.4.1.1.1.1.2" class="ltx_p"><span id="S4.T1.6.4.1.1.1.1.2.1" class="ltx_text ltx_font_bold ltx_font_italic" style="font-size:80%;">SiliconFriend
+<br class="ltx_break">(ChatGLM)</span></span>
+</span></span>
+</span>
+</td>
+<td id="S4.T1.6.4.2" class="ltx_td ltx_align_justify ltx_align_top ltx_border_t">
+<span id="S4.T1.6.4.2.1" class="ltx_inline-block ltx_align_top">
+<span id="S4.T1.6.4.2.1.1" class="ltx_p" style="width:313.0pt;"><span id="S4.T1.6.4.2.1.1.1" class="ltx_text" style="font-size:80%;">I recommended that you try doing some moderate exercise, listening to music, reading, talking to friends, or adding more entertainment and leisure activities into your daily life to reduce work pressure and negative effects. You can also try to add more of these things into your life in moderation, as it is important to balance things out and not overdo it. If you are still feeling stressed, I would recommend seeking the help of a professional counselor or therapist who can provide further guidance and support.</span></span>
+</span>
+</td>
+</tr>
+<tr id="S4.T1.6.5" class="ltx_tr">
+<td id="S4.T1.6.5.1" class="ltx_td ltx_align_justify ltx_align_top ltx_border_t">
+<span id="S4.T1.6.5.1.1" class="ltx_inline-block ltx_align_top">
+<span id="S4.T1.6.5.1.1.1" class="ltx_p" style="width:65.4pt;">
+<span id="S4.T1.6.5.1.1.1.1" class="ltx_inline-block ltx_parbox ltx_align_top" style="width:113.8pt;">
+<span id="S4.T1.6.5.1.1.1.1.1" class="ltx_p"><span id="S4.T1.6.5.1.1.1.1.1.1" class="ltx_text ltx_font_bold ltx_font_italic" style="font-size:80%;color:#0000FF;">Model Output:</span><span id="S4.T1.6.5.1.1.1.1.1.2" class="ltx_text" style="font-size:80%;"></span></span>
+<span id="S4.T1.6.5.1.1.1.1.2" class="ltx_p"><span id="S4.T1.6.5.1.1.1.1.2.1" class="ltx_text ltx_font_bold ltx_font_italic" style="font-size:80%;">SiliconFriend
+<br class="ltx_break">(BELLE)</span></span>
+</span></span>
+</span>
+</td>
+<td id="S4.T1.6.5.2" class="ltx_td ltx_align_justify ltx_align_top ltx_border_t">
+<span id="S4.T1.6.5.2.1" class="ltx_inline-block ltx_align_top">
+<span id="S4.T1.6.5.2.1.1" class="ltx_p" style="width:313.0pt;"><span id="S4.T1.6.5.2.1.1.1" class="ltx_text" style="font-size:80%;">I recommended some ways to relieve stress such as doing moderate exercise, listening to music, reading, talking to friends, etc. You can try to add more entertainment and leisure activities into your daily life, and reduce work pressure and negative effects.</span></span>
+</span>
+</td>
+</tr>
+<tr id="S4.T1.6.6" class="ltx_tr">
+<td id="S4.T1.6.6.1" class="ltx_td ltx_align_justify ltx_align_top ltx_border_bb ltx_border_t">
+<span id="S4.T1.6.6.1.1" class="ltx_inline-block ltx_align_top">
+<span id="S4.T1.6.6.1.1.1" class="ltx_p" style="width:65.4pt;">
+<span id="S4.T1.6.6.1.1.1.1" class="ltx_inline-block ltx_parbox ltx_align_top" style="width:113.8pt;">
+<span id="S4.T1.6.6.1.1.1.1.1" class="ltx_p"><span id="S4.T1.6.6.1.1.1.1.1.1" class="ltx_text ltx_font_bold ltx_font_italic" style="font-size:80%;color:#0000FF;">Model Output:</span><span id="S4.T1.6.6.1.1.1.1.1.2" class="ltx_text" style="font-size:80%;"></span></span>
+<span id="S4.T1.6.6.1.1.1.1.2" class="ltx_p"><span id="S4.T1.6.6.1.1.1.1.2.1" class="ltx_text ltx_font_bold ltx_font_italic" style="font-size:80%;">SiliconFriend
+<br class="ltx_break">(ChatGPT)</span></span>
+</span></span>
+</span>
+</td>
+<td id="S4.T1.6.6.2" class="ltx_td ltx_align_justify ltx_align_top ltx_border_bb ltx_border_t">
+<span id="S4.T1.6.6.2.1" class="ltx_inline-block ltx_align_top">
+<span id="S4.T1.6.6.2.1.1" class="ltx_p" style="width:313.0pt;"><span id="S4.T1.6.6.2.1.1.1" class="ltx_text" style="font-size:80%;">Based on our past conversations, I suggested doing moderate exercise, listening to music, reading, talking to friends, and adding more leisure activities to your daily life as good ways to relieve stress. Exercise can help release endorphins and boost your mood, while music and reading can provide a mental escape from stress. Talking to friends can also help alleviate stress by providing a social support system. Lastly, adding leisure activities to your daily routine can be a fun and effective way of reducing stress levels.</span></span>
+</span>
+</td>
+</tr>
+</table>
+</figure>
+</section>
+<section id="S4.SS2.SSS0.Px2" class="ltx_paragraph">
+<h4 class="ltx_title ltx_title_paragraph">Evaluation Metrics</h4>
+
+<div id="S4.SS2.SSS0.Px2.p1" class="ltx_para">
+<p id="S4.SS2.SSS0.Px2.p1.5" class="ltx_p">The performance of models is assessed based on the following metrics.
+(1) <span id="S4.SS2.SSS0.Px2.p1.5.1" class="ltx_text ltx_font_bold">Memory Retrieval Accuracy</span>: Determines if related memory can be successfully retrieved (labels: <math id="S4.SS2.SSS0.Px2.p1.1.m1.4" class="ltx_Math" alttext="\{0:\text{no},1:\text{yes}\}" display="inline"><semantics id="S4.SS2.SSS0.Px2.p1.1.m1.4a"><mrow id="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1" xref="S4.SS2.SSS0.Px2.p1.1.m1.4.4.2.cmml"><mo stretchy="false" id="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.2" xref="S4.SS2.SSS0.Px2.p1.1.m1.4.4.2.1.cmml">{</mo><mn id="S4.SS2.SSS0.Px2.p1.1.m1.3.3" xref="S4.SS2.SSS0.Px2.p1.1.m1.3.3.cmml">0</mn><mo lspace="0.278em" rspace="0.278em" id="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.3" xref="S4.SS2.SSS0.Px2.p1.1.m1.4.4.2.1.cmml">:</mo><mrow id="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.1" xref="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.1.cmml"><mrow id="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.1.2.2" xref="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.1.2.1.cmml"><mtext id="S4.SS2.SSS0.Px2.p1.1.m1.1.1" xref="S4.SS2.SSS0.Px2.p1.1.m1.1.1a.cmml">no</mtext><mo id="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.1.2.2.1" xref="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.1.2.1.cmml">,</mo><mn id="S4.SS2.SSS0.Px2.p1.1.m1.2.2" xref="S4.SS2.SSS0.Px2.p1.1.m1.2.2.cmml">1</mn></mrow><mo lspace="0.278em" rspace="0.278em" id="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.1.1" xref="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.1.1.cmml">:</mo><mtext id="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.1.3" xref="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.1.3a.cmml">yes</mtext></mrow><mo stretchy="false" id="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.4" xref="S4.SS2.SSS0.Px2.p1.1.m1.4.4.2.1.cmml">}</mo></mrow><annotation-xml encoding="MathML-Content" id="S4.SS2.SSS0.Px2.p1.1.m1.4b"><apply id="S4.SS2.SSS0.Px2.p1.1.m1.4.4.2.cmml" xref="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1"><csymbol cd="latexml" id="S4.SS2.SSS0.Px2.p1.1.m1.4.4.2.1.cmml" xref="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.2">conditional-set</csymbol><cn type="integer" id="S4.SS2.SSS0.Px2.p1.1.m1.3.3.cmml" xref="S4.SS2.SSS0.Px2.p1.1.m1.3.3">0</cn><apply id="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.1.cmml" xref="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.1"><ci id="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.1.1.cmml" xref="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.1.1">:</ci><list id="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.1.2.1.cmml" xref="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.1.2.2"><ci id="S4.SS2.SSS0.Px2.p1.1.m1.1.1a.cmml" xref="S4.SS2.SSS0.Px2.p1.1.m1.1.1"><mtext id="S4.SS2.SSS0.Px2.p1.1.m1.1.1.cmml" xref="S4.SS2.SSS0.Px2.p1.1.m1.1.1">no</mtext></ci><cn type="integer" id="S4.SS2.SSS0.Px2.p1.1.m1.2.2.cmml" xref="S4.SS2.SSS0.Px2.p1.1.m1.2.2">1</cn></list><ci id="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.1.3a.cmml" xref="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.1.3"><mtext id="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.1.3.cmml" xref="S4.SS2.SSS0.Px2.p1.1.m1.4.4.1.1.3">yes</mtext></ci></apply></apply></annotation-xml><annotation encoding="application/x-tex" id="S4.SS2.SSS0.Px2.p1.1.m1.4c">\{0:\text{no},1:\text{yes}\}</annotation></semantics></math>).
+(2) <span id="S4.SS2.SSS0.Px2.p1.5.2" class="ltx_text ltx_font_bold">Response Correctness</span>: Evaluates if the response contains the correct answer to the probing question (labels: <math id="S4.SS2.SSS0.Px2.p1.2.m2.6" class="ltx_Math" alttext="\{0:\text{wrong},0.5:\text{partial},1:\text{correct}\}" display="inline"><semantics id="S4.SS2.SSS0.Px2.p1.2.m2.6a"><mrow id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.2.cmml"><mo stretchy="false" id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.2" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.2.1.cmml">{</mo><mn id="S4.SS2.SSS0.Px2.p1.2.m2.5.5" xref="S4.SS2.SSS0.Px2.p1.2.m2.5.5.cmml">0</mn><mo lspace="0.278em" rspace="0.278em" id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.3" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.2.1.cmml">:</mo><mrow id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.cmml"><mrow id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.2.2" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.2.1.cmml"><mtext id="S4.SS2.SSS0.Px2.p1.2.m2.1.1" xref="S4.SS2.SSS0.Px2.p1.2.m2.1.1a.cmml">wrong</mtext><mo id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.2.2.1" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.2.1.cmml">,</mo><mn id="S4.SS2.SSS0.Px2.p1.2.m2.2.2" xref="S4.SS2.SSS0.Px2.p1.2.m2.2.2.cmml">0.5</mn></mrow><mo lspace="0.278em" rspace="0.278em" id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.3" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.3.cmml">:</mo><mrow id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.4.2" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.4.1.cmml"><mtext id="S4.SS2.SSS0.Px2.p1.2.m2.3.3" xref="S4.SS2.SSS0.Px2.p1.2.m2.3.3a.cmml">partial</mtext><mo id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.4.2.1" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.4.1.cmml">,</mo><mn id="S4.SS2.SSS0.Px2.p1.2.m2.4.4" xref="S4.SS2.SSS0.Px2.p1.2.m2.4.4.cmml">1</mn></mrow><mo lspace="0.278em" rspace="0.278em" id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.5" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.5.cmml">:</mo><mtext id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.6" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.6a.cmml">correct</mtext></mrow><mo stretchy="false" id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.4" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.2.1.cmml">}</mo></mrow><annotation-xml encoding="MathML-Content" id="S4.SS2.SSS0.Px2.p1.2.m2.6b"><apply id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.2.cmml" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1"><csymbol cd="latexml" id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.2.1.cmml" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.2">conditional-set</csymbol><cn type="integer" id="S4.SS2.SSS0.Px2.p1.2.m2.5.5.cmml" xref="S4.SS2.SSS0.Px2.p1.2.m2.5.5">0</cn><apply id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.cmml" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1"><and id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1a.cmml" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1"></and><apply id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1b.cmml" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1"><ci id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.3.cmml" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.3">:</ci><list id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.2.1.cmml" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.2.2"><ci id="S4.SS2.SSS0.Px2.p1.2.m2.1.1a.cmml" xref="S4.SS2.SSS0.Px2.p1.2.m2.1.1"><mtext id="S4.SS2.SSS0.Px2.p1.2.m2.1.1.cmml" xref="S4.SS2.SSS0.Px2.p1.2.m2.1.1">wrong</mtext></ci><cn type="float" id="S4.SS2.SSS0.Px2.p1.2.m2.2.2.cmml" xref="S4.SS2.SSS0.Px2.p1.2.m2.2.2">0.5</cn></list><list id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.4.1.cmml" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.4.2"><ci id="S4.SS2.SSS0.Px2.p1.2.m2.3.3a.cmml" xref="S4.SS2.SSS0.Px2.p1.2.m2.3.3"><mtext id="S4.SS2.SSS0.Px2.p1.2.m2.3.3.cmml" xref="S4.SS2.SSS0.Px2.p1.2.m2.3.3">partial</mtext></ci><cn type="integer" id="S4.SS2.SSS0.Px2.p1.2.m2.4.4.cmml" xref="S4.SS2.SSS0.Px2.p1.2.m2.4.4">1</cn></list></apply><apply id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1c.cmml" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1"><ci id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.5.cmml" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.5">:</ci><share href="#S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.4.cmml" id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1d.cmml" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1"></share><ci id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.6a.cmml" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.6"><mtext id="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.6.cmml" xref="S4.SS2.SSS0.Px2.p1.2.m2.6.6.1.1.6">correct</mtext></ci></apply></apply></apply></annotation-xml><annotation encoding="application/x-tex" id="S4.SS2.SSS0.Px2.p1.2.m2.6c">\{0:\text{wrong},0.5:\text{partial},1:\text{correct}\}</annotation></semantics></math>).
+(3) <span id="S4.SS2.SSS0.Px2.p1.5.3" class="ltx_text ltx_font_bold">Contextual Coherence</span>: Assesses whether the response is naturally and coherently structured, connecting the dialogue context and retrieved memory (labels: <math id="S4.SS2.SSS0.Px2.p1.3.m3.4" class="ltx_Math" alttext="{0:\text{not coherent},0.5:\text{partially coherent},1:\text{coherent}}" display="inline"><semantics id="S4.SS2.SSS0.Px2.p1.3.m3.4a"><mrow id="S4.SS2.SSS0.Px2.p1.3.m3.4.5" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5.cmml"><mn id="S4.SS2.SSS0.Px2.p1.3.m3.4.5.2" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5.2.cmml">0</mn><mo lspace="0.278em" rspace="0.278em" id="S4.SS2.SSS0.Px2.p1.3.m3.4.5.3" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5.3.cmml">:</mo><mrow id="S4.SS2.SSS0.Px2.p1.3.m3.4.5.4.2" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5.4.1.cmml"><mtext id="S4.SS2.SSS0.Px2.p1.3.m3.1.1" xref="S4.SS2.SSS0.Px2.p1.3.m3.1.1a.cmml">not coherent</mtext><mo id="S4.SS2.SSS0.Px2.p1.3.m3.4.5.4.2.1" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5.4.1.cmml">,</mo><mn id="S4.SS2.SSS0.Px2.p1.3.m3.2.2" xref="S4.SS2.SSS0.Px2.p1.3.m3.2.2.cmml">0.5</mn></mrow><mo lspace="0.278em" rspace="0.278em" id="S4.SS2.SSS0.Px2.p1.3.m3.4.5.5" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5.5.cmml">:</mo><mrow id="S4.SS2.SSS0.Px2.p1.3.m3.4.5.6.2" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5.6.1.cmml"><mtext id="S4.SS2.SSS0.Px2.p1.3.m3.3.3" xref="S4.SS2.SSS0.Px2.p1.3.m3.3.3a.cmml">partially coherent</mtext><mo id="S4.SS2.SSS0.Px2.p1.3.m3.4.5.6.2.1" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5.6.1.cmml">,</mo><mn id="S4.SS2.SSS0.Px2.p1.3.m3.4.4" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.4.cmml">1</mn></mrow><mo lspace="0.278em" rspace="0.278em" id="S4.SS2.SSS0.Px2.p1.3.m3.4.5.7" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5.7.cmml">:</mo><mtext id="S4.SS2.SSS0.Px2.p1.3.m3.4.5.8" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5.8a.cmml">coherent</mtext></mrow><annotation-xml encoding="MathML-Content" id="S4.SS2.SSS0.Px2.p1.3.m3.4b"><apply id="S4.SS2.SSS0.Px2.p1.3.m3.4.5.cmml" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5"><and id="S4.SS2.SSS0.Px2.p1.3.m3.4.5a.cmml" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5"></and><apply id="S4.SS2.SSS0.Px2.p1.3.m3.4.5b.cmml" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5"><ci id="S4.SS2.SSS0.Px2.p1.3.m3.4.5.3.cmml" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5.3">:</ci><cn type="integer" id="S4.SS2.SSS0.Px2.p1.3.m3.4.5.2.cmml" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5.2">0</cn><list id="S4.SS2.SSS0.Px2.p1.3.m3.4.5.4.1.cmml" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5.4.2"><ci id="S4.SS2.SSS0.Px2.p1.3.m3.1.1a.cmml" xref="S4.SS2.SSS0.Px2.p1.3.m3.1.1"><mtext id="S4.SS2.SSS0.Px2.p1.3.m3.1.1.cmml" xref="S4.SS2.SSS0.Px2.p1.3.m3.1.1">not coherent</mtext></ci><cn type="float" id="S4.SS2.SSS0.Px2.p1.3.m3.2.2.cmml" xref="S4.SS2.SSS0.Px2.p1.3.m3.2.2">0.5</cn></list></apply><apply id="S4.SS2.SSS0.Px2.p1.3.m3.4.5c.cmml" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5"><ci id="S4.SS2.SSS0.Px2.p1.3.m3.4.5.5.cmml" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5.5">:</ci><share href="#S4.SS2.SSS0.Px2.p1.3.m3.4.5.4.cmml" id="S4.SS2.SSS0.Px2.p1.3.m3.4.5d.cmml" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5"></share><list id="S4.SS2.SSS0.Px2.p1.3.m3.4.5.6.1.cmml" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5.6.2"><ci id="S4.SS2.SSS0.Px2.p1.3.m3.3.3a.cmml" xref="S4.SS2.SSS0.Px2.p1.3.m3.3.3"><mtext id="S4.SS2.SSS0.Px2.p1.3.m3.3.3.cmml" xref="S4.SS2.SSS0.Px2.p1.3.m3.3.3">partially coherent</mtext></ci><cn type="integer" id="S4.SS2.SSS0.Px2.p1.3.m3.4.4.cmml" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.4">1</cn></list></apply><apply id="S4.SS2.SSS0.Px2.p1.3.m3.4.5e.cmml" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5"><ci id="S4.SS2.SSS0.Px2.p1.3.m3.4.5.7.cmml" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5.7">:</ci><share href="#S4.SS2.SSS0.Px2.p1.3.m3.4.5.6.cmml" id="S4.SS2.SSS0.Px2.p1.3.m3.4.5f.cmml" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5"></share><ci id="S4.SS2.SSS0.Px2.p1.3.m3.4.5.8a.cmml" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5.8"><mtext id="S4.SS2.SSS0.Px2.p1.3.m3.4.5.8.cmml" xref="S4.SS2.SSS0.Px2.p1.3.m3.4.5.8">coherent</mtext></ci></apply></apply></annotation-xml><annotation encoding="application/x-tex" id="S4.SS2.SSS0.Px2.p1.3.m3.4c">{0:\text{not coherent},0.5:\text{partially coherent},1:\text{coherent}}</annotation></semantics></math>).
+(4) <span id="S4.SS2.SSS0.Px2.p1.5.4" class="ltx_text ltx_font_bold">Model Ranking Score</span>: Ranks outputs from the three SiliconFriend variants (SiliconFriend <sub id="S4.SS2.SSS0.Px2.p1.5.5" class="ltx_sub">ChatGLM</sub>, SiliconFriend <sub id="S4.SS2.SSS0.Px2.p1.5.6" class="ltx_sub">ChatGPT</sub>, and SiliconFriend <sub id="S4.SS2.SSS0.Px2.p1.5.7" class="ltx_sub">BELLE</sub>) for the same question and context. Models’ scores are calculated using <math id="S4.SS2.SSS0.Px2.p1.4.m4.1" class="ltx_Math" alttext="s=1/r" display="inline"><semantics id="S4.SS2.SSS0.Px2.p1.4.m4.1a"><mrow id="S4.SS2.SSS0.Px2.p1.4.m4.1.1" xref="S4.SS2.SSS0.Px2.p1.4.m4.1.1.cmml"><mi id="S4.SS2.SSS0.Px2.p1.4.m4.1.1.2" xref="S4.SS2.SSS0.Px2.p1.4.m4.1.1.2.cmml">s</mi><mo id="S4.SS2.SSS0.Px2.p1.4.m4.1.1.1" xref="S4.SS2.SSS0.Px2.p1.4.m4.1.1.1.cmml">=</mo><mrow id="S4.SS2.SSS0.Px2.p1.4.m4.1.1.3" xref="S4.SS2.SSS0.Px2.p1.4.m4.1.1.3.cmml"><mn id="S4.SS2.SSS0.Px2.p1.4.m4.1.1.3.2" xref="S4.SS2.SSS0.Px2.p1.4.m4.1.1.3.2.cmml">1</mn><mo id="S4.SS2.SSS0.Px2.p1.4.m4.1.1.3.1" xref="S4.SS2.SSS0.Px2.p1.4.m4.1.1.3.1.cmml">/</mo><mi id="S4.SS2.SSS0.Px2.p1.4.m4.1.1.3.3" xref="S4.SS2.SSS0.Px2.p1.4.m4.1.1.3.3.cmml">r</mi></mrow></mrow><annotation-xml encoding="MathML-Content" id="S4.SS2.SSS0.Px2.p1.4.m4.1b"><apply id="S4.SS2.SSS0.Px2.p1.4.m4.1.1.cmml" xref="S4.SS2.SSS0.Px2.p1.4.m4.1.1"><eq id="S4.SS2.SSS0.Px2.p1.4.m4.1.1.1.cmml" xref="S4.SS2.SSS0.Px2.p1.4.m4.1.1.1"></eq><ci id="S4.SS2.SSS0.Px2.p1.4.m4.1.1.2.cmml" xref="S4.SS2.SSS0.Px2.p1.4.m4.1.1.2">𝑠</ci><apply id="S4.SS2.SSS0.Px2.p1.4.m4.1.1.3.cmml" xref="S4.SS2.SSS0.Px2.p1.4.m4.1.1.3"><divide id="S4.SS2.SSS0.Px2.p1.4.m4.1.1.3.1.cmml" xref="S4.SS2.SSS0.Px2.p1.4.m4.1.1.3.1"></divide><cn type="integer" id="S4.SS2.SSS0.Px2.p1.4.m4.1.1.3.2.cmml" xref="S4.SS2.SSS0.Px2.p1.4.m4.1.1.3.2">1</cn><ci id="S4.SS2.SSS0.Px2.p1.4.m4.1.1.3.3.cmml" xref="S4.SS2.SSS0.Px2.p1.4.m4.1.1.3.3">𝑟</ci></apply></apply></annotation-xml><annotation encoding="application/x-tex" id="S4.SS2.SSS0.Px2.p1.4.m4.1c">s=1/r</annotation></semantics></math>, where <math id="S4.SS2.SSS0.Px2.p1.5.m5.3" class="ltx_Math" alttext="r={1,2,3}" display="inline"><semantics id="S4.SS2.SSS0.Px2.p1.5.m5.3a"><mrow id="S4.SS2.SSS0.Px2.p1.5.m5.3.4" xref="S4.SS2.SSS0.Px2.p1.5.m5.3.4.cmml"><mi id="S4.SS2.SSS0.Px2.p1.5.m5.3.4.2" xref="S4.SS2.SSS0.Px2.p1.5.m5.3.4.2.cmml">r</mi><mo id="S4.SS2.SSS0.Px2.p1.5.m5.3.4.1" xref="S4.SS2.SSS0.Px2.p1.5.m5.3.4.1.cmml">=</mo><mrow id="S4.SS2.SSS0.Px2.p1.5.m5.3.4.3.2" xref="S4.SS2.SSS0.Px2.p1.5.m5.3.4.3.1.cmml"><mn id="S4.SS2.SSS0.Px2.p1.5.m5.1.1" xref="S4.SS2.SSS0.Px2.p1.5.m5.1.1.cmml">1</mn><mo id="S4.SS2.SSS0.Px2.p1.5.m5.3.4.3.2.1" xref="S4.SS2.SSS0.Px2.p1.5.m5.3.4.3.1.cmml">,</mo><mn id="S4.SS2.SSS0.Px2.p1.5.m5.2.2" xref="S4.SS2.SSS0.Px2.p1.5.m5.2.2.cmml">2</mn><mo id="S4.SS2.SSS0.Px2.p1.5.m5.3.4.3.2.2" xref="S4.SS2.SSS0.Px2.p1.5.m5.3.4.3.1.cmml">,</mo><mn id="S4.SS2.SSS0.Px2.p1.5.m5.3.3" xref="S4.SS2.SSS0.Px2.p1.5.m5.3.3.cmml">3</mn></mrow></mrow><annotation-xml encoding="MathML-Content" id="S4.SS2.SSS0.Px2.p1.5.m5.3b"><apply id="S4.SS2.SSS0.Px2.p1.5.m5.3.4.cmml" xref="S4.SS2.SSS0.Px2.p1.5.m5.3.4"><eq id="S4.SS2.SSS0.Px2.p1.5.m5.3.4.1.cmml" xref="S4.SS2.SSS0.Px2.p1.5.m5.3.4.1"></eq><ci id="S4.SS2.SSS0.Px2.p1.5.m5.3.4.2.cmml" xref="S4.SS2.SSS0.Px2.p1.5.m5.3.4.2">𝑟</ci><list id="S4.SS2.SSS0.Px2.p1.5.m5.3.4.3.1.cmml" xref="S4.SS2.SSS0.Px2.p1.5.m5.3.4.3.2"><cn type="integer" id="S4.SS2.SSS0.Px2.p1.5.m5.1.1.cmml" xref="S4.SS2.SSS0.Px2.p1.5.m5.1.1">1</cn><cn type="integer" id="S4.SS2.SSS0.Px2.p1.5.m5.2.2.cmml" xref="S4.SS2.SSS0.Px2.p1.5.m5.2.2">2</cn><cn type="integer" id="S4.SS2.SSS0.Px2.p1.5.m5.3.3.cmml" xref="S4.SS2.SSS0.Px2.p1.5.m5.3.3">3</cn></list></apply></annotation-xml><annotation encoding="application/x-tex" id="S4.SS2.SSS0.Px2.p1.5.m5.3c">r={1,2,3}</annotation></semantics></math> indicates its relative ranking.</p>
+</div>
+</section>
+<section id="S4.SS2.SSS0.Px3" class="ltx_paragraph">
+<h4 class="ltx_title ltx_title_paragraph">Result Analysis.</h4>
+
+<div id="S4.SS2.SSS0.Px3.p1" class="ltx_para">
+<p id="S4.SS2.SSS0.Px3.p1.1" class="ltx_p">We evaluate 3 SiliconFriend variants using both English and Chinese test set. Table <a href="#S4.T2" title="Table 2 ‣ Result Analysis. ‣ 4.2 Quantitative Analysis ‣ 4 Experiments ‣ MemoryBank: Enhancing Large Language Models with Long-Term Memory" class="ltx_ref"><span class="ltx_text ltx_ref_tag">2</span></a> yields the following insights:
+<span id="S4.SS2.SSS0.Px3.p1.1.1" class="ltx_text ltx_font_bold">(1)</span> Our overall best variant SiliconFriend <sub id="S4.SS2.SSS0.Px3.p1.1.2" class="ltx_sub">ChatGPT</sub> has high performance across all metrics, showing the effectiveness of our overall framework.
+<span id="S4.SS2.SSS0.Px3.p1.1.3" class="ltx_text ltx_font_bold">(2)</span> SiliconFriend <sub id="S4.SS2.SSS0.Px3.p1.1.4" class="ltx_sub">BELLE</sub> and SiliconFriend <sub id="S4.SS2.SSS0.Px3.p1.1.5" class="ltx_sub">ChatGLM</sub> also have high performance in retrieval accuracy, showing the generality and effectiveness of our MemoryBank mechanism for both open-source and closed-source LLMs. Nonetheless, their performance on other metrics is not as good as SiliconFriend <sub id="S4.SS2.SSS0.Px3.p1.1.6" class="ltx_sub">ChatGPT</sub>. This might be attributed to the inferior overall abilities of the base models (BELLE and ChatGLM) compared to ChatGPT.
+<span id="S4.SS2.SSS0.Px3.p1.1.7" class="ltx_text ltx_font_bold">(3)</span> Models’ performance varies on different languages. SiliconFriend <sub id="S4.SS2.SSS0.Px3.p1.1.8" class="ltx_sub">ChatGLM</sub> and SiliconFriend <sub id="S4.SS2.SSS0.Px3.p1.1.9" class="ltx_sub">ChatGPT</sub> deliver better results in English, while SiliconFriend <sub id="S4.SS2.SSS0.Px3.p1.1.10" class="ltx_sub">BELLE</sub> excells in Chinese.</p>
+</div>
+<figure id="S4.T2" class="ltx_table">
+<figcaption class="ltx_caption ltx_centering" style="font-size:80%;"><span class="ltx_tag ltx_tag_table"><span id="S4.T2.4.1.1" class="ltx_text" style="font-size:113%;">Table 2</span>: </span><span id="S4.T2.5.2" class="ltx_text" style="font-size:113%;">Results of quantitative analysis.</span></figcaption>
+<table id="S4.T2.6" class="ltx_tabular ltx_centering ltx_align_middle">
+<tr id="S4.T2.6.1" class="ltx_tr">
+<td id="S4.T2.6.1.1" class="ltx_td ltx_align_left ltx_border_tt"><span id="S4.T2.6.1.1.1" class="ltx_text" style="font-size:80%;">Language</span></td>
+<td id="S4.T2.6.1.2" class="ltx_td ltx_align_center ltx_border_tt"><span id="S4.T2.6.1.2.1" class="ltx_text" style="font-size:80%;">Model</span></td>
+<td id="S4.T2.6.1.3" class="ltx_td ltx_align_left ltx_border_tt"><span id="S4.T2.6.1.3.1" class="ltx_text" style="font-size:80%;">Retrieval Acc.</span></td>
+<td id="S4.T2.6.1.4" class="ltx_td ltx_align_left ltx_border_tt"><span id="S4.T2.6.1.4.1" class="ltx_text" style="font-size:80%;">Correctness</span></td>
+<td id="S4.T2.6.1.5" class="ltx_td ltx_align_left ltx_border_tt"><span id="S4.T2.6.1.5.1" class="ltx_text" style="font-size:80%;">Coherence</span></td>
+<td id="S4.T2.6.1.6" class="ltx_td ltx_align_left ltx_border_tt"><span id="S4.T2.6.1.6.1" class="ltx_text" style="font-size:80%;">Ranking</span></td>
+</tr>
+<tr id="S4.T2.6.2" class="ltx_tr">
+<td id="S4.T2.6.2.1" class="ltx_td ltx_align_center ltx_border_t" rowspan="3"><span id="S4.T2.6.2.1.1" class="ltx_text" style="font-size:80%;">English</span></td>
+<td id="S4.T2.6.2.2" class="ltx_td ltx_align_center ltx_border_t">
+<span id="S4.T2.6.2.2.1" class="ltx_text" style="font-size:80%;">SiliconFriend </span><sub id="S4.T2.6.2.2.2" class="ltx_sub"><span id="S4.T2.6.2.2.2.1" class="ltx_text" style="font-size:80%;">ChatGLM</span></sub>
+</td>
+<td id="S4.T2.6.2.3" class="ltx_td ltx_align_right ltx_border_t"><span id="S4.T2.6.2.3.1" class="ltx_text" style="font-size:80%;">0.809</span></td>
+<td id="S4.T2.6.2.4" class="ltx_td ltx_align_right ltx_border_t"><span id="S4.T2.6.2.4.1" class="ltx_text" style="font-size:80%;">0.438</span></td>
+<td id="S4.T2.6.2.5" class="ltx_td ltx_align_right ltx_border_t"><span id="S4.T2.6.2.5.1" class="ltx_text" style="font-size:80%;">0.68</span></td>
+<td id="S4.T2.6.2.6" class="ltx_td ltx_align_right ltx_border_t"><span id="S4.T2.6.2.6.1" class="ltx_text" style="font-size:80%;">0.498</span></td>
+</tr>
+<tr id="S4.T2.6.3" class="ltx_tr">
+<td id="S4.T2.6.3.1" class="ltx_td ltx_align_center">
+<span id="S4.T2.6.3.1.1" class="ltx_text" style="font-size:80%;">SiliconFriend </span><sub id="S4.T2.6.3.1.2" class="ltx_sub"><span id="S4.T2.6.3.1.2.1" class="ltx_text" style="font-size:80%;">BELLE</span></sub>
+</td>
+<td id="S4.T2.6.3.2" class="ltx_td ltx_align_right"><span id="S4.T2.6.3.2.1" class="ltx_text" style="font-size:80%;">0.814</span></td>
+<td id="S4.T2.6.3.3" class="ltx_td ltx_align_right"><span id="S4.T2.6.3.3.1" class="ltx_text" style="font-size:80%;">0.479</span></td>
+<td id="S4.T2.6.3.4" class="ltx_td ltx_align_right"><span id="S4.T2.6.3.4.1" class="ltx_text" style="font-size:80%;">0.582</span></td>
+<td id="S4.T2.6.3.5" class="ltx_td ltx_align_right"><span id="S4.T2.6.3.5.1" class="ltx_text" style="font-size:80%;">0.517</span></td>
+</tr>
+<tr id="S4.T2.6.4" class="ltx_tr">
+<td id="S4.T2.6.4.1" class="ltx_td ltx_align_center">
+<span id="S4.T2.6.4.1.1" class="ltx_text" style="font-size:80%;">SiliconFriend </span><sub id="S4.T2.6.4.1.2" class="ltx_sub"><span id="S4.T2.6.4.1.2.1" class="ltx_text" style="font-size:80%;">ChatGPT</span></sub>
+</td>
+<td id="S4.T2.6.4.2" class="ltx_td ltx_align_right"><span id="S4.T2.6.4.2.1" class="ltx_text" style="font-size:80%;">0.763</span></td>
+<td id="S4.T2.6.4.3" class="ltx_td ltx_align_right"><span id="S4.T2.6.4.3.1" class="ltx_text" style="font-size:80%;">0.716</span></td>
+<td id="S4.T2.6.4.4" class="ltx_td ltx_align_right"><span id="S4.T2.6.4.4.1" class="ltx_text" style="font-size:80%;">0.912</span></td>
+<td id="S4.T2.6.4.5" class="ltx_td ltx_align_right"><span id="S4.T2.6.4.5.1" class="ltx_text" style="font-size:80%;">0.818</span></td>
+</tr>
+<tr id="S4.T2.6.5" class="ltx_tr">
+<td id="S4.T2.6.5.1" class="ltx_td ltx_align_center ltx_border_bb ltx_border_t" rowspan="3"><span id="S4.T2.6.5.1.1" class="ltx_text" style="font-size:80%;">Chinese</span></td>
+<td id="S4.T2.6.5.2" class="ltx_td ltx_align_center ltx_border_t">
+<span id="S4.T2.6.5.2.1" class="ltx_text" style="font-size:80%;">SiliconFriend </span><sub id="S4.T2.6.5.2.2" class="ltx_sub"><span id="S4.T2.6.5.2.2.1" class="ltx_text" style="font-size:80%;">ChatGLM</span></sub>
+</td>
+<td id="S4.T2.6.5.3" class="ltx_td ltx_align_right ltx_border_t"><span id="S4.T2.6.5.3.1" class="ltx_text" style="font-size:80%;">0.84</span></td>
+<td id="S4.T2.6.5.4" class="ltx_td ltx_align_right ltx_border_t"><span id="S4.T2.6.5.4.1" class="ltx_text" style="font-size:80%;">0.418</span></td>
+<td id="S4.T2.6.5.5" class="ltx_td ltx_align_right ltx_border_t"><span id="S4.T2.6.5.5.1" class="ltx_text" style="font-size:80%;">0.428</span></td>
+<td id="S4.T2.6.5.6" class="ltx_td ltx_align_right ltx_border_t"><span id="S4.T2.6.5.6.1" class="ltx_text" style="font-size:80%;">0.51</span></td>
+</tr>
+<tr id="S4.T2.6.6" class="ltx_tr">
+<td id="S4.T2.6.6.1" class="ltx_td ltx_align_center">
+<span id="S4.T2.6.6.1.1" class="ltx_text" style="font-size:80%;">SiliconFriend </span><sub id="S4.T2.6.6.1.2" class="ltx_sub"><span id="S4.T2.6.6.1.2.1" class="ltx_text" style="font-size:80%;">BELLE</span></sub>
+</td>
+<td id="S4.T2.6.6.2" class="ltx_td ltx_align_right"><span id="S4.T2.6.6.2.1" class="ltx_text" style="font-size:80%;">0.856</span></td>
+<td id="S4.T2.6.6.3" class="ltx_td ltx_align_right"><span id="S4.T2.6.6.3.1" class="ltx_text" style="font-size:80%;">0.603</span></td>
+<td id="S4.T2.6.6.4" class="ltx_td ltx_align_right"><span id="S4.T2.6.6.4.1" class="ltx_text" style="font-size:80%;">0.562</span></td>
+<td id="S4.T2.6.6.5" class="ltx_td ltx_align_right"><span id="S4.T2.6.6.5.1" class="ltx_text" style="font-size:80%;">0.565</span></td>
+</tr>
+<tr id="S4.T2.6.7" class="ltx_tr">
+<td id="S4.T2.6.7.1" class="ltx_td ltx_align_center ltx_border_bb">
+<span id="S4.T2.6.7.1.1" class="ltx_text" style="font-size:80%;">SiliconFriend </span><sub id="S4.T2.6.7.1.2" class="ltx_sub"><span id="S4.T2.6.7.1.2.1" class="ltx_text" style="font-size:80%;">ChatGPT</span></sub>
+</td>
+<td id="S4.T2.6.7.2" class="ltx_td ltx_align_right ltx_border_bb"><span id="S4.T2.6.7.2.1" class="ltx_text" style="font-size:80%;">0.711</span></td>
+<td id="S4.T2.6.7.3" class="ltx_td ltx_align_right ltx_border_bb"><span id="S4.T2.6.7.3.1" class="ltx_text" style="font-size:80%;">0.655</span></td>
+<td id="S4.T2.6.7.4" class="ltx_td ltx_align_right ltx_border_bb"><span id="S4.T2.6.7.4.1" class="ltx_text" style="font-size:80%;">0.675</span></td>
+<td id="S4.T2.6.7.5" class="ltx_td ltx_align_right ltx_border_bb"><span id="S4.T2.6.7.5.1" class="ltx_text" style="font-size:80%;">0.758</span></td>
+</tr>
+</table>
+</figure>
+</section>
+</section>
+</section>
+<section id="S5" class="ltx_section">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">5 </span>Related Works</h2>
+
+<section id="S5.SS0.SSS0.Px1" class="ltx_paragraph">
+<h4 class="ltx_title ltx_title_paragraph">Large Language Models:</h4>
+
+<div id="S5.SS0.SSS0.Px1.p1" class="ltx_para">
+<p id="S5.SS0.SSS0.Px1.p1.1" class="ltx_p">LLMs such as GPT-3 <cite class="ltx_cite ltx_citemacro_citep">(Brown et al., <a href="#bib.bib1" title="" class="ltx_ref">2020</a>)</cite>, OPT <cite class="ltx_cite ltx_citemacro_citep">(Zhang et al., <a href="#bib.bib21" title="" class="ltx_ref">2022</a>)</cite>, and FLAN-T5 <cite class="ltx_cite ltx_citemacro_citep">(Chung et al., <a href="#bib.bib3" title="" class="ltx_ref">2022</a>)</cite> have made remarkable strides in a broad spectrum of natural language processing tasks in recent years. Recently, cutting-edge closed-source language models, like PaLM <cite class="ltx_cite ltx_citemacro_citep">(Chowdhery et al., <a href="#bib.bib2" title="" class="ltx_ref">2022</a>)</cite>, GPT-4 <cite class="ltx_cite ltx_citemacro_citep">(OpenAI, <a href="#bib.bib13" title="" class="ltx_ref">2023</a>)</cite> and ChatGPT <cite class="ltx_cite ltx_citemacro_citep">(OpenAI, <a href="#bib.bib12" title="" class="ltx_ref">2022</a>)</cite>, continue to display substantial flexibility, adapting to a wide variety of domains. They have increasingly become daily decision-making aids for many people.
+However, the close-source nature of these models prohibit the researchers and companies to study the inner mechanism of LLMs and built domain-adapted applications. Therefore, many open-source LLMs emerged in the community, like LLaMa <cite class="ltx_cite ltx_citemacro_citep">(Touvron et al., <a href="#bib.bib15" title="" class="ltx_ref">2023</a>)</cite>, ChatGLM <cite class="ltx_cite ltx_citemacro_citep">(Zeng et al., <a href="#bib.bib20" title="" class="ltx_ref">2022</a>)</cite> and Alpaca <cite class="ltx_cite ltx_citemacro_citep">(Taori et al., <a href="#bib.bib14" title="" class="ltx_ref">2023</a>)</cite>. For more details, we refer readers to this comprehensive review: <cite class="ltx_cite ltx_citemacro_citet">Zhao et al. (<a href="#bib.bib22" title="" class="ltx_ref">2023</a>)</cite>.
+Nevertheless, these models still have shortcomings. A noticeable gap lies in their deficiency in a robust long-term memory function. This limitation hinders their ability to maintain context over a long period and retrieve pertinent information from past interactions. Our research steps in here, with the primary objective of developing long-term memory mechanism for LLMs.</p>
+</div>
+</section>
+<section id="S5.SS0.SSS0.Px2" class="ltx_paragraph">
+<h4 class="ltx_title ltx_title_paragraph">Long-term Memory Mechanisms:</h4>
+
+<div id="S5.SS0.SSS0.Px2.p1" class="ltx_para">
+<p id="S5.SS0.SSS0.Px2.p1.1" class="ltx_p">Numerous attempts have been made to enhance the memory capabilities of neural models. Memory-augmented networks (MANNs) <cite class="ltx_cite ltx_citemacro_citep">(Meng &amp; Huang, <a href="#bib.bib10" title="" class="ltx_ref">2018</a>; Graves et al., <a href="#bib.bib5" title="" class="ltx_ref">2014</a>)</cite> like Neural Turing Machines (NTMs)<cite class="ltx_cite ltx_citemacro_citep">(Graves et al., <a href="#bib.bib5" title="" class="ltx_ref">2014</a>)</cite> is an example of this, designed to increase the memory capacity of neural networks. These models are structured to interact with an external memory matrix, enabling them to handle tasks that necessitate the maintenance and manipulation of stored information over extended periods. Despite showing potential, these methods have not fully addressed the need for a reliable and adaptable long-term memory function in LLMs.
+There have also been studies focusing on long-range conversations <cite class="ltx_cite ltx_citemacro_citep">(Xu et al., <a href="#bib.bib17" title="" class="ltx_ref">2021</a>, <a href="#bib.bib18" title="" class="ltx_ref">2022</a>)</cite>. For instance, <cite class="ltx_cite ltx_citemacro_citet">Xu et al. (<a href="#bib.bib17" title="" class="ltx_ref">2021</a>)</cite> introduced a new English dataset comprised of multi-session human-human crowdworker chats for long-term conversations. However, these conversations are generally restricted to a few rounds of conversation, which can not align with the application scenarios of long-term AI companions. Moreover, these models often fail to create a detailed user portrait and lack a human-like memory updating mechanism, both crucial for facilitating more natural interactions.
+The concept of memory updating has been extensively researched in psychology. The Forgetting Curve theory by <cite class="ltx_cite ltx_citemacro_cite">Ebbinghaus (<a href="#bib.bib4" title="" class="ltx_ref">1964</a>)</cite> offers valuable insights into the pattern of memory retention and forgetting over time. Taking inspiration from this theory, we integrate a memory updating mechanism into MemoryBank to bolster its long-term memory function.</p>
+</div>
+<div id="S5.SS0.SSS0.Px2.p2" class="ltx_para">
+<p id="S5.SS0.SSS0.Px2.p2.1" class="ltx_p">In summary, while significant progress has been made in the field of LLMs, there is still a need for long-term memory mechanism to empower LLMs in the scenarios requiring personalized and persistent interactions.
+Our work presents MemoryBank as a novel approach to address this challenge.</p>
+</div>
+</section>
+</section>
+<section id="S6" class="ltx_section">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">6 </span>Conclusion</h2>
+
+<div id="S6.p1" class="ltx_para">
+<p id="S6.p1.1" class="ltx_p">We present MemoryBank, a novel long-term memory mechanism designed to address the memory limitation of LLMs.
+MemoryBank enhances the ability to maintain context over time, recall relevant information, and understand user personality.
+Besides, the memory updating mechanism of MemoryBank draws inspiration from the Ebbinghaus Forgetting Curve theory, a psychological principle that describes the nature of memory retention and forgetting over time.
+This design improves the anthropomorphism of AI in long-term interactions scenarios. The versatility of MemoryBank is demonstrated through its accommodation of both open-source models such as ChatGLM and BELLE, and close-source models like ChatGPT.</p>
+</div>
+<div id="S6.p2" class="ltx_para">
+<p id="S6.p2.1" class="ltx_p">We further illustrate the practical application of MemoryBank through the development of SiliconFriend, an LLM-based chatbot designed to serve as a long-term AI companion. Equipped with MemoryBank, SiliconFriend can establish a deeper understanding of users, offering more personalized and meaningful interactions, emphasizing the potential for MemoryBank to humanize AI interactions. The tuning of SiliconFriend with psychological dialogue data enables it to provide empathetic emotional support. Extensive experiments including both qualitative and quantitative methods validate the effectiveness of MemoryBank. The findings demonstrate that MemoryBank empowers SiliconFriend with memory recall capabilities and deepens the understanding of user behaviors. Besides, SiliconFriend can provide empathetic companionship of higher quality.</p>
+</div>
+</section>
+<section id="bib" class="ltx_bibliography">
+<h2 class="ltx_title ltx_title_bibliography">References</h2>
+
+<ul class="ltx_biblist">
+<li id="bib.bib1" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Brown et al. (2020)</span>
+<span class="ltx_bibblock">
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie Subbiah, Jared D Kaplan, Prafulla
+Dhariwal, Arvind Neelakantan, Pranav Shyam, Girish Sastry, Amanda Askell,
+et al.
+
+</span>
+<span class="ltx_bibblock">Language models are few-shot learners.
+
+</span>
+<span class="ltx_bibblock"><em id="bib.bib1.1.1" class="ltx_emph ltx_font_italic">Advances in neural information processing systems</em>,
+33:1877–1901, 2020.
+
+</span>
+</li>
+<li id="bib.bib2" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Chowdhery et al. (2022)</span>
+<span class="ltx_bibblock">
+Aakanksha Chowdhery, Sharan Narang, Jacob Devlin, Maarten Bosma, Gaurav Mishra,
+Adam Roberts, Paul Barham, Hyung Won Chung, Charles Sutton, Sebastian
+Gehrmann, et al.
+
+</span>
+<span class="ltx_bibblock">Palm: Scaling language modeling with pathways.
+
+</span>
+<span class="ltx_bibblock"><em id="bib.bib2.1.1" class="ltx_emph ltx_font_italic">arXiv preprint arXiv:2204.02311</em>, 2022.
+
+</span>
+</li>
+<li id="bib.bib3" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Chung et al. (2022)</span>
+<span class="ltx_bibblock">
+Hyung Won Chung, Le Hou, Shayne Longpre, Barret Zoph, Yi Tay, William Fedus,
+Eric Li, Xuezhi Wang, Mostafa Dehghani, Siddhartha Brahma, et al.
+
+</span>
+<span class="ltx_bibblock">Scaling instruction-finetuned language models.
+
+</span>
+<span class="ltx_bibblock"><em id="bib.bib3.1.1" class="ltx_emph ltx_font_italic">arXiv preprint arXiv:2210.11416</em>, 2022.
+
+</span>
+</li>
+<li id="bib.bib4" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Ebbinghaus (1964)</span>
+<span class="ltx_bibblock">
+H Ebbinghaus.
+
+</span>
+<span class="ltx_bibblock">Memory: A contribution to experimental, 1964.
+
+</span>
+</li>
+<li id="bib.bib5" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Graves et al. (2014)</span>
+<span class="ltx_bibblock">
+Alex Graves, Greg Wayne, and Ivo Danihelka.
+
+</span>
+<span class="ltx_bibblock">Neural turing machines.
+
+</span>
+<span class="ltx_bibblock"><em id="bib.bib5.1.1" class="ltx_emph ltx_font_italic">arXiv preprint arXiv:1410.5401</em>, 2014.
+
+</span>
+</li>
+<li id="bib.bib6" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Hu et al. (2021)</span>
+<span class="ltx_bibblock">
+Edward Hu, Yelong Shen, Phil Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Lu Wang, and
+Weizhu Chen.
+
+</span>
+<span class="ltx_bibblock">Lora: Low-rank adaptation of large language models, 2021.
+
+</span>
+</li>
+<li id="bib.bib7" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Johnson et al. (2019)</span>
+<span class="ltx_bibblock">
+Jeff Johnson, Matthijs Douze, and Hervé Jégou.
+
+</span>
+<span class="ltx_bibblock">Billion-scale similarity search with GPUs.
+
+</span>
+<span class="ltx_bibblock"><em id="bib.bib7.1.1" class="ltx_emph ltx_font_italic">IEEE Transactions on Big Data</em>, 7(3):535–547, 2019.
+
+</span>
+</li>
+<li id="bib.bib8" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Karpukhin et al. (2020)</span>
+<span class="ltx_bibblock">
+Vladimir Karpukhin, Barlas Oğuz, Sewon Min, Patrick Lewis, Ledell Wu,
+Sergey Edunov, Danqi Chen, and Wen-tau Yih.
+
+</span>
+<span class="ltx_bibblock">Dense passage retrieval for open-domain question answering.
+
+</span>
+<span class="ltx_bibblock"><em id="bib.bib8.1.1" class="ltx_emph ltx_font_italic">arXiv preprint arXiv:2004.04906</em>, 2020.
+
+</span>
+</li>
+<li id="bib.bib9" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">LangChain Inc. (2022)</span>
+<span class="ltx_bibblock">
+LangChain Inc.
+
+</span>
+<span class="ltx_bibblock">Langchain, 2022.
+
+</span>
+<span class="ltx_bibblock"><a target="_blank" href="https://docs.langchain.com/docs/" title="" class="ltx_ref ltx_url ltx_font_typewriter">https://docs.langchain.com/docs/</a>.
+
+</span>
+</li>
+<li id="bib.bib10" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Meng &amp; Huang (2018)</span>
+<span class="ltx_bibblock">
+Lian Meng and Minlie Huang.
+
+</span>
+<span class="ltx_bibblock">Dialogue intent classification with long short-term memory networks.
+
+</span>
+<span class="ltx_bibblock">In <em id="bib.bib10.1.1" class="ltx_emph ltx_font_italic">Natural Language Processing and Chinese Computing: 6th CCF
+International Conference, NLPCC 2017, Dalian, China, November 8–12, 2017,
+Proceedings 6</em>, pp.  42–50. Springer, 2018.
+
+</span>
+</li>
+<li id="bib.bib11" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Ming (2022)</span>
+<span class="ltx_bibblock">
+Xu Ming.
+
+</span>
+<span class="ltx_bibblock">text2vec: A tool for text to vector, 2022.
+
+</span>
+<span class="ltx_bibblock">URL <a target="_blank" href="https://github.com/shibing624/text2vec" title="" class="ltx_ref ltx_url ltx_font_typewriter">https://github.com/shibing624/text2vec</a>.
+
+</span>
+</li>
+<li id="bib.bib12" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">OpenAI (2022)</span>
+<span class="ltx_bibblock">
+OpenAI.
+
+</span>
+<span class="ltx_bibblock">Chatgpt, 2022.
+
+</span>
+<span class="ltx_bibblock"><a target="_blank" href="https://chat.openai.com/chat" title="" class="ltx_ref ltx_url ltx_font_typewriter">https://chat.openai.com/chat</a>.
+
+</span>
+</li>
+<li id="bib.bib13" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">OpenAI (2023)</span>
+<span class="ltx_bibblock">
+OpenAI.
+
+</span>
+<span class="ltx_bibblock">Gpt-4 technical report, 2023.
+
+</span>
+</li>
+<li id="bib.bib14" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Taori et al. (2023)</span>
+<span class="ltx_bibblock">
+Rohan Taori, Ishaan Gulrajani, Tianyi Zhang, Yann Dubois, Xuechen Li, Carlos
+Guestrin, Percy Liang, and Tatsunori B. Hashimoto.
+
+</span>
+<span class="ltx_bibblock">Stanford alpaca: An instruction-following llama model.
+
+</span>
+<span class="ltx_bibblock"><a target="_blank" href="https://github.com/tatsu-lab/stanford_alpaca" title="" class="ltx_ref ltx_url ltx_font_typewriter">https://github.com/tatsu-lab/stanford_alpaca</a>, 2023.
+
+</span>
+</li>
+<li id="bib.bib15" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Touvron et al. (2023)</span>
+<span class="ltx_bibblock">
+Hugo Touvron, Thibaut Lavril, Gautier Izacard, Xavier Martinet, Marie-Anne
+Lachaux, Timothée Lacroix, Baptiste Rozière, Naman Goyal, Eric
+Hambro, Faisal Azhar, et al.
+
+</span>
+<span class="ltx_bibblock">Llama: Open and efficient foundation language models.
+
+</span>
+<span class="ltx_bibblock"><em id="bib.bib15.1.1" class="ltx_emph ltx_font_italic">arXiv preprint arXiv:2302.13971</em>, 2023.
+
+</span>
+</li>
+<li id="bib.bib16" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Wang et al. (2020)</span>
+<span class="ltx_bibblock">
+Wenhui Wang, Furu Wei, Li Dong, Hangbo Bao, Nan Yang, and Ming Zhou.
+
+</span>
+<span class="ltx_bibblock">Minilm: Deep self-attention distillation for task-agnostic
+compression of pre-trained transformers.
+
+</span>
+<span class="ltx_bibblock"><em id="bib.bib16.1.1" class="ltx_emph ltx_font_italic">Advances in Neural Information Processing Systems</em>,
+33:5776–5788, 2020.
+
+</span>
+</li>
+<li id="bib.bib17" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Xu et al. (2021)</span>
+<span class="ltx_bibblock">
+Jing Xu, Arthur Szlam, and Jason Weston.
+
+</span>
+<span class="ltx_bibblock">Beyond goldfish memory: Long-term open-domain conversation.
+
+</span>
+<span class="ltx_bibblock"><em id="bib.bib17.1.1" class="ltx_emph ltx_font_italic">arXiv preprint arXiv:2107.07567</em>, 2021.
+
+</span>
+</li>
+<li id="bib.bib18" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Xu et al. (2022)</span>
+<span class="ltx_bibblock">
+Xinchao Xu, Zhibin Gou, Wenquan Wu, Zheng-Yu Niu, Hua Wu, Haifeng Wang, and
+Shihang Wang.
+
+</span>
+<span class="ltx_bibblock">Long time no see! open-domain conversation with long-term persona
+memory.
+
+</span>
+<span class="ltx_bibblock"><em id="bib.bib18.1.1" class="ltx_emph ltx_font_italic">arXiv preprint arXiv:2203.05797</em>, 2022.
+
+</span>
+</li>
+<li id="bib.bib19" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Yunjie Ji &amp; Li (2023)</span>
+<span class="ltx_bibblock">
+Yan Gong Yiping Peng Qiang Niu Baochang Ma Yunjie Ji, Yong Deng and Xiangang
+Li.
+
+</span>
+<span class="ltx_bibblock">Belle: Be everyone’s large language model engine.
+
+</span>
+<span class="ltx_bibblock"><a target="_blank" href="https://github.com/LianjiaTech/BELLE" title="" class="ltx_ref ltx_url ltx_font_typewriter">https://github.com/LianjiaTech/BELLE</a>, 2023.
+
+</span>
+</li>
+<li id="bib.bib20" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Zeng et al. (2022)</span>
+<span class="ltx_bibblock">
+Aohan Zeng, Xiao Liu, Zhengxiao Du, Zihan Wang, Hanyu Lai, Ming Ding, Zhuoyi
+Yang, Yifan Xu, Wendi Zheng, Xiao Xia, et al.
+
+</span>
+<span class="ltx_bibblock">Glm-130b: An open bilingual pre-trained model.
+
+</span>
+<span class="ltx_bibblock"><em id="bib.bib20.1.1" class="ltx_emph ltx_font_italic">arXiv preprint arXiv:2210.02414</em>, 2022.
+
+</span>
+</li>
+<li id="bib.bib21" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Zhang et al. (2022)</span>
+<span class="ltx_bibblock">
+Susan Zhang, Stephen Roller, Naman Goyal, Mikel Artetxe, Moya Chen, Shuohui
+Chen, Christopher Dewan, Mona Diab, Xian Li, Xi Victoria Lin, et al.
+
+</span>
+<span class="ltx_bibblock">Opt: Open pre-trained transformer language models.
+
+</span>
+<span class="ltx_bibblock"><em id="bib.bib21.1.1" class="ltx_emph ltx_font_italic">arXiv preprint arXiv:2205.01068</em>, 2022.
+
+</span>
+</li>
+<li id="bib.bib22" class="ltx_bibitem">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Zhao et al. (2023)</span>
+<span class="ltx_bibblock">
+Wayne Xin Zhao, Kun Zhou, Junyi Li, Tianyi Tang, Xiaolei Wang, Yupeng Hou,
+Yingqian Min, Beichen Zhang, Junjie Zhang, Zican Dong, et al.
+
+</span>
+<span class="ltx_bibblock">A survey of large language models.
+
+</span>
+<span class="ltx_bibblock"><em id="bib.bib22.1.1" class="ltx_emph ltx_font_italic">arXiv preprint arXiv:2303.18223</em>, 2023.
+
+</span>
+</li>
+</ul>
+</section>
+<div class="ltx_pagination ltx_role_newpage"></div>
+</article>
+</div>
+<div class="ar5iv-footer"><a href="/html/2305.10249" class="ar5iv-nav-button ar5iv-nav-button-prev">◄</a>
+    <a class="ar5iv-home-button" href="/"><img height="40" alt="ar5iv homepage" src="/assets/ar5iv.png"></a>
+    <a href="/feeling_lucky" class="ar5iv-text-button">Feeling<br>lucky?</a>
+    <a href="/land_of_honey_and_milk" rel="nofollow" aria-hidden="true" tabindex="-1"></a>
+    <a href="/log/2305.10250" class="ar5iv-text-button ar5iv-severity-warning">Conversion<br>report</a>
+    <a class="ar5iv-text-button" target="_blank" href="https://github.com/dginev/ar5iv/issues/new?template=improve-article--arxiv-id-.md&title=Improve+article+2305.10250">Report<br>an issue</a>
+    <a href="https://arxiv.org/abs/2305.10250" class="ar5iv-text-button arxiv-ui-theme">View&nbsp;original<br>on&nbsp;arXiv</a><a href="/html/2305.10251" class="ar5iv-nav-button ar5iv-nav-button-next">►</a>
+</div><footer class="ltx_page_footer">
+<a class="ar5iv-toggle-color-scheme" href="javascript:toggleColorScheme()" title="Toggle ar5iv color scheme"><span class="color-scheme-icon"></span></a>
+<a class="ar5iv-footer-button" href="https://arxiv.org/help/license" target="_blank">Copyright</a>
+<a class="ar5iv-footer-button" href="https://arxiv.org/help/policies/privacy_policy" target="_blank">Privacy Policy</a>
+
+<div class="ltx_page_logo">Generated  on Thu Feb 29 07:34:12 2024 by <a target="_blank" href="http://dlmf.nist.gov/LaTeXML/" class="ltx_LaTeXML_logo"><span style="letter-spacing:-0.2em; margin-right:0.1em;">L<span class="ltx_font_smallcaps" style="position:relative; bottom:2.2pt;">a</span>T<span class="ltx_font_smallcaps" style="font-size:120%;position:relative; bottom:-0.2ex;">e</span></span><span style="font-size:90%; position:relative; bottom:-0.2ex;">XML</span><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAsAAAAOCAYAAAD5YeaVAAAAAXNSR0IArs4c6QAAAAZiS0dEAP8A/wD/oL2nkwAAAAlwSFlzAAALEwAACxMBAJqcGAAAAAd0SU1FB9wKExQZLWTEaOUAAAAddEVYdENvbW1lbnQAQ3JlYXRlZCB3aXRoIFRoZSBHSU1Q72QlbgAAAdpJREFUKM9tkL+L2nAARz9fPZNCKFapUn8kyI0e4iRHSR1Kb8ng0lJw6FYHFwv2LwhOpcWxTjeUunYqOmqd6hEoRDhtDWdA8ApRYsSUCDHNt5ul13vz4w0vWCgUnnEc975arX6ORqN3VqtVZbfbTQC4uEHANM3jSqXymFI6yWazP2KxWAXAL9zCUa1Wy2tXVxheKA9YNoR8Pt+aTqe4FVVVvz05O6MBhqUIBGk8Hn8HAOVy+T+XLJfLS4ZhTiRJgqIoVBRFIoric47jPnmeB1mW/9rr9ZpSSn3Lsmir1fJZlqWlUonKsvwWwD8ymc/nXwVBeLjf7xEKhdBut9Hr9WgmkyGEkJwsy5eHG5vN5g0AKIoCAEgkEkin0wQAfN9/cXPdheu6P33fBwB4ngcAcByHJpPJl+fn54mD3Gg0NrquXxeLRQAAwzAYj8cwTZPwPH9/sVg8PXweDAauqqr2cDjEer1GJBLBZDJBs9mE4zjwfZ85lAGg2+06hmGgXq+j3+/DsixYlgVN03a9Xu8jgCNCyIegIAgx13Vfd7vdu+FweG8YRkjXdWy329+dTgeSJD3ieZ7RNO0VAXAPwDEAO5VKndi2fWrb9jWl9Esul6PZbDY9Go1OZ7PZ9z/lyuD3OozU2wAAAABJRU5ErkJggg==" alt="Mascot Sammy"></a>
+</div></footer>
+</div>
+
+    <script>
+      var canMathML = typeof(MathMLElement) == "function";
+      if (!canMathML) {
+        var body = document.querySelector("body");
+        body.firstElementChild.setAttribute('style', 'opacity: 0;');
+        var loading = document.createElement("div");
+        loading.setAttribute("id", "mathjax-loading-spinner");
+        var message = document.createElement("div");
+        message.setAttribute("id", "mathjax-loading-message");
+        message.innerText = "Typesetting Equations...";
+        body.prepend(loading);
+        body.prepend(message);
+
+        var el = document.createElement("script");
+        el.src = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js";
+        document.querySelector("head").appendChild(el);
+
+        window.MathJax = {
+          startup: {
+            pageReady: () => {
+              return MathJax.startup.defaultPageReady().then(() => {
+                body.removeChild(loading);
+                body.removeChild(message);
+                body.firstElementChild.removeAttribute('style');
+              }); } } };
+      }
+    </script>
+    <script>
+    // Auxiliary function, building the preview feature when
+    // an inline citation is clicked
+    function clicked_cite(e) {
+      e.preventDefault();
+      let cite = this.closest('.ltx_cite');
+      let next = cite.nextSibling;
+      if (next && next.nodeType == Node.ELEMENT_NODE && next.getAttribute('class') == "ar5iv-bibitem-preview") {
+        next.remove();
+        return; }
+      // Before adding a preview modal,
+      // cleanup older previews, in case they're still open
+      document.querySelectorAll('span.ar5iv-bibitem-preview').forEach(function(node) {
+        node.remove();
+      })
+
+      // Create the preview
+      preview = document.createElement('span');
+      preview.setAttribute('class','ar5iv-bibitem-preview');
+      let target = document.getElementById(this.getAttribute('href').slice(1));
+      target.childNodes.forEach(function (child) {
+        preview.append(child.cloneNode(true));
+      });
+      let close_x = document.createElement('button');
+      close_x.setAttribute("aria-label","Close modal for bibliography item preview");
+      close_x.textContent = "×";
+      close_x.setAttribute('class', 'ar5iv-button-close-preview');
+      close_x.setAttribute('onclick','this.parentNode.remove()');
+      preview.append(close_x);
+      preview.querySelectorAll('.ltx_tag_bibitem').forEach(function(node) {
+        node.remove();
+      });
+      cite.parentNode.insertBefore(preview, cite.nextSibling);
+      return;
+    }
+    // Global Document initialization:
+    // - assign the preview feature to all inline citation links
+    document.querySelectorAll(".ltx_cite .ltx_ref").forEach(function (link) {
+      link.addEventListener("click", clicked_cite);
+    });
+    </script>
+    </body>
+</html>

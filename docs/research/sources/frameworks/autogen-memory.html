@@ -1,0 +1,1316 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="../../" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Memory and RAG &#8212; AutoGen</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!-- 
+    this give us a css class that will be invisible only if js is disabled 
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="../../_static/styles/theme.css?digest=26a4bc78f4c0ddb94549" rel="stylesheet" />
+<link href="../../_static/styles/pydata-sphinx-theme.css?digest=26a4bc78f4c0ddb94549" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="../../_static/graphviz.css?v=4ae1632d" />
+    <link rel="stylesheet" type="text/css" href="../../_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="../../_static/mystnb.4510f1fc1dee50b3e5859aac5469c37c29e427902b24a333a5f9fcb2f0b3ac41.css" />
+    <link rel="stylesheet" type="text/css" href="../../_static/autodoc_pydantic.css" />
+    <link rel="stylesheet" type="text/css" href="../../_static/sphinx-design.min.css?v=95c83b7e" />
+    <link rel="stylesheet" type="text/css" href="../../_static/custom.css?v=069332a8" />
+  
+  <!-- So that users can add custom icons -->
+  <script src="../../_static/scripts/fontawesome.js?digest=26a4bc78f4c0ddb94549"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="../../_static/scripts/bootstrap.js?digest=26a4bc78f4c0ddb94549" />
+<link rel="preload" as="script" href="../../_static/scripts/pydata-sphinx-theme.js?digest=26a4bc78f4c0ddb94549" />
+
+    <script src="../../_static/documentation_options.js?v=ea3bebfc"></script>
+    <script src="../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="../../_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="../../_static/copybutton.js?v=f281be69"></script>
+    <script>(function(c,l,a,r,i,t,y){
+    c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
+    t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
+    y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
+})(window, document, "clarity", "script", "lnxpe6skj1");</script>
+    <script src="../../_static/design-tabs.js?v=f930bc37"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'user-guide/agentchat-user-guide/memory';</script>
+    <script>
+        DOCUMENTATION_OPTIONS.theme_version = '0.16.0';
+        DOCUMENTATION_OPTIONS.theme_switcher_json_url = 'https://raw.githubusercontent.com/microsoft/autogen/refs/heads/main/docs/switcher.json';
+        DOCUMENTATION_OPTIONS.theme_switcher_version_match = 'stable';
+        DOCUMENTATION_OPTIONS.show_version_warning_banner = true;
+        </script>
+    <script src="../../_static/custom-icon.js?v=a32026ea"></script>
+    <script src="../../_static/banner-override.js?v=8cd4f749"></script>
+    <script src="../../_static/custom.js?v=70c1e88a"></script>
+    <link rel="canonical" href="/autogen/stable//user-guide/agentchat-user-guide/memory.html" />
+    <link rel="icon" href="../../_static/favicon-512x512.png"/>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Logging" href="logging.html" />
+    <link rel="prev" title="GraphFlow (Workflows)" href="graph-flow.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="0.4" />
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="../../search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search the docs ..."
+         aria-label="Search the docs ..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+<div class="bd-header__inner bd-page-width">
+  <button class="pst-navbar-icon sidebar-toggle primary-toggle" aria-label="Site navigation">
+    <span class="fa-solid fa-bars"></span>
+  </button>
+  
+  
+  <div class=" navbar-header-items__start">
+    
+      <div class="navbar-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="../../index.html">
+  
+  
+  
+  
+  
+    
+    
+      
+    
+    
+    <img src="../../_static/logo.svg" class="logo__image only-light" alt="AutoGen - Home"/>
+    <img src="../../_static/logo.svg" class="logo__image only-dark pst-js-only" alt="AutoGen - Home"/>
+  
+  
+</a></div>
+    
+      <div class="navbar-item">
+<div class="version-switcher__container dropdown pst-js-only">
+  <button id="pst-version-switcher-button-2"
+    type="button"
+    class="version-switcher__button btn btn-sm dropdown-toggle"
+    data-bs-toggle="dropdown"
+    aria-haspopup="listbox"
+    aria-controls="pst-version-switcher-list-2"
+    aria-label="Version switcher list"
+  >
+    Choose version  <!-- this text may get changed later by javascript -->
+    <span class="caret"></span>
+  </button>
+  <div id="pst-version-switcher-list-2"
+    class="version-switcher__menu dropdown-menu list-group-flush py-0"
+    role="listbox" aria-labelledby="pst-version-switcher-button-2">
+    <!-- dropdown will be populated by javascript on page load -->
+  </div>
+</div></div>
+    
+  </div>
+  
+  <div class=" navbar-header-items">
+    
+    <div class="me-auto navbar-header-items__center">
+      
+        <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item current active">
+  <a class="nav-link nav-internal" href="index.html">
+    AgentChat
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../core-user-guide/index.html">
+    Core
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../extensions-user-guide/index.html">
+    Extensions
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../autogenstudio-user-guide/index.html">
+    Studio
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../../reference/index.html">
+    API Reference
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-external" href="https://microsoft.github.io/autogen/dotnet/">
+    .NET
+  </a>
+</li>
+
+            <li class="nav-item dropdown">
+                <button class="btn dropdown-toggle nav-item" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-controls="pst-nav-more-links">
+                    More
+                </button>
+                <ul id="pst-nav-more-links" class="dropdown-menu">
+                    
+<li class=" ">
+  <a class="nav-link dropdown-item nav-external" href="https://microsoft.github.io/autogen/0.2/">
+    0.2 Docs
+  </a>
+</li>
+
+                </ul>
+            </li>
+            
+  </ul>
+</nav></div>
+      
+    </div>
+    
+    
+    <div class="navbar-header-items__end">
+      
+        <div class="navbar-item navbar-persistent--container">
+          
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+        </div>
+      
+      
+        <div class="navbar-item">
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button></div>
+      
+        <div class="navbar-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/microsoft/autogen" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">GitHub</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://aka.ms/autogen-discord" title="Discord" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-discord fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Discord</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://twitter.com/pyautogen" title="Twitter" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-twitter fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Twitter</span></a>
+        </li>
+</ul></div>
+      
+    </div>
+    
+  </div>
+  
+  
+    <div class="navbar-persistent--mobile">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button>
+    </div>
+  
+
+  
+    <button class="pst-navbar-icon sidebar-toggle secondary-toggle" aria-label="On this page">
+      <span class="fa-solid fa-outdent"></span>
+    </button>
+  
+</div>
+
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+      <div class="sidebar-header-items__center">
+        
+          
+          
+            <div class="navbar-item">
+<nav>
+  <ul class="bd-navbar-elements navbar-nav">
+    
+<li class="nav-item current active">
+  <a class="nav-link nav-internal" href="index.html">
+    AgentChat
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../core-user-guide/index.html">
+    Core
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../extensions-user-guide/index.html">
+    Extensions
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../autogenstudio-user-guide/index.html">
+    Studio
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-internal" href="../../reference/index.html">
+    API Reference
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-external" href="https://microsoft.github.io/autogen/dotnet/">
+    .NET
+  </a>
+</li>
+
+
+<li class="nav-item ">
+  <a class="nav-link nav-external" href="https://microsoft.github.io/autogen/0.2/">
+    0.2 Docs
+  </a>
+</li>
+
+  </ul>
+</nav></div>
+          
+        
+      </div>
+    
+    
+    
+      <div class="sidebar-header-items__end">
+        
+          <div class="navbar-item">
+
+<button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button pst-js-only" aria-label="Color mode" data-bs-title="Color mode"  data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <i class="theme-switch fa-solid fa-sun                fa-lg" data-mode="light" title="Light"></i>
+  <i class="theme-switch fa-solid fa-moon               fa-lg" data-mode="dark"  title="Dark"></i>
+  <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"  title="System Settings"></i>
+</button></div>
+        
+          <div class="navbar-item"><ul class="navbar-icon-links"
+    aria-label="Icon Links">
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://github.com/microsoft/autogen" title="GitHub" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-github fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">GitHub</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://aka.ms/autogen-discord" title="Discord" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-discord fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Discord</span></a>
+        </li>
+        <li class="nav-item">
+          
+          
+          
+          
+          
+          
+          
+          
+          <a href="https://twitter.com/pyautogen" title="Twitter" class="nav-link pst-navbar-icon" rel="noopener" target="_blank" data-bs-toggle="tooltip" data-bs-placement="bottom"><i class="fa-brands fa-twitter fa-lg" aria-hidden="true"></i>
+            <span class="sr-only">Twitter</span></a>
+        </li>
+</ul></div>
+        
+      </div>
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+<nav class="bd-docs-nav bd-links" aria-label="Section Navigation">
+    <div class="bd-toc-item navbar-nav"><ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quickstart</a></li>
+<li class="toctree-l1"><a class="reference internal" href="migration-guide.html">Migration Guide for v0.2 to v0.4</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Tutorial</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="tutorial/index.html">Introduction</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorial/models.html">Models</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorial/messages.html">Messages</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorial/agents.html">Agents</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorial/teams.html">Teams</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorial/human-in-the-loop.html">Human-in-the-Loop</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorial/termination.html">Termination</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorial/state.html">Managing State</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Advanced</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="custom-agents.html">Custom Agents</a></li>
+<li class="toctree-l1"><a class="reference internal" href="selector-group-chat.html">Selector Group Chat</a></li>
+<li class="toctree-l1"><a class="reference internal" href="swarm.html">Swarm</a></li>
+<li class="toctree-l1"><a class="reference internal" href="magentic-one.html">Magentic-One</a></li>
+<li class="toctree-l1"><a class="reference internal" href="graph-flow.html">GraphFlow (Workflows)</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">Memory and RAG</a></li>
+
+
+
+
+<li class="toctree-l1"><a class="reference internal" href="logging.html">Logging</a></li>
+<li class="toctree-l1"><a class="reference internal" href="serialize-components.html">Serializing Components</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tracing.html">Tracing and Observability</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">More</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="examples/index.html">Examples</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="examples/travel-planning.html">Travel Planning</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples/company-research.html">Company Research</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples/literature-review.html">Literature Review</a></li>
+</ul>
+</details></li>
+</ul>
+<ul class="nav bd-sidenav">
+            <li class="toctree-l1">
+                <a class="reference internal" href="../../reference/python/autogen_agentchat.html">
+                    <i class="fa-solid fa-file-code"></i>
+                    API Reference
+                </a>
+            </li>
+            <li class="toctree-l1">
+                <a target="_blank" class="reference internal"
+                    href="https://pypi.org/project/autogen-agentchat/">
+                    <i class="fa-brands fa-python"></i>
+                    PyPi
+                    <i class="fa-solid fa-arrow-up-right-from-square fa-2xs"></i>
+                </a>
+            </li>
+            <li class="toctree-l1">
+                <a target="_blank" class="reference internal"
+                    href="https://github.com/microsoft/autogen/tree/main/python/packages/autogen-agentchat">
+                    <i class="fa-brands fa-github"></i>
+                    Source
+                    <i class="fa-solid fa-arrow-up-right-from-square fa-2xs"></i>
+                </a>
+            </li>
+        </ul>
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item">
+
+<nav aria-label="Breadcrumb" class="d-print-none">
+  <ul class="bd-breadcrumbs">
+    
+    <li class="breadcrumb-item breadcrumb-home">
+      <a href="../../index.html" class="nav-link" aria-label="Home">
+        <i class="fa-solid fa-home"></i>
+      </a>
+    </li>
+    
+    <li class="breadcrumb-item"><a href="index.html" class="nav-link">AgentChat</a></li>
+    
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">Memory and RAG</span></li>
+  </ul>
+</nav>
+</div>
+      
+    </div>
+  
+  
+</div>
+</div>
+              
+              
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section id="memory-and-rag">
+<h1>Memory and RAG<a class="headerlink" href="#memory-and-rag" title="Link to this heading">#</a></h1>
+<p>There are several use cases where it is valuable to maintain a <em>store</em> of useful facts that can be intelligently added to the context of the agent just before a specific step. The typically use case here is a RAG pattern where a query is used to retrieve relevant information from a database that is then added to the agent’s context.</p>
+<p>AgentChat provides a <a class="reference internal" href="../../reference/python/autogen_core.memory.html#autogen_core.memory.Memory" title="autogen_core.memory.Memory"><code class="xref py py-class docutils literal notranslate"><span class="pre">Memory</span></code></a> protocol that can be extended to provide this functionality.  The key methods are <code class="docutils literal notranslate"><span class="pre">query</span></code>, <code class="docutils literal notranslate"><span class="pre">update_context</span></code>,  <code class="docutils literal notranslate"><span class="pre">add</span></code>, <code class="docutils literal notranslate"><span class="pre">clear</span></code>, and <code class="docutils literal notranslate"><span class="pre">close</span></code>.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">add</span></code>: add new entries to the memory store</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">query</span></code>: retrieve relevant information from the memory store</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">update_context</span></code>: mutate an agent’s internal <code class="docutils literal notranslate"><span class="pre">model_context</span></code> by adding the retrieved information (used in the <a class="reference internal" href="../../reference/python/autogen_agentchat.agents.html#autogen_agentchat.agents.AssistantAgent" title="autogen_agentchat.agents.AssistantAgent"><code class="xref py py-class docutils literal notranslate"><span class="pre">AssistantAgent</span></code></a> class)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">clear</span></code>: clear all entries from the memory store</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">close</span></code>: clean up any resources used by the memory store</p></li>
+</ul>
+</section>
+<section id="listmemory-example">
+<h1>ListMemory Example<a class="headerlink" href="#listmemory-example" title="Link to this heading">#</a></h1>
+<p><a class="reference internal" href="../../reference/python/autogen_core.memory.html#autogen_core.memory.ListMemory" title="autogen_core.memory.ListMemory"><code class="xref py py-class docutils literal notranslate"><span class="pre">ListMemory</span></code></a> is provided as an example implementation of the <a class="reference internal" href="../../reference/python/autogen_core.memory.html#autogen_core.memory.Memory" title="autogen_core.memory.Memory"><code class="xref py py-class docutils literal notranslate"><span class="pre">Memory</span></code></a> protocol. It is a simple list-based memory implementation that maintains memories in chronological order, appending the most recent memories to the model’s context. The implementation is designed to be straightforward and predictable, making it easy to understand and debug.
+In the following example, we will use ListMemory to maintain a memory bank of user preferences and demonstrate how it can be used to provide consistent context for agent responses over time.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">autogen_agentchat.agents</span><span class="w"> </span><span class="kn">import</span> <span class="n">AssistantAgent</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_agentchat.ui</span><span class="w"> </span><span class="kn">import</span> <span class="n">Console</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_core.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">ListMemory</span><span class="p">,</span> <span class="n">MemoryContent</span><span class="p">,</span> <span class="n">MemoryMimeType</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_ext.models.openai</span><span class="w"> </span><span class="kn">import</span> <span class="n">OpenAIChatCompletionClient</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Initialize user memory</span>
+<span class="n">user_memory</span> <span class="o">=</span> <span class="n">ListMemory</span><span class="p">()</span>
+
+<span class="c1"># Add user preferences to memory</span>
+<span class="k">await</span> <span class="n">user_memory</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">MemoryContent</span><span class="p">(</span><span class="n">content</span><span class="o">=</span><span class="s2">&quot;The weather should be in metric units&quot;</span><span class="p">,</span> <span class="n">mime_type</span><span class="o">=</span><span class="n">MemoryMimeType</span><span class="o">.</span><span class="n">TEXT</span><span class="p">))</span>
+
+<span class="k">await</span> <span class="n">user_memory</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">MemoryContent</span><span class="p">(</span><span class="n">content</span><span class="o">=</span><span class="s2">&quot;Meal recipe must be vegan&quot;</span><span class="p">,</span> <span class="n">mime_type</span><span class="o">=</span><span class="n">MemoryMimeType</span><span class="o">.</span><span class="n">TEXT</span><span class="p">))</span>
+
+
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">get_weather</span><span class="p">(</span><span class="n">city</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">units</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;imperial&quot;</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">units</span> <span class="o">==</span> <span class="s2">&quot;imperial&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;The weather in </span><span class="si">{</span><span class="n">city</span><span class="si">}</span><span class="s2"> is 73 °F and Sunny.&quot;</span>
+    <span class="k">elif</span> <span class="n">units</span> <span class="o">==</span> <span class="s2">&quot;metric&quot;</span><span class="p">:</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;The weather in </span><span class="si">{</span><span class="n">city</span><span class="si">}</span><span class="s2"> is 23 °C and Sunny.&quot;</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;Sorry, I don&#39;t know the weather in </span><span class="si">{</span><span class="n">city</span><span class="si">}</span><span class="s2">.&quot;</span>
+
+
+<span class="n">assistant_agent</span> <span class="o">=</span> <span class="n">AssistantAgent</span><span class="p">(</span>
+    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;assistant_agent&quot;</span><span class="p">,</span>
+    <span class="n">model_client</span><span class="o">=</span><span class="n">OpenAIChatCompletionClient</span><span class="p">(</span>
+        <span class="n">model</span><span class="o">=</span><span class="s2">&quot;gpt-4o-2024-08-06&quot;</span><span class="p">,</span>
+    <span class="p">),</span>
+    <span class="n">tools</span><span class="o">=</span><span class="p">[</span><span class="n">get_weather</span><span class="p">],</span>
+    <span class="n">memory</span><span class="o">=</span><span class="p">[</span><span class="n">user_memory</span><span class="p">],</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Run the agent with a task.</span>
+<span class="n">stream</span> <span class="o">=</span> <span class="n">assistant_agent</span><span class="o">.</span><span class="n">run_stream</span><span class="p">(</span><span class="n">task</span><span class="o">=</span><span class="s2">&quot;What is the weather in New York?&quot;</span><span class="p">)</span>
+<span class="k">await</span> <span class="n">Console</span><span class="p">(</span><span class="n">stream</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>---------- TextMessage (user) ----------
+What is the weather in New York?
+---------- MemoryQueryEvent (assistant_agent) ----------
+[MemoryContent(content=&#39;The weather should be in metric units&#39;, mime_type=&lt;MemoryMimeType.TEXT: &#39;text/plain&#39;&gt;, metadata=None), MemoryContent(content=&#39;Meal recipe must be vegan&#39;, mime_type=&lt;MemoryMimeType.TEXT: &#39;text/plain&#39;&gt;, metadata=None)]
+---------- ToolCallRequestEvent (assistant_agent) ----------
+[FunctionCall(id=&#39;call_33uMqZO6hwOfEpJavP9GW9LI&#39;, arguments=&#39;{&quot;city&quot;:&quot;New York&quot;,&quot;units&quot;:&quot;metric&quot;}&#39;, name=&#39;get_weather&#39;)]
+---------- ToolCallExecutionEvent (assistant_agent) ----------
+[FunctionExecutionResult(content=&#39;The weather in New York is 23 °C and Sunny.&#39;, name=&#39;get_weather&#39;, call_id=&#39;call_33uMqZO6hwOfEpJavP9GW9LI&#39;, is_error=False)]
+---------- ToolCallSummaryMessage (assistant_agent) ----------
+The weather in New York is 23 °C and Sunny.
+</pre></div>
+</div>
+<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>TaskResult(messages=[TextMessage(source=&#39;user&#39;, models_usage=None, metadata={}, created_at=datetime.datetime(2025, 7, 1, 23, 53, 8, 867845, tzinfo=datetime.timezone.utc), content=&#39;What is the weather in New York?&#39;, type=&#39;TextMessage&#39;), MemoryQueryEvent(source=&#39;assistant_agent&#39;, models_usage=None, metadata={}, created_at=datetime.datetime(2025, 7, 1, 23, 53, 8, 869589, tzinfo=datetime.timezone.utc), content=[MemoryContent(content=&#39;The weather should be in metric units&#39;, mime_type=&lt;MemoryMimeType.TEXT: &#39;text/plain&#39;&gt;, metadata=None), MemoryContent(content=&#39;Meal recipe must be vegan&#39;, mime_type=&lt;MemoryMimeType.TEXT: &#39;text/plain&#39;&gt;, metadata=None)], type=&#39;MemoryQueryEvent&#39;), ToolCallRequestEvent(source=&#39;assistant_agent&#39;, models_usage=RequestUsage(prompt_tokens=123, completion_tokens=19), metadata={}, created_at=datetime.datetime(2025, 7, 1, 23, 53, 10, 240626, tzinfo=datetime.timezone.utc), content=[FunctionCall(id=&#39;call_33uMqZO6hwOfEpJavP9GW9LI&#39;, arguments=&#39;{&quot;city&quot;:&quot;New York&quot;,&quot;units&quot;:&quot;metric&quot;}&#39;, name=&#39;get_weather&#39;)], type=&#39;ToolCallRequestEvent&#39;), ToolCallExecutionEvent(source=&#39;assistant_agent&#39;, models_usage=None, metadata={}, created_at=datetime.datetime(2025, 7, 1, 23, 53, 10, 242633, tzinfo=datetime.timezone.utc), content=[FunctionExecutionResult(content=&#39;The weather in New York is 23 °C and Sunny.&#39;, name=&#39;get_weather&#39;, call_id=&#39;call_33uMqZO6hwOfEpJavP9GW9LI&#39;, is_error=False)], type=&#39;ToolCallExecutionEvent&#39;), ToolCallSummaryMessage(source=&#39;assistant_agent&#39;, models_usage=None, metadata={}, created_at=datetime.datetime(2025, 7, 1, 23, 53, 10, 243722, tzinfo=datetime.timezone.utc), content=&#39;The weather in New York is 23 °C and Sunny.&#39;, type=&#39;ToolCallSummaryMessage&#39;)], stop_reason=None)
+</pre></div>
+</div>
+</div>
+</div>
+<p>We can inspect that the <code class="docutils literal notranslate"><span class="pre">assistant_agent</span></code> model_context is actually updated with the retrieved memory entries.  The <code class="docutils literal notranslate"><span class="pre">transform</span></code> method is used to format the retrieved memory entries into a string that can be used by the agent.  In this case, we simply concatenate the content of each memory entry into a single string.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">await</span> <span class="n">assistant_agent</span><span class="o">.</span><span class="n">_model_context</span><span class="o">.</span><span class="n">get_messages</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>[UserMessage(content=&#39;What is the weather in New York?&#39;, source=&#39;user&#39;, type=&#39;UserMessage&#39;),
+ SystemMessage(content=&#39;\nRelevant memory content (in chronological order):\n1. The weather should be in metric units\n2. Meal recipe must be vegan\n&#39;, type=&#39;SystemMessage&#39;),
+ AssistantMessage(content=[FunctionCall(id=&#39;call_33uMqZO6hwOfEpJavP9GW9LI&#39;, arguments=&#39;{&quot;city&quot;:&quot;New York&quot;,&quot;units&quot;:&quot;metric&quot;}&#39;, name=&#39;get_weather&#39;)], thought=None, source=&#39;assistant_agent&#39;, type=&#39;AssistantMessage&#39;),
+ FunctionExecutionResultMessage(content=[FunctionExecutionResult(content=&#39;The weather in New York is 23 °C and Sunny.&#39;, name=&#39;get_weather&#39;, call_id=&#39;call_33uMqZO6hwOfEpJavP9GW9LI&#39;, is_error=False)], type=&#39;FunctionExecutionResultMessage&#39;)]
+</pre></div>
+</div>
+</div>
+</div>
+<p>We see above that the weather is returned in Centigrade as stated in the user preferences.</p>
+<p>Similarly, assuming we ask a separate question about generating a meal plan, the agent is able to retrieve relevant information from the memory store and provide a personalized (vegan) response.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">stream</span> <span class="o">=</span> <span class="n">assistant_agent</span><span class="o">.</span><span class="n">run_stream</span><span class="p">(</span><span class="n">task</span><span class="o">=</span><span class="s2">&quot;Write brief meal recipe with broth&quot;</span><span class="p">)</span>
+<span class="k">await</span> <span class="n">Console</span><span class="p">(</span><span class="n">stream</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>---------- TextMessage (user) ----------
+Write brief meal recipe with broth
+---------- MemoryQueryEvent (assistant_agent) ----------
+[MemoryContent(content=&#39;The weather should be in metric units&#39;, mime_type=&lt;MemoryMimeType.TEXT: &#39;text/plain&#39;&gt;, metadata=None), MemoryContent(content=&#39;Meal recipe must be vegan&#39;, mime_type=&lt;MemoryMimeType.TEXT: &#39;text/plain&#39;&gt;, metadata=None)]
+---------- TextMessage (assistant_agent) ----------
+Here&#39;s a brief vegan meal recipe using broth:
+
+**Vegan Vegetable Broth Soup**
+
+**Ingredients:**
+- 1 tablespoon olive oil
+- 1 onion, chopped
+- 3 cloves garlic, minced
+- 2 carrots, sliced
+- 2 celery stalks, sliced
+- 1 zucchini, chopped
+- 1 cup mushrooms, sliced
+- 1 cup kale or spinach, chopped
+- 1 can (400g) diced tomatoes
+- 4 cups vegetable broth
+- 1 teaspoon dried thyme
+- Salt and pepper to taste
+- Fresh parsley, chopped (for garnish)
+
+**Instructions:**
+1. Heat olive oil in a large pot over medium heat. Add the onion and garlic, and sauté until soft.
+2. Add the carrots, celery, zucchini, and mushrooms. Cook for about 5 minutes until the vegetables begin to soften.
+3. Add the diced tomatoes, vegetable broth, and dried thyme. Bring to a boil.
+4. Reduce heat and let it simmer for about 20 minutes, or until the vegetables are tender.
+5. Stir in the chopped kale or spinach and cook for another 5 minutes.
+6. Season with salt and pepper to taste.
+7. Serve hot, garnished with fresh parsley.
+
+Enjoy your comforting vegan vegetable broth soup!
+</pre></div>
+</div>
+<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>TaskResult(messages=[TextMessage(source=&#39;user&#39;, models_usage=None, metadata={}, created_at=datetime.datetime(2025, 7, 1, 23, 53, 10, 256897, tzinfo=datetime.timezone.utc), content=&#39;Write brief meal recipe with broth&#39;, type=&#39;TextMessage&#39;), MemoryQueryEvent(source=&#39;assistant_agent&#39;, models_usage=None, metadata={}, created_at=datetime.datetime(2025, 7, 1, 23, 53, 10, 258468, tzinfo=datetime.timezone.utc), content=[MemoryContent(content=&#39;The weather should be in metric units&#39;, mime_type=&lt;MemoryMimeType.TEXT: &#39;text/plain&#39;&gt;, metadata=None), MemoryContent(content=&#39;Meal recipe must be vegan&#39;, mime_type=&lt;MemoryMimeType.TEXT: &#39;text/plain&#39;&gt;, metadata=None)], type=&#39;MemoryQueryEvent&#39;), TextMessage(source=&#39;assistant_agent&#39;, models_usage=RequestUsage(prompt_tokens=205, completion_tokens=266), metadata={}, created_at=datetime.datetime(2025, 7, 1, 23, 53, 14, 67151, tzinfo=datetime.timezone.utc), content=&quot;Here&#39;s a brief vegan meal recipe using broth:\n\n**Vegan Vegetable Broth Soup**\n\n**Ingredients:**\n- 1 tablespoon olive oil\n- 1 onion, chopped\n- 3 cloves garlic, minced\n- 2 carrots, sliced\n- 2 celery stalks, sliced\n- 1 zucchini, chopped\n- 1 cup mushrooms, sliced\n- 1 cup kale or spinach, chopped\n- 1 can (400g) diced tomatoes\n- 4 cups vegetable broth\n- 1 teaspoon dried thyme\n- Salt and pepper to taste\n- Fresh parsley, chopped (for garnish)\n\n**Instructions:**\n1. Heat olive oil in a large pot over medium heat. Add the onion and garlic, and sauté until soft.\n2. Add the carrots, celery, zucchini, and mushrooms. Cook for about 5 minutes until the vegetables begin to soften.\n3. Add the diced tomatoes, vegetable broth, and dried thyme. Bring to a boil.\n4. Reduce heat and let it simmer for about 20 minutes, or until the vegetables are tender.\n5. Stir in the chopped kale or spinach and cook for another 5 minutes.\n6. Season with salt and pepper to taste.\n7. Serve hot, garnished with fresh parsley.\n\nEnjoy your comforting vegan vegetable broth soup!&quot;, type=&#39;TextMessage&#39;)], stop_reason=None)
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+<section id="custom-memory-stores-vector-dbs-etc">
+<h1>Custom Memory Stores (Vector DBs, etc.)<a class="headerlink" href="#custom-memory-stores-vector-dbs-etc" title="Link to this heading">#</a></h1>
+<p>You can build on the <code class="docutils literal notranslate"><span class="pre">Memory</span></code> protocol to implement more complex memory stores. For example, you could implement a custom memory store that uses a vector database to store and retrieve information, or a memory store that uses a machine learning model to generate personalized responses based on the user’s preferences etc.</p>
+<p>Specifically, you will need to overload the <code class="docutils literal notranslate"><span class="pre">add</span></code>, <code class="docutils literal notranslate"><span class="pre">query</span></code> and <code class="docutils literal notranslate"><span class="pre">update_context</span></code>  methods to implement the desired functionality and pass the memory store to your agent.</p>
+<p>Currently the following example memory stores are available as part of the <a class="reference internal" href="../../reference/python/autogen_ext.html#module-autogen_ext" title="autogen_ext"><code class="xref py py-class docutils literal notranslate"><span class="pre">autogen_ext</span></code></a> extensions package.</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">autogen_ext.memory.chromadb.ChromaDBVectorMemory</span></code>: A memory store that uses a vector database to store and retrieve information.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">autogen_ext.memory.chromadb.SentenceTransformerEmbeddingFunctionConfig</span></code>: A configuration class for the SentenceTransformer embedding function used by the <code class="docutils literal notranslate"><span class="pre">ChromaDBVectorMemory</span></code> store. Note that other embedding functions such as <code class="docutils literal notranslate"><span class="pre">autogen_ext.memory.openai.OpenAIEmbeddingFunctionConfig</span></code> can also be used with the <code class="docutils literal notranslate"><span class="pre">ChromaDBVectorMemory</span></code> store.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">autogen_ext.memory.redis.RedisMemory</span></code>: A memory store that uses a Redis vector database to store and retrieve information.</p></li>
+</ul>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">tempfile</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_agentchat.agents</span><span class="w"> </span><span class="kn">import</span> <span class="n">AssistantAgent</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_agentchat.ui</span><span class="w"> </span><span class="kn">import</span> <span class="n">Console</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_core.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryContent</span><span class="p">,</span> <span class="n">MemoryMimeType</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_ext.memory.chromadb</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">ChromaDBVectorMemory</span><span class="p">,</span>
+    <span class="n">PersistentChromaDBVectorMemoryConfig</span><span class="p">,</span>
+    <span class="n">SentenceTransformerEmbeddingFunctionConfig</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_ext.models.openai</span><span class="w"> </span><span class="kn">import</span> <span class="n">OpenAIChatCompletionClient</span>
+
+<span class="c1"># Use a temporary directory for ChromaDB persistence</span>
+<span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">TemporaryDirectory</span><span class="p">()</span> <span class="k">as</span> <span class="n">tmpdir</span><span class="p">:</span>
+    <span class="n">chroma_user_memory</span> <span class="o">=</span> <span class="n">ChromaDBVectorMemory</span><span class="p">(</span>
+        <span class="n">config</span><span class="o">=</span><span class="n">PersistentChromaDBVectorMemoryConfig</span><span class="p">(</span>
+            <span class="n">collection_name</span><span class="o">=</span><span class="s2">&quot;preferences&quot;</span><span class="p">,</span>
+            <span class="n">persistence_path</span><span class="o">=</span><span class="n">tmpdir</span><span class="p">,</span>  <span class="c1"># Use the temp directory here</span>
+            <span class="n">k</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>  <span class="c1"># Return top k results</span>
+            <span class="n">score_threshold</span><span class="o">=</span><span class="mf">0.4</span><span class="p">,</span>  <span class="c1"># Minimum similarity score</span>
+            <span class="n">embedding_function_config</span><span class="o">=</span><span class="n">SentenceTransformerEmbeddingFunctionConfig</span><span class="p">(</span>
+                <span class="n">model_name</span><span class="o">=</span><span class="s2">&quot;all-MiniLM-L6-v2&quot;</span>  <span class="c1"># Use default model for testing</span>
+            <span class="p">),</span>
+        <span class="p">)</span>
+    <span class="p">)</span>
+    <span class="c1"># Add user preferences to memory</span>
+    <span class="k">await</span> <span class="n">chroma_user_memory</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+        <span class="n">MemoryContent</span><span class="p">(</span>
+            <span class="n">content</span><span class="o">=</span><span class="s2">&quot;The weather should be in metric units&quot;</span><span class="p">,</span>
+            <span class="n">mime_type</span><span class="o">=</span><span class="n">MemoryMimeType</span><span class="o">.</span><span class="n">TEXT</span><span class="p">,</span>
+            <span class="n">metadata</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;preferences&quot;</span><span class="p">,</span> <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;units&quot;</span><span class="p">},</span>
+        <span class="p">)</span>
+    <span class="p">)</span>
+
+    <span class="k">await</span> <span class="n">chroma_user_memory</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+        <span class="n">MemoryContent</span><span class="p">(</span>
+            <span class="n">content</span><span class="o">=</span><span class="s2">&quot;Meal recipe must be vegan&quot;</span><span class="p">,</span>
+            <span class="n">mime_type</span><span class="o">=</span><span class="n">MemoryMimeType</span><span class="o">.</span><span class="n">TEXT</span><span class="p">,</span>
+            <span class="n">metadata</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;preferences&quot;</span><span class="p">,</span> <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;dietary&quot;</span><span class="p">},</span>
+        <span class="p">)</span>
+    <span class="p">)</span>
+
+    <span class="n">model_client</span> <span class="o">=</span> <span class="n">OpenAIChatCompletionClient</span><span class="p">(</span>
+        <span class="n">model</span><span class="o">=</span><span class="s2">&quot;gpt-4o&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="c1"># Create assistant agent with ChromaDB memory</span>
+    <span class="n">assistant_agent</span> <span class="o">=</span> <span class="n">AssistantAgent</span><span class="p">(</span>
+        <span class="n">name</span><span class="o">=</span><span class="s2">&quot;assistant_agent&quot;</span><span class="p">,</span>
+        <span class="n">model_client</span><span class="o">=</span><span class="n">model_client</span><span class="p">,</span>
+        <span class="n">tools</span><span class="o">=</span><span class="p">[</span><span class="n">get_weather</span><span class="p">],</span>
+        <span class="n">memory</span><span class="o">=</span><span class="p">[</span><span class="n">chroma_user_memory</span><span class="p">],</span>
+    <span class="p">)</span>
+
+    <span class="n">stream</span> <span class="o">=</span> <span class="n">assistant_agent</span><span class="o">.</span><span class="n">run_stream</span><span class="p">(</span><span class="n">task</span><span class="o">=</span><span class="s2">&quot;What is the weather in New York?&quot;</span><span class="p">)</span>
+    <span class="k">await</span> <span class="n">Console</span><span class="p">(</span><span class="n">stream</span><span class="p">)</span>
+
+    <span class="k">await</span> <span class="n">model_client</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+    <span class="k">await</span> <span class="n">chroma_user_memory</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>---------- TextMessage (user) ----------
+What is the weather in New York?
+---------- MemoryQueryEvent (assistant_agent) ----------
+[MemoryContent(content=&#39;The weather should be in metric units&#39;, mime_type=&#39;MemoryMimeType.TEXT&#39;, metadata={&#39;category&#39;: &#39;preferences&#39;, &#39;mime_type&#39;: &#39;MemoryMimeType.TEXT&#39;, &#39;type&#39;: &#39;units&#39;, &#39;score&#39;: 0.4342913031578064, &#39;id&#39;: &#39;b8a70e90-a39f-47ed-ab7b-5a274009d9f0&#39;}), MemoryContent(content=&#39;The weather should be in metric units&#39;, mime_type=&#39;MemoryMimeType.TEXT&#39;, metadata={&#39;mime_type&#39;: &#39;MemoryMimeType.TEXT&#39;, &#39;type&#39;: &#39;units&#39;, &#39;category&#39;: &#39;preferences&#39;, &#39;score&#39;: 0.4342913031578064, &#39;id&#39;: &#39;b240f12a-1440-42d1-8f5e-3d8a388363f2&#39;})]
+---------- ToolCallRequestEvent (assistant_agent) ----------
+[FunctionCall(id=&#39;call_YmKqq1nWXgAkAAyXWWk9YpFW&#39;, arguments=&#39;{&quot;city&quot;:&quot;New York&quot;,&quot;units&quot;:&quot;metric&quot;}&#39;, name=&#39;get_weather&#39;)]
+---------- ToolCallExecutionEvent (assistant_agent) ----------
+[FunctionExecutionResult(content=&#39;The weather in New York is 23 °C and Sunny.&#39;, name=&#39;get_weather&#39;, call_id=&#39;call_YmKqq1nWXgAkAAyXWWk9YpFW&#39;, is_error=False)]
+---------- ToolCallSummaryMessage (assistant_agent) ----------
+The weather in New York is 23 °C and Sunny.
+</pre></div>
+</div>
+</div>
+</div>
+<p>Note that you can also serialize the ChromaDBVectorMemory and save it to disk.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">chroma_user_memory</span><span class="o">.</span><span class="n">dump_component</span><span class="p">()</span><span class="o">.</span><span class="n">model_dump_json</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>&#39;{&quot;provider&quot;:&quot;autogen_ext.memory.chromadb.ChromaDBVectorMemory&quot;,&quot;component_type&quot;:&quot;memory&quot;,&quot;version&quot;:1,&quot;component_version&quot;:1,&quot;description&quot;:&quot;Store and retrieve memory using vector similarity search powered by ChromaDB.&quot;,&quot;label&quot;:&quot;ChromaDBVectorMemory&quot;,&quot;config&quot;:{&quot;client_type&quot;:&quot;persistent&quot;,&quot;collection_name&quot;:&quot;preferences&quot;,&quot;distance_metric&quot;:&quot;cosine&quot;,&quot;k&quot;:2,&quot;score_threshold&quot;:0.4,&quot;allow_reset&quot;:false,&quot;tenant&quot;:&quot;default_tenant&quot;,&quot;database&quot;:&quot;default_database&quot;,&quot;persistence_path&quot;:&quot;/Users/justin.cechmanek/.chromadb_autogen&quot;}}&#39;
+</pre></div>
+</div>
+</div>
+</div>
+<section id="redis-memory">
+<h2>Redis Memory<a class="headerlink" href="#redis-memory" title="Link to this heading">#</a></h2>
+<p>You can perform the same persistent memory storage using Redis. Note, you will need to have a running Redis instance to connect to.</p>
+<p>See <code class="xref py py-class docutils literal notranslate"><span class="pre">RedisMemory</span></code> for instructions to run Redis locally or via Docker.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">logging</span><span class="w"> </span><span class="kn">import</span> <span class="n">WARNING</span><span class="p">,</span> <span class="n">getLogger</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_agentchat.agents</span><span class="w"> </span><span class="kn">import</span> <span class="n">AssistantAgent</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_agentchat.ui</span><span class="w"> </span><span class="kn">import</span> <span class="n">Console</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_core.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryContent</span><span class="p">,</span> <span class="n">MemoryMimeType</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_ext.memory.redis</span><span class="w"> </span><span class="kn">import</span> <span class="n">RedisMemory</span><span class="p">,</span> <span class="n">RedisMemoryConfig</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_ext.models.openai</span><span class="w"> </span><span class="kn">import</span> <span class="n">OpenAIChatCompletionClient</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">getLogger</span><span class="p">()</span>
+<span class="n">logger</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">WARNING</span><span class="p">)</span>
+
+<span class="c1"># Initailize Redis memory</span>
+<span class="n">redis_memory</span> <span class="o">=</span> <span class="n">RedisMemory</span><span class="p">(</span>
+    <span class="n">config</span><span class="o">=</span><span class="n">RedisMemoryConfig</span><span class="p">(</span>
+        <span class="n">redis_url</span><span class="o">=</span><span class="s2">&quot;redis://localhost:6379&quot;</span><span class="p">,</span>
+        <span class="n">index_name</span><span class="o">=</span><span class="s2">&quot;chat_history&quot;</span><span class="p">,</span>
+        <span class="n">prefix</span><span class="o">=</span><span class="s2">&quot;memory&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+<span class="p">)</span>
+
+<span class="c1"># Add user preferences to memory</span>
+<span class="k">await</span> <span class="n">redis_memory</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+    <span class="n">MemoryContent</span><span class="p">(</span>
+        <span class="n">content</span><span class="o">=</span><span class="s2">&quot;The weather should be in metric units&quot;</span><span class="p">,</span>
+        <span class="n">mime_type</span><span class="o">=</span><span class="n">MemoryMimeType</span><span class="o">.</span><span class="n">TEXT</span><span class="p">,</span>
+        <span class="n">metadata</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;preferences&quot;</span><span class="p">,</span> <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;units&quot;</span><span class="p">},</span>
+    <span class="p">)</span>
+<span class="p">)</span>
+
+<span class="k">await</span> <span class="n">redis_memory</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+    <span class="n">MemoryContent</span><span class="p">(</span>
+        <span class="n">content</span><span class="o">=</span><span class="s2">&quot;Meal recipe must be vegan&quot;</span><span class="p">,</span>
+        <span class="n">mime_type</span><span class="o">=</span><span class="n">MemoryMimeType</span><span class="o">.</span><span class="n">TEXT</span><span class="p">,</span>
+        <span class="n">metadata</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;preferences&quot;</span><span class="p">,</span> <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;dietary&quot;</span><span class="p">},</span>
+    <span class="p">)</span>
+<span class="p">)</span>
+
+<span class="n">model_client</span> <span class="o">=</span> <span class="n">OpenAIChatCompletionClient</span><span class="p">(</span>
+    <span class="n">model</span><span class="o">=</span><span class="s2">&quot;gpt-4o&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="c1"># Create assistant agent with ChromaDB memory</span>
+<span class="n">assistant_agent</span> <span class="o">=</span> <span class="n">AssistantAgent</span><span class="p">(</span>
+    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;assistant_agent&quot;</span><span class="p">,</span>
+    <span class="n">model_client</span><span class="o">=</span><span class="n">model_client</span><span class="p">,</span>
+    <span class="n">tools</span><span class="o">=</span><span class="p">[</span><span class="n">get_weather</span><span class="p">],</span>
+    <span class="n">memory</span><span class="o">=</span><span class="p">[</span><span class="n">redis_memory</span><span class="p">],</span>
+<span class="p">)</span>
+
+<span class="n">stream</span> <span class="o">=</span> <span class="n">assistant_agent</span><span class="o">.</span><span class="n">run_stream</span><span class="p">(</span><span class="n">task</span><span class="o">=</span><span class="s2">&quot;What is the weather in New York?&quot;</span><span class="p">)</span>
+<span class="k">await</span> <span class="n">Console</span><span class="p">(</span><span class="n">stream</span><span class="p">)</span>
+
+<span class="k">await</span> <span class="n">model_client</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+<span class="k">await</span> <span class="n">redis_memory</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>---------- TextMessage (user) ----------
+What is the weather in New York?
+---------- MemoryQueryEvent (assistant_agent) ----------
+[MemoryContent(content=&#39;The weather should be in metric units&#39;, mime_type=&lt;MemoryMimeType.TEXT: &#39;text/plain&#39;&gt;, metadata={&#39;category&#39;: &#39;preferences&#39;, &#39;type&#39;: &#39;units&#39;})]
+---------- ToolCallRequestEvent (assistant_agent) ----------
+[FunctionCall(id=&#39;call_1R6wV3uDOK8mGK2Vh2t0h4ld&#39;, arguments=&#39;{&quot;city&quot;:&quot;New York&quot;,&quot;units&quot;:&quot;metric&quot;}&#39;, name=&#39;get_weather&#39;)]
+---------- ToolCallExecutionEvent (assistant_agent) ----------
+[FunctionExecutionResult(content=&#39;The weather in New York is 23 °C and Sunny.&#39;, name=&#39;get_weather&#39;, call_id=&#39;call_1R6wV3uDOK8mGK2Vh2t0h4ld&#39;, is_error=False)]
+---------- ToolCallSummaryMessage (assistant_agent) ----------
+The weather in New York is 23 °C and Sunny.
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+</section>
+<section id="rag-agent-putting-it-all-together">
+<h1>RAG Agent: Putting It All Together<a class="headerlink" href="#rag-agent-putting-it-all-together" title="Link to this heading">#</a></h1>
+<p>The RAG (Retrieval Augmented Generation) pattern which is common in building AI systems encompasses two distinct phases:</p>
+<ol class="arabic simple">
+<li><p><strong>Indexing</strong>: Loading documents, chunking them, and storing them in a vector database</p></li>
+<li><p><strong>Retrieval</strong>: Finding and using relevant chunks during conversation runtime</p></li>
+</ol>
+<p>In our previous examples, we manually added items to memory and passed them to our agents. In practice, the indexing process is usually automated and based on much larger document sources like product documentation, internal files, or knowledge bases.</p>
+<blockquote>
+<div><p>Note: The quality of a RAG system is dependent on the quality of the chunking and retrieval process (models, embeddings, etc.). You may need to experiement with more advanced chunking and retrieval models to get the best results.</p>
+</div></blockquote>
+<section id="building-a-simple-rag-agent">
+<h2>Building a Simple RAG Agent<a class="headerlink" href="#building-a-simple-rag-agent" title="Link to this heading">#</a></h2>
+<p>To begin, let’s create a simple document indexer that we will used to load documents, chunk them, and store them in a <code class="docutils literal notranslate"><span class="pre">ChromaDBVectorMemory</span></code> memory store.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">List</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">aiofiles</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">aiohttp</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_core.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">Memory</span><span class="p">,</span> <span class="n">MemoryContent</span><span class="p">,</span> <span class="n">MemoryMimeType</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">SimpleDocumentIndexer</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Basic document indexer for AutoGen Memory.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">memory</span><span class="p">:</span> <span class="n">Memory</span><span class="p">,</span> <span class="n">chunk_size</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1500</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">memory</span> <span class="o">=</span> <span class="n">memory</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">chunk_size</span> <span class="o">=</span> <span class="n">chunk_size</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_fetch_content</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">source</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Fetch content from URL or file.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">source</span><span class="o">.</span><span class="n">startswith</span><span class="p">((</span><span class="s2">&quot;http://&quot;</span><span class="p">,</span> <span class="s2">&quot;https://&quot;</span><span class="p">)):</span>
+            <span class="k">async</span> <span class="k">with</span> <span class="n">aiohttp</span><span class="o">.</span><span class="n">ClientSession</span><span class="p">()</span> <span class="k">as</span> <span class="n">session</span><span class="p">:</span>
+                <span class="k">async</span> <span class="k">with</span> <span class="n">session</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">source</span><span class="p">)</span> <span class="k">as</span> <span class="n">response</span><span class="p">:</span>
+                    <span class="k">return</span> <span class="k">await</span> <span class="n">response</span><span class="o">.</span><span class="n">text</span><span class="p">()</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">async</span> <span class="k">with</span> <span class="n">aiofiles</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">source</span><span class="p">,</span> <span class="s2">&quot;r&quot;</span><span class="p">,</span> <span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                <span class="k">return</span> <span class="k">await</span> <span class="n">f</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_strip_html</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Remove HTML tags and normalize whitespace.&quot;&quot;&quot;</span>
+        <span class="n">text</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;&lt;[^&gt;]*&gt;&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span>
+        <span class="n">text</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">sub</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;\s+&quot;</span><span class="p">,</span> <span class="s2">&quot; &quot;</span><span class="p">,</span> <span class="n">text</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">text</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_split_text</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">text</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Split text into fixed-size chunks.&quot;&quot;&quot;</span>
+        <span class="n">chunks</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="c1"># Just split text into fixed-size chunks</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">text</span><span class="p">),</span> <span class="bp">self</span><span class="o">.</span><span class="n">chunk_size</span><span class="p">):</span>
+            <span class="n">chunk</span> <span class="o">=</span> <span class="n">text</span><span class="p">[</span><span class="n">i</span> <span class="p">:</span> <span class="n">i</span> <span class="o">+</span> <span class="bp">self</span><span class="o">.</span><span class="n">chunk_size</span><span class="p">]</span>
+            <span class="n">chunks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">chunk</span><span class="o">.</span><span class="n">strip</span><span class="p">())</span>
+        <span class="k">return</span> <span class="n">chunks</span>
+
+    <span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">index_documents</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">sources</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Index documents into memory.&quot;&quot;&quot;</span>
+        <span class="n">total_chunks</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="k">for</span> <span class="n">source</span> <span class="ow">in</span> <span class="n">sources</span><span class="p">:</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">content</span> <span class="o">=</span> <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">_fetch_content</span><span class="p">(</span><span class="n">source</span><span class="p">)</span>
+
+                <span class="c1"># Strip HTML if content appears to be HTML</span>
+                <span class="k">if</span> <span class="s2">&quot;&lt;&quot;</span> <span class="ow">in</span> <span class="n">content</span> <span class="ow">and</span> <span class="s2">&quot;&gt;&quot;</span> <span class="ow">in</span> <span class="n">content</span><span class="p">:</span>
+                    <span class="n">content</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_strip_html</span><span class="p">(</span><span class="n">content</span><span class="p">)</span>
+
+                <span class="n">chunks</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_split_text</span><span class="p">(</span><span class="n">content</span><span class="p">)</span>
+
+                <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">chunk</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">chunks</span><span class="p">):</span>
+                    <span class="k">await</span> <span class="bp">self</span><span class="o">.</span><span class="n">memory</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+                        <span class="n">MemoryContent</span><span class="p">(</span>
+                            <span class="n">content</span><span class="o">=</span><span class="n">chunk</span><span class="p">,</span> <span class="n">mime_type</span><span class="o">=</span><span class="n">MemoryMimeType</span><span class="o">.</span><span class="n">TEXT</span><span class="p">,</span> <span class="n">metadata</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="n">source</span><span class="p">,</span> <span class="s2">&quot;chunk_index&quot;</span><span class="p">:</span> <span class="n">i</span><span class="p">}</span>
+                        <span class="p">)</span>
+                    <span class="p">)</span>
+
+                <span class="n">total_chunks</span> <span class="o">+=</span> <span class="nb">len</span><span class="p">(</span><span class="n">chunks</span><span class="p">)</span>
+
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error indexing </span><span class="si">{</span><span class="n">source</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">total_chunks</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Now let’s use our indexer with ChromaDBVectorMemory to build a complete RAG agent:</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_agentchat.agents</span><span class="w"> </span><span class="kn">import</span> <span class="n">AssistantAgent</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_agentchat.ui</span><span class="w"> </span><span class="kn">import</span> <span class="n">Console</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_ext.memory.chromadb</span><span class="w"> </span><span class="kn">import</span> <span class="n">ChromaDBVectorMemory</span><span class="p">,</span> <span class="n">PersistentChromaDBVectorMemoryConfig</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_ext.models.openai</span><span class="w"> </span><span class="kn">import</span> <span class="n">OpenAIChatCompletionClient</span>
+
+<span class="c1"># Initialize vector memory</span>
+
+<span class="n">rag_memory</span> <span class="o">=</span> <span class="n">ChromaDBVectorMemory</span><span class="p">(</span>
+    <span class="n">config</span><span class="o">=</span><span class="n">PersistentChromaDBVectorMemoryConfig</span><span class="p">(</span>
+        <span class="n">collection_name</span><span class="o">=</span><span class="s2">&quot;autogen_docs&quot;</span><span class="p">,</span>
+        <span class="n">persistence_path</span><span class="o">=</span><span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">Path</span><span class="o">.</span><span class="n">home</span><span class="p">()),</span> <span class="s2">&quot;.chromadb_autogen&quot;</span><span class="p">),</span>
+        <span class="n">k</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>  <span class="c1"># Return top 3 results</span>
+        <span class="n">score_threshold</span><span class="o">=</span><span class="mf">0.4</span><span class="p">,</span>  <span class="c1"># Minimum similarity score</span>
+    <span class="p">)</span>
+<span class="p">)</span>
+
+<span class="k">await</span> <span class="n">rag_memory</span><span class="o">.</span><span class="n">clear</span><span class="p">()</span>  <span class="c1"># Clear existing memory</span>
+
+
+<span class="c1"># Index AutoGen documentation</span>
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">index_autogen_docs</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="n">indexer</span> <span class="o">=</span> <span class="n">SimpleDocumentIndexer</span><span class="p">(</span><span class="n">memory</span><span class="o">=</span><span class="n">rag_memory</span><span class="p">)</span>
+    <span class="n">sources</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="s2">&quot;https://raw.githubusercontent.com/microsoft/autogen/main/README.md&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;https://microsoft.github.io/autogen/dev/user-guide/agentchat-user-guide/tutorial/agents.html&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;https://microsoft.github.io/autogen/dev/user-guide/agentchat-user-guide/tutorial/teams.html&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;https://microsoft.github.io/autogen/dev/user-guide/agentchat-user-guide/tutorial/termination.html&quot;</span><span class="p">,</span>
+    <span class="p">]</span>
+    <span class="n">chunks</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="k">await</span> <span class="n">indexer</span><span class="o">.</span><span class="n">index_documents</span><span class="p">(</span><span class="n">sources</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Indexed </span><span class="si">{</span><span class="n">chunks</span><span class="si">}</span><span class="s2"> chunks from </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">sources</span><span class="p">)</span><span class="si">}</span><span class="s2"> AutoGen documents&quot;</span><span class="p">)</span>
+
+
+<span class="k">await</span> <span class="n">index_autogen_docs</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Indexed 70 chunks from 4 AutoGen documents
+</pre></div>
+</div>
+</div>
+</div>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Create our RAG assistant agent</span>
+<span class="n">rag_assistant</span> <span class="o">=</span> <span class="n">AssistantAgent</span><span class="p">(</span>
+    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;rag_assistant&quot;</span><span class="p">,</span> <span class="n">model_client</span><span class="o">=</span><span class="n">OpenAIChatCompletionClient</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="s2">&quot;gpt-4o&quot;</span><span class="p">),</span> <span class="n">memory</span><span class="o">=</span><span class="p">[</span><span class="n">rag_memory</span><span class="p">]</span>
+<span class="p">)</span>
+
+<span class="c1"># Ask questions about AutoGen</span>
+<span class="n">stream</span> <span class="o">=</span> <span class="n">rag_assistant</span><span class="o">.</span><span class="n">run_stream</span><span class="p">(</span><span class="n">task</span><span class="o">=</span><span class="s2">&quot;What is AgentChat?&quot;</span><span class="p">)</span>
+<span class="k">await</span> <span class="n">Console</span><span class="p">(</span><span class="n">stream</span><span class="p">)</span>
+
+<span class="c1"># Remember to close the memory when done</span>
+<span class="k">await</span> <span class="n">rag_memory</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>---------- TextMessage (user) ----------
+What is AgentChat?
+---------- MemoryQueryEvent (rag_assistant) ----------
+[MemoryContent(content=&#39;e of the AssistantAgent , we can now proceed to the next section to learn about the teams feature in AgentChat. previous Messages next Teams On this page Assistant Agent Getting Result Multi-Modal Input Streaming Messages Using Tools and Workbench Built-in Tools and Workbench Function Tool Model Context Protocol (MCP) Workbench Agent as a Tool Parallel Tool Calls Tool Iterations Structured Output Streaming Tokens Using Model Context Other Preset Agents Next Step Edit on GitHub Show Source so the DOM is not blocked --&gt; © Copyright 2024, Microsoft. Privacy Policy | Consumer Health Privacy Built with the PyData Sphinx Theme 0.16.0.&#39;, mime_type=&#39;MemoryMimeType.TEXT&#39;, metadata={&#39;chunk_index&#39;: 16, &#39;mime_type&#39;: &#39;MemoryMimeType.TEXT&#39;, &#39;source&#39;: &#39;https://microsoft.github.io/autogen/dev/user-guide/agentchat-user-guide/tutorial/agents.html&#39;, &#39;score&#39;: 0.6237251460552216, &#39;id&#39;: &#39;6457da13-1c25-44f0-bea3-158e5c0c5bb4&#39;}), MemoryContent(content=&#39;h Literature Review API Reference PyPi Source AgentChat Agents Agents # AutoGen AgentChat provides a set of preset Agents, each with variations in how an agent might respond to messages. All agents share the following attributes and methods: name : The unique name of the agent. description : The description of the agent in text. run : The method that runs the agent given a task as a string or a list of messages, and returns a TaskResult . Agents are expected to be stateful and this method is expected to be called with new messages, not complete history . run_stream : Same as run() but returns an iterator of messages that subclass BaseAgentEvent or BaseChatMessage followed by a TaskResult as the last item. See autogen_agentchat.messages for more information on AgentChat message types. Assistant Agent # AssistantAgent is a built-in agent that uses a language model and has the ability to use tools. Warning AssistantAgent is a “kitchen sink” agent for prototyping and educational purpose – it is very general. Make sure you read the documentation and implementation to understand the design choices. Once you fully understand the design, you may want to implement your own agent. See Custom Agent . from autogen_agentchat.agents import AssistantAgent from autogen_agentchat.messages import StructuredMessage from autogen_agentchat.ui import Console from autogen_ext.models.openai import OpenAIChatCompletionClient # Define a tool that searches the web for information. # For simplicity, we&#39;, mime_type=&#39;MemoryMimeType.TEXT&#39;, metadata={&#39;chunk_index&#39;: 1, &#39;mime_type&#39;: &#39;MemoryMimeType.TEXT&#39;, &#39;source&#39;: &#39;https://microsoft.github.io/autogen/dev/user-guide/agentchat-user-guide/tutorial/agents.html&#39;, &#39;score&#39;: 0.6212755441665649, &#39;id&#39;: &#39;ab3a553f-bb69-41ff-b6a9-8397b4cb3cb1&#39;}), MemoryContent(content=&#39;Literature Review API Reference PyPi Source AgentChat Teams Teams # In this section you’ll learn how to create a multi-agent team (or simply team) using AutoGen. A team is a group of agents that work together to achieve a common goal. We’ll first show you how to create and run a team. We’ll then explain how to observe the team’s behavior, which is crucial for debugging and understanding the team’s performance, and common operations to control the team’s behavior. AgentChat supports several team presets: RoundRobinGroupChat : A team that runs a group chat with participants taking turns in a round-robin fashion (covered on this page). Tutorial SelectorGroupChat : A team that selects the next speaker using a ChatCompletion model after each message. Tutorial MagenticOneGroupChat : A generalist multi-agent system for solving open-ended web and file-based tasks across a variety of domains. Tutorial Swarm : A team that uses HandoffMessage to signal transitions between agents. Tutorial Note When should you use a team? Teams are for complex tasks that require collaboration and diverse expertise. However, they also demand more scaffolding to steer compared to single agents. While AutoGen simplifies the process of working with teams, start with a single agent for simpler tasks, and transition to a multi-agent team when a single agent proves inadequate. Ensure that you have optimized your single agent with the appropriate tools and instructions before moving to a team-based approach. Cre&#39;, mime_type=&#39;MemoryMimeType.TEXT&#39;, metadata={&#39;mime_type&#39;: &#39;MemoryMimeType.TEXT&#39;, &#39;chunk_index&#39;: 1, &#39;source&#39;: &#39;https://microsoft.github.io/autogen/dev/user-guide/agentchat-user-guide/tutorial/teams.html&#39;, &#39;score&#39;: 0.5267025232315063, &#39;id&#39;: &#39;554b20a9-e041-4ac6-b2f1-11261336861c&#39;})]
+---------- TextMessage (rag_assistant) ----------
+AgentChat is a framework that provides a set of preset agents designed to handle conversations and tasks using a variety of response strategies. It includes features for managing individual agents as well as creating teams of agents that can work collaboratively on complex goals. These agents are stateful, meaning they can manage and track ongoing conversations. AgentChat also includes agents that can utilize tools to enhance their capabilities.
+
+Key features of AgentChat include:
+- **Preset Agents**: These agents are pre-configured with specific behavior patterns for handling tasks and messages.
+- **Agent Attributes and Methods**: Each agent has a unique name and description, and methods like `run` and `run_stream` to execute tasks and handle messages.
+- **AssistantAgent**: A built-in general-purpose agent used primarily for prototyping and educational purposes.
+- **Team Configurations**: AgentChat allows for the creation of multi-agent teams for tasks that are too complex for a single agent. Teams run in preset formats like RoundRobinGroupChat or Swarm, providing structured interaction among agents.
+
+Overall, AgentChat is designed for flexible deployment of conversational agents, either singly or in groups, across a variety of tasks. 
+
+TERMINATE
+</pre></div>
+</div>
+</div>
+</div>
+<p>This implementation provides a RAG agent that can answer questions based on AutoGen documentation. When a question is asked, the Memory system  retrieves relevant chunks and adds them to the context, enabling the assistant to generate informed responses.</p>
+<p>For production systems, you might want to:</p>
+<ol class="arabic simple">
+<li><p>Implement more sophisticated chunking strategies</p></li>
+<li><p>Add metadata filtering capabilities</p></li>
+<li><p>Customize the retrieval scoring</p></li>
+<li><p>Optimize embedding models for your specific domain</p></li>
+</ol>
+</section>
+</section>
+<section id="mem0memory-example">
+<h1>Mem0Memory Example<a class="headerlink" href="#mem0memory-example" title="Link to this heading">#</a></h1>
+<p><code class="docutils literal notranslate"><span class="pre">autogen_ext.memory.mem0.Mem0Memory</span></code> provides integration with <code class="docutils literal notranslate"><span class="pre">Mem0.ai</span></code>’s memory system. It supports both cloud-based and local backends, offering advanced memory capabilities for agents. The implementation handles proper retrieval and context updating, making it suitable for production environments.</p>
+<p>In the following example, we’ll demonstrate how to use <code class="docutils literal notranslate"><span class="pre">Mem0Memory</span></code> to maintain persistent memories across conversations:</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">autogen_agentchat.agents</span><span class="w"> </span><span class="kn">import</span> <span class="n">AssistantAgent</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_agentchat.ui</span><span class="w"> </span><span class="kn">import</span> <span class="n">Console</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_core.memory</span><span class="w"> </span><span class="kn">import</span> <span class="n">MemoryContent</span><span class="p">,</span> <span class="n">MemoryMimeType</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_ext.memory.mem0</span><span class="w"> </span><span class="kn">import</span> <span class="n">Mem0Memory</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">autogen_ext.models.openai</span><span class="w"> </span><span class="kn">import</span> <span class="n">OpenAIChatCompletionClient</span>
+
+<span class="c1"># Initialize Mem0 cloud memory (requires API key)</span>
+<span class="c1"># For local deployment, use is_cloud=False with appropriate config</span>
+<span class="n">mem0_memory</span> <span class="o">=</span> <span class="n">Mem0Memory</span><span class="p">(</span>
+    <span class="n">is_cloud</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">limit</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>  <span class="c1"># Maximum number of memories to retrieve</span>
+<span class="p">)</span>
+
+<span class="c1"># Add user preferences to memory</span>
+<span class="k">await</span> <span class="n">mem0_memory</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+    <span class="n">MemoryContent</span><span class="p">(</span>
+        <span class="n">content</span><span class="o">=</span><span class="s2">&quot;The weather should be in metric units&quot;</span><span class="p">,</span>
+        <span class="n">mime_type</span><span class="o">=</span><span class="n">MemoryMimeType</span><span class="o">.</span><span class="n">TEXT</span><span class="p">,</span>
+        <span class="n">metadata</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;preferences&quot;</span><span class="p">,</span> <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;units&quot;</span><span class="p">},</span>
+    <span class="p">)</span>
+<span class="p">)</span>
+
+<span class="k">await</span> <span class="n">mem0_memory</span><span class="o">.</span><span class="n">add</span><span class="p">(</span>
+    <span class="n">MemoryContent</span><span class="p">(</span>
+        <span class="n">content</span><span class="o">=</span><span class="s2">&quot;Meal recipe must be vegan&quot;</span><span class="p">,</span>
+        <span class="n">mime_type</span><span class="o">=</span><span class="n">MemoryMimeType</span><span class="o">.</span><span class="n">TEXT</span><span class="p">,</span>
+        <span class="n">metadata</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;preferences&quot;</span><span class="p">,</span> <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;dietary&quot;</span><span class="p">},</span>
+    <span class="p">)</span>
+<span class="p">)</span>
+
+<span class="c1"># Create assistant with mem0 memory</span>
+<span class="n">assistant_agent</span> <span class="o">=</span> <span class="n">AssistantAgent</span><span class="p">(</span>
+    <span class="n">name</span><span class="o">=</span><span class="s2">&quot;assistant_agent&quot;</span><span class="p">,</span>
+    <span class="n">model_client</span><span class="o">=</span><span class="n">OpenAIChatCompletionClient</span><span class="p">(</span>
+        <span class="n">model</span><span class="o">=</span><span class="s2">&quot;gpt-4o-2024-08-06&quot;</span><span class="p">,</span>
+    <span class="p">),</span>
+    <span class="n">tools</span><span class="o">=</span><span class="p">[</span><span class="n">get_weather</span><span class="p">],</span>
+    <span class="n">memory</span><span class="o">=</span><span class="p">[</span><span class="n">mem0_memory</span><span class="p">],</span>
+<span class="p">)</span>
+
+<span class="c1"># Ask about the weather</span>
+<span class="n">stream</span> <span class="o">=</span> <span class="n">assistant_agent</span><span class="o">.</span><span class="n">run_stream</span><span class="p">(</span><span class="n">task</span><span class="o">=</span><span class="s2">&quot;What are my dietary preferences?&quot;</span><span class="p">)</span>
+<span class="k">await</span> <span class="n">Console</span><span class="p">(</span><span class="n">stream</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>The example above demonstrates how Mem0Memory can be used with an assistant agent. The memory integration ensures that:</p>
+<ol class="arabic simple">
+<li><p>All agent interactions are stored in Mem0 for future reference</p></li>
+<li><p>Relevant memories (like user preferences) are automatically retrieved and added to the context</p></li>
+<li><p>The agent can maintain consistent behavior based on stored memories</p></li>
+</ol>
+<p>Mem0Memory is particularly useful for:</p>
+<ul class="simple">
+<li><p>Long-running agent deployments that need persistent memory</p></li>
+<li><p>Applications requiring enhanced privacy controls</p></li>
+<li><p>Teams wanting unified memory management across agents</p></li>
+<li><p>Use cases needing advanced memory filtering and analytics</p></li>
+</ul>
+<p>Just like ChromaDBVectorMemory, you can serialize Mem0Memory configurations:</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Serialize the memory configuration</span>
+<span class="n">config_json</span> <span class="o">=</span> <span class="n">mem0_memory</span><span class="o">.</span><span class="n">dump_component</span><span class="p">()</span><span class="o">.</span><span class="n">model_dump_json</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Memory config JSON: </span><span class="si">{</span><span class="n">config_json</span><span class="p">[:</span><span class="mi">100</span><span class="p">]</span><span class="si">}</span><span class="s2">...&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+</section>
+
+
+                </article>
+              
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="graph-flow.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">GraphFlow (Workflows)</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="logging.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Logging</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+<div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> On this page
+  </div>
+  <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h1 nav-item toc-entry"><a class="reference internal nav-link" href="#">Memory and RAG</a></li>
+<li class="toc-h1 nav-item toc-entry"><a class="reference internal nav-link" href="#listmemory-example">ListMemory Example</a></li>
+<li class="toc-h1 nav-item toc-entry"><a class="reference internal nav-link" href="#custom-memory-stores-vector-dbs-etc">Custom Memory Stores (Vector DBs, etc.)</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#redis-memory">Redis Memory</a></li>
+</ul>
+</li>
+<li class="toc-h1 nav-item toc-entry"><a class="reference internal nav-link" href="#rag-agent-putting-it-all-together">RAG Agent: Putting It All Together</a><ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#building-a-simple-rag-agent">Building a Simple RAG Agent</a></li>
+</ul>
+</li>
+<li class="toc-h1 nav-item toc-entry"><a class="reference internal nav-link" href="#mem0memory-example">Mem0Memory Example</a></li>
+</ul>
+
+  </nav></div>
+
+  <div class="sidebar-secondary-item">
+  
+  <div class="tocsection editthispage">
+    <a href="https://github.com/microsoft/autogen/edit/main/python/docs/src/user-guide/agentchat-user-guide/memory.ipynb">
+      <i class="fa-solid fa-pencil"></i>
+      
+      
+        
+          Edit on GitHub
+        
+      
+    </a>
+  </div>
+</div>
+
+  <div class="sidebar-secondary-item">
+
+  <div class="tocsection sourcelink">
+    <a href="../../_sources/user-guide/agentchat-user-guide/memory.ipynb.txt">
+      <i class="fa-solid fa-file-lines"></i> Show Source
+    </a>
+  </div>
+</div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+          </footer>
+        
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="../../_static/scripts/bootstrap.js?digest=26a4bc78f4c0ddb94549"></script>
+<script defer src="../../_static/scripts/pydata-sphinx-theme.js?digest=26a4bc78f4c0ddb94549"></script>
+
+  <footer class="bd-footer">
+<div class="bd-footer__inner bd-page-width">
+  
+    <div class="footer-items__start">
+      
+        <div class="footer-item">
+
+  <p class="copyright">
+    
+      © Copyright 2024, Microsoft.
+      <br/>
+    
+  </p>
+</div>
+      
+    </div>
+  
+  
+    <div class="footer-items__center">
+      
+        <div class="footer-item"><p><a href="https://go.microsoft.com/fwlink/?LinkId=521839">Privacy Policy</a> | <a href="https://go.microsoft.com/fwlink/?linkid=2259814">Consumer Health Privacy</a> </p></div>
+      
+    </div>
+  
+  
+    <div class="footer-items__end">
+      
+        <div class="footer-item">
+<p class="theme-version">
+  Built with the <a href="https://pydata-sphinx-theme.readthedocs.io/en/stable/index.html">PyData Sphinx Theme</a> 0.16.0.
+</p></div>
+      
+        <div class="footer-item"><script src="_static/banner-override.js"></script></div>
+      
+    </div>
+  
+</div>
+
+  </footer>
+  </body>
+</html>

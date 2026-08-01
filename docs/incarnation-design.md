@@ -1,14 +1,19 @@
 # YUKI.N 分身、记忆与 Prompt 治理
 
-> 认知体系的实现细节以 `docs/cognition-design.md` 为准。尤其：短期 context 的睡眠
-> 产物称 `WakePacket`；`Impression` 专指每个分身独立、模型驱动的潜意识，不再用作
-> compaction 摘要的泛称；同一分身全部 Task 的原始结构化 `Task Archive` 是长期记忆
-> 本体，本文的 Memory Record / Space / Living Model 只描述可重建派生索引。
-
-> 状态：新架构权威基线
+> 状态：新架构**概念权威基线**（领域蓝图）。本文保持项目层面的概念级构思——
+> **记忆只是分身治理的一部分，不代表整个 cognition**；概念不被记忆子系统文档覆盖。
+>
+> 关系：
+> - **实现权威**：认知体系与记忆子系统的当前实现见 [`cognition-design.md`](cognition-design.md)
+>   （认知总纲）与 [`memory/`](memory/) 系列；未落地的远期对象不在界面中伪装成可用能力。
+> - **记忆子系统机制**：印象、工作记忆（睡眠-清醒）、长期记忆（Task Archive）分别见
+>   [`memory/01-印象.md`](memory/01-印象.md)、[`memory/02-工作记忆.md`](memory/02-工作记忆.md)、
+>   [`memory/03-长期记忆.md`](memory/03-长期记忆.md)、[`memory/04-生命周期.md`](memory/04-生命周期.md)。
+> - 本文中 Memory Record / Space / Mount / Living Model / Playbook / Commitment 属
+>   领域蓝图中的**可重建派生索引**形态；当前已实现的派生层（LongTerm 记忆库、印象）见
+>   `memory/03` 与 `memory/01`。
+>
 > 范围：本地单用户工具。记忆作用域只描述多个 Yuki 分身之间的内部边界，不涉及多用户、鉴权或对外扩展。
-> 本文是完整领域蓝图；当前已闭合、可运行的实现边界与准确 HTTP 映射见
-> `docs/cognition-design.md`，未落地的远期对象不在界面中伪装成可用能力。
 
 ## 一、最高原则
 
@@ -35,9 +40,13 @@ Prompt 负责把这一状态投影给模型；Transcript 负责把一次经历�
 
 ---
 
-## 二、当前实现的真实形态
+## 二、迁移前形态（历史背景）
 
-当前系统不是「有自我的分身」，而是：
+> 本节描述新领域模型落地**之前**的旧形态，用于理解迁移来源。分身体系（Incarnation、
+> Task Archive、印象、睡眠-清醒）**现已实现**，当前实现以 `cognition-design.md` 与
+> `memory/` 系列为准；以下遗留问题正是新模型逐一解决的问题。
+
+此前系统不是「有自我的分身」，而是：
 
 ```text
 Runtime
@@ -334,9 +343,13 @@ Operation → PromptBuild → ContextBuild → ModelInvocationSnapshot
 
 ---
 
-## 四、Memory 拓扑
+## 四、Memory 拓扑（蓝图 vs 已实现）
 
-本节的两层必须分开：
+> 记忆子系统是分身治理的一部分，不是认知的全部（见 `cognition-design.md` §一）。
+> 本节区分两层：**canonical memory（已实现）** 与 **derived memory（部分实现，
+> 其余为蓝图）**。canonical 机制细节见 `memory/03-长期记忆.md`；已实现的派生层
+> （LongTerm 记忆库、印象）见 `memory/03` 与 `memory/01`。Space / Mount / Living
+> Model / Playbook / Commitment 属蓝图对象，当前不在界面中伪装为可用能力。
 
 ```text
 canonical memory = same-incarnation Task Archive

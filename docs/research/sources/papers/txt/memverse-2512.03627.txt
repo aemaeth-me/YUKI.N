@@ -1,0 +1,3051 @@
+
+
+MemVerse: Multimodal Memory for Lifelong Learning Agents
+
+ Report GitHub Issue
+
+ ×
+
+ Title:
+
+ Content selection saved. Describe the issue below:
+
+ Description:
+
+ Submit without GitHub
+ Submit in GitHub
+
+ arXiv is now an independent nonprofit!
+ Learn more
+ ×
+
+ Back to arXiv
+
+ Why HTML?
+
+ Report Issue
+
+ Back to Abstract
+
+ Download PDF
+
+Abstract
+
+1 Introduction
+
+2 Related Work
+
+2.1 Memory for LLM Agents
+
+2.2 Multimodal Knowledge Retrieval
+
+3 Methodology
+
+3.1 Hierarchical Retrival-based Memory
+
+Multimodal Processing.
+
+Short-Term Memory.
+
+Long-Term Memory.
+
+3.2 Lightweight Parametric Memory Model
+
+Supervised Fine-tuning.
+
+Dynamic Memory Expansion.
+
+4 Experiment
+
+4.1 Setups
+
+Evaluation Datasets.
+
+Baselines.
+
+Implementation Details.
+
+4.2 Main Results
+
+LoCoMo
+
+LongMemEval
+
+Multimodal Benchmarks.
+
+4.3 Ablation Study
+
+4.4 Further Analysis
+
+Benefits of Structured Graph Memory.
+
+Efficiency of Parametric Distillation.
+
+Knowledge Retention and Scalability.
+
+5 Conclusion
+
+6 Limitations
+
+References
+
+A Datasets
+
+LoCoMo (Maharana et al., 2024).
+
+LongMemEval (Wu et al., 2025).
+
+ScienceQA (Lu et al., 2022).
+
+MSR-VTT (Xu et al., 2016).
+
+B Implementation Details
+
+B.1 Baselines
+
+B.2 Multimodal Preprocessing
+
+B.3 Memory Extraction Prompts
+
+B.4 Knowledge Graph Construction
+
+B.5 Training Details
+
+C Algorithms
+
+D Additional Results
+
+ScienceQA
+
+MSR-VTT
+
+E Memory Evolution Performance
+
+F Scalability Analysis of MemVerse
+
+G More Related Work Discussion
+
+G.1 Memory for LLM Agents.
+
+G.2 Multimodal Knowledge Retrieval
+
+H Example Cases
+
+ License: arXiv.org perpetual non-exclusive license
+
+arXiv:2512.03627v2 [cs.AI] 02 Jun 2026
+
+MemVerse: Multimodal Memory for Lifelong Learning Agents
+
+Junming Liu, Yifei Sun11footnotemark: 1, Weihua Cheng, Haodong Lei, 
+Yirong Chen, Licheng Wen, Xuemeng Yang, Daocheng Fu, Pinlong Cai, 
+Nianchen Deng, Yi Yu, Shuyue Hu, Botian Shi, Ding Wang
+Shanghai Artificial Intelligence Laboratory
+liujunming@pjlab.org.cn wangding@pjlab.org.cn
+
+ https://github.com/KnowledgeXLab/MemVerse
+Equal Contribution.Corresponding author.
+
+Abstract
+
+Despite the remarkable advancements in multimodal large language models across various domains, AI agents still lack the ability to retain past information.
+Without reliable memory, agents struggle to leverage historical context, impairing long-horizon reasoning and coherent interactions in dynamic environments.
+In this paper, we introduce MemVerse, a model-agnostic, plug-and-play memory framework that combines fast parametric recall with hierarchical retrieval, enabling scalable and adaptive multimodal intelligence.
+MemVerse maintains short-term memory for recent context while transforming raw experiences into structured long-term memory graphs, empowering continuous learning and autonomous knowledge evolution.
+To meet real-time demands, we introduce a periodic distillation mechanism that compresses essential knowledge from the cognitive graph into the parametric model, providing fast and differentiable recall while preserving interpretability.
+Extensive experiments show that MemVerse boosts multimodal reasoning with superior efficiency, allowing agents to maintain coherence and adapt seamlessly throughout extended interactions.
+
+MemVerse: Multimodal Memory for Lifelong Learning Agents
+
+Junming Liu††thanks: Equal Contribution., Yifei Sun11footnotemark: 1, Weihua Cheng, Haodong Lei,
+
+Yirong Chen, Licheng Wen, Xuemeng Yang, Daocheng Fu, Pinlong Cai,
+
+Nianchen Deng, Yi Yu, Shuyue Hu, Botian Shi, Ding Wang††thanks: Corresponding author.
+
+Shanghai Artificial Intelligence Laboratory
+
+liujunming@pjlab.org.cn wangding@pjlab.org.cn
+
+ https://github.com/KnowledgeXLab/MemVerse
+
+Figure 1: 
+(1) The left panels (a-d) illustrate how MemVerse equips agents with multimodal memories such as auditory, visual, video, and textual modalities, enhancing contextual understanding.
+(2) The right panels compare two reasoning outcomes: the baseline LLM without memory (top) tends to hallucinate, while with MemVerse plugged in (bottom), the agent retrieves grounded evidence and generates accurate answers.
+
+1 Introduction
+
+While large-scale Multimodal Large Language Models (MLLMs) have achieved substantial success Zhang et al. (2025a); Wang et al. (2025a), AI agents remain constrained by their lack of effective memory Zhang et al. (2025d), particularly in visual reasoning Dong et al. (2025), web navigation Wang et al. (2025b), and multimodal scene understanding Kong et al. (2025). Memory is essential for enabling agents to adapt to dynamic environments, integrate new experiences with prior knowledge, and perform long-horizon reasoning. Unlike humans, whose intelligence emerges from the continuous accumulation and abstraction of multimodal experiences Deary et al. (2010), current agents operate in a largely stateless manner Su et al. (2024); Liu et al. (2025a); Wang and Chen (2025). They often treat each task as an isolated episode, creating a fundamental bottleneck as AI systems shift from single-task inference to continuous interaction in real-world settings.
+
+Current memory solutions fall into two dominant but inadequate paradigms for multimodal Xiao et al. (2025); Chhikara et al. (2025); Wang and Chen (2025) and lifelong learning Wu et al. (2022); Fan et al. (2025a) scenarios. The first, parameter-embedded memory, encodes knowledge directly into model weights via fine-tuning or in-context learning Pritzel et al. (2017); Tai et al. (2017). While leveraging the model’s capacity for associative recall, it suffers from fixed capacity, costly retraining, catastrophic forgetting, and is inherently a black box that limits interpretability and control. The second relies on external storage via Retrieval-Augmented Generation (RAG) systems Liu et al. (2025b), using embedding-based retrieval Huang et al. (2020) or keyword matching Liu et al. (2006). While modular and readily extensible without modifying model parameters, such systems maintain raw interaction logs without abstraction or consolidation, leading to redundancy, retrieval noise, and escalating computational cost as the database grows.
+
+The limitation, however, lies not in either paradigm alone, but in their isolated use. Parameter-embedded memory and external retrieval address different aspects of memory: the former supports compact generalization, whereas the latter preserves explicit and revisitable experiences. This suggests that memory for multimodal agents should not be framed as a choice between parametric and retrieval-based mechanisms, but as a problem of coordinating them. This perspective is consistent with Complementary Learning Systems (CLS) theory McClelland et al. (1995); Kahneman (2011); Evans and Stanovich (2013), which holds that human memory achieves both rapid recall and stable generalization through functionally distinct yet complementary systems. The hippocampus preserves episodic detail and relational structure, while the neocortex gradually compresses repeated experiences into efficient representations. Analogously, parametric memory resembles neocortical compression, whereas retrieval memory resembles hippocampal binding: each excels where the other fails. Like human memory, the key is therefore not choosing one over the other, but determining when and how to rely on each.
+
+Building on this insight, we introduce MemVerse, a model-agnostic memory framework for AI agents engaged in multimodal reasoning and lifelong learning. MemVerse instantiates the two pathways as two decoupled but
+jointly governed components: the
+slow pathway operates over hierarchical multimodal
+knowledge graphs organizing core (user-specific),
+episodic (time-ordered), and semantic (relational)
+memory as a dynamic substrate continuously updated
+from agent experience; the fast pathway
+is a lightweight external parametric memory model,
+periodically distilled from long-term memory graphs
+and fully decoupled from the answering LLM, providing low-latency responses.
+A central memory orchestrator governs routing
+between the two pathways via a confidence score, making the speed–accuracy trade-off
+explicit and query-adaptive without learned parameters.
+Our key contributions are as follows:
+
+• 
+
+We propose MemVerse, a dual-pathway memory architecture that models fast parametric recall and slow graph-based retrieval as complementary, jointly governed components, enabling adaptive routing between them.
+
+• 
+
+We design a memory transformation mechanism that converts raw multimodal experiences into specialized memory types organized as hierarchical knowledge graphs, enabling continual abstraction, adaptive forgetting, and bounded memory growth.
+
+• 
+
+We introduce a periodic distillation mechanism that compresses essential long-term memory into a lightweight parametric model, enabling fast, differentiable recall while preserving transparency and controllability.
+
+2 Related Work
+
+2.1 Memory for LLM Agents
+
+Memory is a fundamental component of LLM-based agents Zhang et al. (2025d), with existing approaches spanning parametric and non-parametric paradigms. Parametric memory incorporates knowledge directly into model parameters via trajectory-based fine-tuning Chen et al. (2023), modular adaptation Yin et al. (2024), latent memory tokens Wang et al. (2024b), or reinforcement-driven optimization Yu et al. (2025); Zhang et al. (2025b). Non-parametric memory relies on external storage and retrieval: MemGPT Packer et al. (2024), MemoryBank Zhong et al. (2024), and MemoRAG Qian et al. (2025) employ hierarchical retrieval and dual-system mechanisms for long-term reasoning, while SimpleMem Liu et al. (2026b), OCR-Memory Li et al. (2026), and Amory Zhou et al. (2026) further improve token efficiency, scalable recall, and narrative coherence. Production systems such as Mem0 Chhikara et al. (2025) and SuperMemory Shah et al. (2025) focus on hierarchical summarization and efficient read/write operations. However, retrieval-based memory suffers from interaction inefficiency, while purely parametric memory lacks flexible long-term retention.
+
+2.2 Multimodal Knowledge Retrieval
+
+Multimodal retrieval is central to knowledge-intensive
+reasoning in MLLM systems Abootorabi et al. (2025); Liu et al. (2025a). Recent work explores reward-guided
+retrieval Fan et al. (2025b), position-aware
+retrieval Yao et al. (2025b), universal multimodal
+retrievers Lin et al. (2025), synthetic training
+pairs Zhou et al. (2025), zero-shot cross-modal
+retrieval Choi et al. (2025), and utility-oriented
+evidence selection Luo et al. (2026).
+Knowledge graph-based retrieval has also been explored
+for structured reasoning Zhu et al. (2022); Chen and others (2024); Wang et al. (2024a), typically treating graphs as static
+external knowledge bases indexed for retrieval.
+
+Figure 2: MemVerse integrates three memory components: short-term memory for recent conversational contexts, long-term memory structured as a MMKG with entities and semantic relationships, and parametric memory as a lightweight neural model for fast context encoding. A central memory orchestrator manages retrieval and storage across these components, enabling the agent to process multimodal inputs and support lifelong learning.
+
+3 Methodology
+
+In this section, we describe the technical design of MemVerse, illustrated in Figure 2. MemVerse adopts a CLS-based memory architecture that combines retrieval memory with parametric memory for long-horizon multimodal reasoning. The framework is centered around a memory orchestrator, which dynamically manages memory addition, update, retrieval, consolidation, and deletion according to the current multimodal context and reasoning state. The retrieval memory contains both short-term and long-term memory. Short-term memory stores recent interaction context, while long-term memory organizes persistent knowledge as MMKGs. Alongside the retrieval memory, the parametric memory provides a fast and differentiable mechanism for knowledge recall and generalization through compact neural representations periodically distilled from long-term memory.
+
+3.1 Hierarchical Retrival-based Memory
+
+Multimodal Processing.
+
+To handle arbitrary multimodal inputs, such as images, videos, and audio, we first employ pretrained MLLMs to convert the raw data into textual representations. Specifically, each input modality [MATH] is encoded into a sequence of descriptive tokens:
+
+ [MATH] 
+
+(1)
+
+where [MATH] denotes the input modality, [MATH] is the modality-specific encoder that extracts features from [MATH] , [MATH] projects modality-specific representations into a unified textual token space, and [MATH] generates the textual tokens. We apply length normalization and redundancy filtering before inserting [MATH] into short-term memory.
+
+The resulting text [MATH] serves as a text chunk corresponding to the original multimodal input [MATH] .
+This explicit projection into a unified textual token space, together with modality-specific metadata, allows any symbolic entity or relation derived from [MATH] to be directly linked back to the original multimodal data Liu et al. (2025a).
+Importantly, this design does not introduce irreversible modality information loss. Although retrieval operates on textual representations, the original multimodal inputs are preserved and can be recovered through the retrieved text chunks and metadata pointers, allowing downstream models to jointly access both the retrieved text and the corresponding raw multimodal data. We adopt textual retrieval because it is generally more efficient and accurate than retrieval in heterogeneous multimodal embedding spaces. Multimodal similarity matching may overlook fine grained or local information due to interference from dominant modality features Xie et al. (2025); Yao et al. (2025a). For example, a small but task critical object or character in an image can be missed during multimodal retrieval, while textual representations support both semantic and keyword retrieval, enabling more accurate and controllable access to fine grained concepts.
+
+Short-Term Memory.
+
+To avoid redundant retrieval and continuous updates to long-term storage, we introduce a short-term memory mechanism that caches recent interaction states. Specifically, given a dialogue sequence [MATH] , STM retains the most recent [MATH] queries within a sliding window:
+
+ [MATH] 
+
+(2)
+
+Since the contextual information in a short dialogue session is already captured within this window, frequent updates to the external memory are unnecessary. Instead, consolidation is performed periodically or when sufficient new knowledge accumulates, ensuring both efficiency and stability.
+
+Long-Term Memory.
+
+We implement LTM as a paired structure [MATH] , where each [MATH] is a KG corresponding to a specific type of memory (core, episodic, or semantic), and [MATH] stores the original dialogue text chunks:
+
+ [MATH] 
+
+(3)
+
+Raw dialogue text is first compressed into salient memory descriptions by prompting an LLM to retain repeatedly referenced, causally influential, or semantically stable information while discarding transient details. These are then structured into MMKGs. Core memory stores durable user-grounded facts persisting across sessions; episodic memory captures time-stamped, context-dependent interactions; semantic memory maintains user-agnostic abstract knowledge generalizable across users. Entries are routed to subgraphs based on user identity dependency, temporal scope, and abstraction degree.
+
+Formally, given textual chunks [MATH] , the LLM extracts entities and typed relations to construct the knowledge graph:
+
+ [MATH] 
+
+(4)
+
+where each node [MATH] and each relation [MATH] maintain persistent references to their supporting text chunks:
+
+ [MATH] 
+
+(5)
+
+ [MATH] 
+
+(6)
+
+During retrieval, activating an entity or relation in [MATH] enables access to the corresponding supporting dialogue text [MATH] and any associated multimodal data [MATH] , ensuring that both symbolic and perceptual knowledge remain accessible and grounded.
+
+3.2 Lightweight Parametric Memory Model
+
+Parametric memory is stored as weights in a lightweight language model and updated via periodic supervised fine-tuning on LTM contents. It alleviates the computational overhead of RAG inference by mimicking retrieval behavior and enabling plug-and-play domain adaptation.
+
+Supervised Fine-tuning.
+
+To enable the model to internalize retrieved knowledge from the LTM, we perform supervised fine-tuning on a constructed dataset of [MATH] triplets derived from the LTM retrieval process. Each training instance consists of a question [MATH] , its multiple-choice context, and the corresponding retrieved answer [MATH] provided by the explicit memory module. The model is optimized to generate [MATH] conditioned on [MATH] , thereby learning to emulate the retrieval behavior of the LTM within its parametric space.
+
+Formally, the training objective minimizes the token-level cross-entropy loss between the generated sequence [MATH] and the target [MATH] :
+
+ [MATH] 
+
+(7)
+
+where [MATH] denotes the [MATH] -th token of the target sequence [MATH] , [MATH] represents its preceding tokens, and [MATH] are the current model parameters. This process embeds retrieved knowledge directly into the parameter space, serving as the parametric memory update mechanism.
+
+Dynamic Memory Expansion.
+
+Parametric memory is updated in coordination with the expansion of the
+explicit knowledge graph, serving as a compact and fast-access
+complement to retrieval-based memory rather than a sole long-term
+knowledge store. At each update step [MATH] , newly retrieved query–evidence
+pairs [MATH] derived from the explicit memory are used to perform a
+lightweight and localized fine-tuning step, yielding an updated
+parameter state:
+
+ [MATH] 
+
+(8)
+
+where [MATH] represents the gradient-based weight update induced by fine-tuning on newly accumulated data. This continual process enables the model to progressively encode new knowledge, ensuring that parametric memory evolves in synchrony with the explicit memory without requiring full retraining.
+
+4 Experiment
+
+4.1 Setups
+
+Model
+Method
+Answer Prediction (F1)
+
+Single Hop
+Multi-Hop
+Temporal
+Open Domain
+Overall
+
+Human
+Human Maharana et al. (2024)
+
+95.1
+85.5
+92.6
+75.4
+91.6
+
+Qwen2.5-7B-Instruct
+Vanilla
+29.3
+23.7
+8.7
+18.1
+23.3
+
+Full Context Terranova et al. (2025)
+
+10.6
+3.4
+3.7
+8.2
+7.7
+
+RAG Terranova et al. (2025)
+
+21.7
+8.1
+4.9
+14.5
+15.3
+
+A-Mem Terranova et al. (2025)
+
+12.7
+8.7
+6.3
+13.9
+10.7
+
+EpMem Terranova et al. (2025)
+
+17.6
+6.4
+10.0
+2.7
+13.0
+
+Mem0∗ Yan et al. (2025)
+
+25.0
+20.3
+33.2
+32.7
+26.3
+
+MemoryOS∗ Yan et al. (2025)
+
+29.6
+21.0
+26.3
+40.9
+28.0
+
+MemVerse
+40.3
+28.1
+24.2
+25.1
+33.8
+
+GPT-4o-mini
+Vanilla
+8.6
+19.0
+9.9
+13.7
+11.1
+
+Full Context Xu et al. (2025)
+
+40.4
+25.0
+18.4
+12.0
+31.2
+
+Claude-Mem Liu et al. (2026a)
+
+10.2
+24.5
+12.2
+21.5
+13.9
+
+A-Mem Xu et al. (2025)
+
+44.7
+27.0
+45.9
+12.1
+39.7
+
+MemGPT Xu et al. (2025)
+
+41.0
+26.7
+25.5
+9.2
+33.2
+
+Zep Chhikara et al. (2025)
+
+35.7
+19.4
+42.0
+49.6
+34.9
+
+LangMem Chhikara et al. (2025)
+
+35.5
+26.0
+30.8
+40.9
+33.1
+
+Mem0 Chhikara et al. (2025)
+
+38.7
+28.6
+48.9
+47.7
+39.6
+
+MemoryOS Kang et al. (2025)
+
+35.3
+41.2
+20.0
+48.6
+34.0
+
+SimpleMem Liu et al. (2026a)
+
+12.8
+30.0
+17.8
+31.2
+18.1
+
+Omni-SimpleMem Liu et al. (2026a)
+
+19.6
+54.4
+17.7
+58.8
+28.0
+
+MemVerse
+49.2
+46.1
+29.7
+30.8
+43.4
+
+GPT-5.1
+Claude-Mem∗ Liu et al. (2026a)
+
+17.1
+28.9
+26.4
+29.2
+22.0
+
+A-MEM∗ Liu et al. (2026a)
+
+16.4
+28.7
+24.6
+28.4
+21.1
+
+MemGPT∗ Liu et al. (2026a)
+
+16.5
+28.8
+24.9
+29.4
+21.3
+
+Mem0∗ Liu et al. (2026a)
+
+16.0
+29.2
+26.1
+29.8
+21.4
+
+SimpleMem∗ Liu et al. (2026a)
+
+17.8
+30.5
+27.2
+30.5
+22.9
+
+Omni-SimpleMem∗ Liu et al. (2026a)
+
+36.7
+59.8
+30.7
+67.6
+41.6
+
+MemVerse
+49.2
+35.6
+38.3
+26.7
+43.0
+
+GPT-3.5-turbo-16k
+Vanilla
+34.7
+32.5
+11.0
+14.4
+28.1
+
+RAG Maharana et al. (2024)
+
+44.3
+30.6
+41.9
+40.2
+41.0
+
+MemVerse
+69.1
+49.6
+53.1
+34.2
+60.0
+
+∗ Note: For methods marked with ∗, we observed discrepancies between the originally reported overall F1 scores and those computed using the official LoCoMo weighted evaluation protocol. We therefore recalculated the overall scores based on the subset distribution: Single-Hop / Multi-Hop / Temporal / Open-Domain = 841 / 282 / 321 / 96.
+
+Table 1: Performance comparison on the LoCoMo Benchmark. The Vanilla method represents the evaluation of models without any memory or context enhancement. All other comparative methods utilize data from their respective cited sources. Performance is measured by F1 scores across Single-Hop, Multi-Hop, Temporal, and Open-Domain categories. Higher values denote better performance; the best results are highlighted in blue bold, and the second-best results are marked in cyan.
+
+Evaluation Datasets.
+
+We evaluate the proposed method on four multimodal reasoning and memory benchmarks with diverse characteristics, including long-term conversational memory, science reasoning, and video-text understanding. Specifically, we use LoCoMo (Maharana et al., 2024), a long-horizon multimodal dialogue dataset with extended conversational sessions; LongMemEval (Wu et al., 2025), a large-scale benchmark containing 500 conversations designed for evaluating long-term memory processing capabilities; ScienceQA (Lu et al., 2022), a multimodal science reasoning benchmark; and MSR-VTT (Xu et al., 2016), a widely used video–text benchmark for cross-modal understanding and retrieval.
+
+Baselines.
+
+For long-context memory benchmarks including LoCoMo and LongMemEval, we compare against strong proprietary and open-source LLMs, including GPT-3.5-Turbo Brown et al. (2020), GPT-4o-mini Hurst et al. (2024), Qwen2.5-7B-Instruct Yang et al. (2025a), and GPT-5.1 Singh et al. (2026).
+We further compare with representative memory and retrieval frameworks, including MemoryBank Zhong et al. (2024), A-MEM Xu et al. (2025), EpMem Terranova et al. (2025), Mem0 Chhikara et al. (2025), MemoryOS Kang et al. (2025), MemGPT Packer et al. (2024), Zep Rasmussen et al. (2025), LangMem111https://langchain-ai.github.io/langmem/, LD-Agent Li et al. (2025), QRRetriever Zhang et al. (2025c), SimpleMem Liu et al. (2026b), Omni-SimpleMem Liu et al. (2026a).
+For ScienceQA, we compare against representative text-only and multimodal reasoning models, including CoT Lu et al. (2022), HoT-T5-Large Yao et al. (2023), and Chameleon Lu et al. (2023).
+For MSR-VTT, the comparative methods include InternVideo Wang et al. (2022b), UMT-L Li et al. (2023), VAST Chen et al. (2024), Clip4Clip Luo et al. (2022), ExCae Yang et al. (2025b), and CLIP Radford et al. (2021).
+All models are evaluated using their recommended settings and identical prompting protocols for fair comparison.
+Due to space constraints, only representative baselines are discussed here. Descriptions of additional baseline methods, together with implementation setups and optimization details, are provided in Appendix B.
+
+Implementation Details.
+
+For multimodal processing, images, audio, and sampled video frames are converted into textual chunks [MATH] using GPT-4o-mini and Whisper Radford et al. (2023), which are then mapped into a hierarchical knowledge graph [MATH] spanning core, semantic, and episodic memories Liu et al. (2025a). GPT-4o-mini manages both graph construction and retrieval across benchmarks under specialized settings: ScienceQA utilizes its training split for memory and parametric modules; LoCoMo and LongMemEval retain their session-based structures; and MSR-VTT operates in an unsupervised manner without accessing ground-truth text-video alignments. Our default backbone, Qwen2.5-7B, undergoes supervised fine-tuning via a causal language modeling objective using the “Question-Retrieved” format. Training is optimized using AdamW with a learning rate of [MATH] over a 2048 sequence length, utilizing linear warm-up, a 1.0 gradient clipping norm, and a single A100 (80G) GPU.
+
+4.2 Main Results
+
+LoCoMo
+
+The results in Table 1 demonstrate that MemVerse consistently achieves the state-of-the-art Overall F1 scores across all four evaluated backbones, validating its robustness across varied model scales.
+Notably, when paired with GPT-3.5-turbo-16k, MemVerse reaches a peak Overall F1 of 60.0, outperforming the RAG baseline by a large margin.
+Conversely, the relative improvements on Qwen2.5-7B-Instruct are more modest.
+This is primarily attributed to the inherent long-context reasoning constraints of smaller open-source architectures, which face difficulties in effectively prioritizing and integrating dense memory streams.
+
+A task-level breakdown reveals that MemVerse exhibits exceptional efficacy in factual grounding and temporal anchoring, establishing a new state-of-the-art in Single-Hop reasoning across all backbones and achieving strong performance in Temporal tasks.
+However, we also observe a performance bottleneck in broader Open Domain and highly complex Multi-Hop scenarios.
+A closer error analysis reveals that due to the massive volume and unstructured nature of open-domain history, our dense retrieval mechanism inevitably introduces irrelevant candidate memories.
+This semantic noise tends to distract and confuse the downstream generators, particularly when the model attempts to synthesize sparse evidence across multi-step reasoning chains.
+To mitigate this limitation, incorporating an explicit semantic reranker Meng et al. (2025) to filter out redundant candidates and prune context noise presents a highly promising future direction for further optimizing the framework.
+
+LongMemEval
+
+As evaluated on the LongMemEval benchmark (Table 2), MemVerse leverages its graph-based structural topology to achieve exceptionally efficient memory indexing and retrieval, securing a commanding lead with a Rec@5 of 89.8% and an NDCG@5 of 91.6%.
+While it delivers a highly competitive downstream accuracy of 68.4%, we observe a distinct performance divergence where the high retrieval recall does not fully translate into proportional answer accuracy.
+Our analysis attributes this bottleneck to the over-reasoning phenomenon, where the downstream generator over-interprets dense memory inputs and introduces spurious correlations.
+To validate this hypothesis, upgrading the downstream reader to the higher-capacity GPT-5.1 drives the final accuracy to a remarkable 77.0%.
+This substantial leap demonstrates that the core bottleneck resides in the reasoning capacity of the downstream reader rather than the quality of MemVerse’s memory pipeline, proving our framework’s capability to supply high-fidelity long-term context.
+
+Method
+
+Recall@5 [MATH] 
+
+Accuracy [MATH] 
+
+No History
+-
+0.0
+
+Long Context
+-
+57.4
+
+RAG
+62.4
+63.6
+
+MemoryBank
+58.6
+59.6
+
+LD-Agent
+56.8
+59.2
+
+A-Mem
+-
+55.4
+
+Mem0
+-
+65.0
+
+MemoryOS
+-
+58.0
+
+QRRetriever
+80.4
+66.7
+
+MemVerse
+89.8
+68.4
+
+Table 2: Comparison of memory method performance on the LongMemEval dataset. Part of the data is cited from Liu et al. (2026c).
+
+Multimodal Benchmarks.
+
+To verify the generalizability of MemVerse across diverse multimodal tasks, we evaluate its performance on both the ScienceQA benchmark for multimodal science reasoning and the MSR-VTT dataset for bidirectional video-text retrieval. As shown in Table 3 and Table 4, MemVerse consistently enhances foundational backbones, achieving substantial performance gains across both tasks.
+On ScienceQA, pairing MemVerse with GPT-4o-mini establishes a new state-of-the-art accuracy of 85.48%, notably outperforming the strong CoT (GPT-4) baseline by [MATH] and approaching human-level proficiency.
+
+Category
+Method
+Backbone
+
+Acc [MATH] 
+
+Baselines
+Human
+-
+88.40
+
+GPT-4
+-
+82.69
+
+LLM-CoT
+CoT (UnifiedQA)
+223M
+74.11
+
+CoT (GPT-4)
+1T+
+83.99
+
+Chameleon (ChatGPT)
+175B+
+79.93
+
+HoT-T5-Large
+738M
+83.38
+
+MemVerse
+Qwen2.5-7B
+7B
+75.62
+
+Qwen2.5-72B
+72B
+80.25
+
+GPT-4o-mini
+-
+85.48
+
+Table 3: Performance on ScienceQA. 
+
+On the highly competitive MSR-VTT retrieval benchmark, MemVerse demonstrates clear superiority over previous pre-trained foundation models and specialized ViT-based architectures. Specifically, it improves the text-to-video (T2V) R@1 to 90.4% and video-to-text (V2T) R@1 to 89.2%, surpassing the previous best-performing baseline ExCae by more than [MATH] .
+These results demonstrate that MemVerse’s structured memory framework effectively captures cross-modal alignments while supporting complex multi-step reasoning. Due to space constraints, more extensive comparative experiments and detailed task-level statistics are provided in Appendix D.
+
+Cat.
+Method
+T2V
+V2T
+
+R@1
+R@5
+R@1
+R@5
+
+Pre-trained
+InternVideo
+55.2
+79.6
+57.9
+79.2
+
+UMT-L
+58.8
+81.0
+58.6
+81.6
+
+VAST
+63.9
+84.3
+-
+-
+
+ViT
+Clip4Clip
+46.4
+72.1
+45.4
+73.4
+
+ExCae
+67.7
+92.7
+69.3
+92.5
+
+CLIP
+29.7
+48.9
+21.4
+38.6
+
+MemVerse
+GPT-4o-mini
+90.4
+95.6
+89.2
+92.7
+
+Table 4: Performance on MSR-VTT Retrieval. 
+
+4.3 Ablation Study
+
+Table 5 presents the ablation results on the LoCoMo benchmark. Vanilla models and those with only a sliding window (+Short-Term) underperform due to limited context, whereas independently integrating the parametric module (+Param) or the graph-based retrieval system (+Long-Term) substantially enhances results; for instance, +Long-Term improves the Overall F1 from [MATH] to [MATH] on GPT-4o-mini and from [MATH] to [MATH] on Qwen2.5-7B-Instruct. Combining both memory streams via our routing strategy (+Orchestrator) yields the optimal overall performance, reaching 43.4 and 33.8 F1 scores respectively. Although the orchestrator introduces slight trade-offs in Multi-Hop and Temporal tasks under the Qwen backbone compared to pure +Long-Term retrieval, the consistent improvements in overall scores validate that our hybrid memory approach effectively captures long-range dependencies beyond standard context windows.
+
+Method
+S-Hop
+M-Hop
+Temp.
+Open
+Over.
+
+GPT-4o-mini
+
+Vanilla
+8.6
+19.0
+9.9
+13.7
+11.1
+
++Short-Term
+11.1
+17.7
+8.9
+11.7
+11.9
+
++Param
+48.9
+28.7
+19.9
+11.7
+36.8
+
++Long-Term
+47.0
+40.8
+25.9
+22.5
+39.9
+
+MemVerse
+49.2
+46.1
+29.7
+30.8
+43.4
+
+Qwen2.5-7B-Ins.
+
+Vanilla
+29.3
+23.7
+8.7
+18.1
+23.3
+
++Short-Term
+27.2
+24.5
+10.2
+16.8
+22.5
+
++Param
+28.8
+24.2
+10.1
+19.2
+23.5
+
++Long-Term
+36.9
+29.1
+24.8
+22.7
+32.1
+
+MemVerse
+40.3
+28.1
+24.2
+25.1
+33.8
+
+Table 5: Ablation study on the LoCoMo dataset.
+
+4.4 Further Analysis
+
+Method
+S-Hop
+M-Hop
+Temp.
+Open
+Over.
+
+Flat RAG
+30.3
+27.3
+18.5
+19.3
+26.6
+
+MMKG-only
+47.0
+40.8
+25.9
+22.5
+39.9
+
+Table 6: Comparison between Flat RAG and MMKG-only under GPT-4o-mini.
+
+Benefits of Structured Graph Memory.
+
+To isolate the advantages of structured memory, we compare a Flat RAG vector store baseline against an MMKG-only configuration using GPT-4o-mini, as shown in Table 6. Compared with flat retrieval, MMKG-only achieves consistent improvements across all task categories, with particularly large gains in Multi-Hop and Temporal reasoning. These results demonstrate that hierarchical graph memory structures are significantly more effective than flat text retrieval for modeling complex dependencies.
+
+Component
+Metric
+Value
+
+Memory Extraction
+Total Time
+22.03 s
+
+Per 1k Tokens
+0.20 s
+
+MMKG Construction
+Total Time
+208.56 s
+
+Per Chunk
+13.03 s
+
+Per 1k Tokens
+16.94 s
+
+Parametric Training
+Total Time
+978.72 s
+
+Training Tokens
+453,841
+
+Per 1k Tokens
+2.16 s
+
+Table 7: Efficiency analysis of memory extraction, MMKG construction, and parametric memory distillation on the LoCoMo benchmark.
+
+Efficiency of Parametric Distillation.
+
+We provide a detailed breakdown of the computational cost for memory extraction, MMKG construction, and parametric memory distillation in Table 7. The results show that the overall pipeline remains computationally efficient, with memory extraction requiring only [MATH] s per 1k tokens and parametric memory training scaling at [MATH] s per 1k training tokens. Although the total training time is relatively longer, this is primarily due to multiple training epochs and the large amount of contextual training data, rather than inefficiency in the memory module itself.
+
+Knowledge Retention and Scalability.
+
+We investigate the periodic update strategy of parametric memory on the ScienceQA dataset using a grouped partitioning scheme to examine knowledge retention across intervals, with details in Appendix E. Furthermore, we evaluate MemVerse’s scalability by scaling the backbone from Qwen2.5-1.5B to 72B while keeping the Qwen2.5-7B-based memory module fixed, isolating the impact of model capacity on reasoning accuracy as discussed in Appendix F.
+
+5 Conclusion
+
+We introduced MemVerse, a model-agnostic, plug-and-play memory framework that brings AI agents closer to lifelong multimodal intelligence. MemVerse unifies fast parametric recall with slow, hierarchical retrieval-based memory, mirroring the complementary roles of intuition and deliberation. This dual-path design lets agents maintain recent context, transform raw multimodal experiences into structured knowledge, and retrieve information efficiently without unbounded memory growth.
+Across diverse multimodal tasks, MemVerse yields significant improvements in reasoning accuracy, stability, and long-horizon coherence. These results demonstrate that scalable memory, rather than ever-larger models, is the missing ingredient for continuous-learning agents. Looking ahead, we plan to explore more adaptive memory-control strategies and to deploy MemVerse in open-world environments across a variety of domains, fostering agents that learn, remember, and truly evolve.
+
+6 Limitations
+
+Although MemVerse demonstrates strong effectiveness on long-context memory and multimodal reasoning benchmarks, its current graph-based memory organization has so far been evaluated primarily under small- to medium-scale memory settings, as discussed in Section 4.4. When deployed in longer-term interactions, the memory graph may continue to expand, increasing retrieval and insertion overhead and potentially introducing noise from outdated memories. A promising direction is to dynamically partition memories into multiple temporal graphs, where new graphs are periodically initialized to prevent excessive node accumulation while preserving retrieval efficiency. Historical memories can then be accessed through temporal indexing over archived graphs when needed.
+
+References
+
+M. M. Abootorabi, A. Zobeiri, M. Dehghani, M. Mohammadkhani, B. Mohammadi, O. Ghahroodi, M. S. Baghshah, and E. Asgari (2025)
+Ask in any modality: a comprehensive survey on multimodal retrieval-augmented generation.
+
+In Findings of the Association for Computational Linguistics: ACL 2025, W. Che, J. Nabende, E. Shutova, and M. T. Pilehvar (Eds.),
+
+Vienna, Austria, pp. 16776–16809.
+
+External Links: Link,
+Document,
+ISBN 979-8-89176-256-5
+
+Cited by: §G.2,
+§2.2.
+
+T. Brown, B. Mann, N. Ryder, M. Subbiah, J. D. Kaplan, P. Dhariwal, A. Neelakantan, P. Shyam, G. Sastry, A. Askell, S. Agarwal, A. Herbert-Voss, G. Krueger, T. Henighan, R. Child, A. Ramesh, D. Ziegler, J. Wu, C. Winter, C. Hesse, M. Chen, E. Sigler, M. Litwin, S. Gray, B. Chess, J. Clark, C. Berner, S. McCandlish, A. Radford, I. Sutskever, and D. Amodei (2020)
+Language models are few-shot learners.
+
+In Advances in Neural Information Processing Systems, H. Larochelle, M. Ranzato, R. Hadsell, M.F. Balcan, and H. Lin (Eds.),
+
+Vol. 33, pp. 1877–1901.
+
+External Links: Link
+
+Cited by: §B.1,
+§4.1.
+
+B. Chen, C. Shu, E. Shareghi, N. Collier, K. Narasimhan, and S. Yao (2023)
+Fireact: toward language agent fine-tuning.
+
+arXiv preprint arXiv:2310.05915.
+
+Cited by: §G.1,
+§2.1.
+
+S. Chen, H. Li, Q. Wang, Z. Zhao, M. Sun, X. Zhu, and J. Liu (2024)
+Vast: a vision-audio-subtitle-text omni-modality foundation model and dataset.
+
+Advances in Neural Information Processing Systems 36.
+
+Cited by: §B.1,
+Table 9,
+§4.1.
+
+Z. Chen et al. (2024)
+Knowledge graphs meet multi-modal learning.
+
+Note: arXiv:2402.05391
+
+External Links: Link
+
+Cited by: §2.2.
+
+P. Chhikara, D. Khant, S. Aryan, T. Singh, and D. Yadav (2025)
+Mem0: building production-ready ai agents with scalable long-term memory.
+
+arXiv preprint arXiv:2504.19413.
+
+Cited by: §B.1,
+§G.1,
+§1,
+§2.1,
+§4.1,
+Table 1,
+Table 1,
+Table 1.
+
+Y. Choi, J. Park, J. Yoon, S. Kim, J. Jeon, and Y. Yu (2025)
+Zero-shot multimodal document retrieval via cross-modal question generation.
+
+In Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing, C. Christodoulopoulos, T. Chakraborty, C. Rose, and V. Peng (Eds.),
+
+Suzhou, China, pp. 26068–26083.
+
+External Links: Link,
+Document,
+ISBN 979-8-89176-332-6
+
+Cited by: §G.2,
+§2.2.
+
+I. J. Deary, L. Penke, and W. Johnson (2010)
+The neuroscience of human intelligence differences.
+
+Nature Reviews Neuroscience 11 (3), pp. 201–211.
+
+External Links: Document,
+Link
+
+Cited by: §1.
+
+Y. Deng, C. Ye, Z. Huang, M. D. Ma, Y. Kou, and W. Wang (2024)
+GraphVis: boosting llms with visual knowledge graph integration.
+
+In Advances in Neural Information Processing Systems, A. Globerson, L. Mackey, D. Belgrave, A. Fan, U. Paquet, J. Tomczak, and C. Zhang (Eds.),
+
+Vol. 37, pp. 67511–67534.
+
+External Links: Link
+
+Cited by: §B.1,
+Table 8.
+
+Y. Dong, Z. Liu, H. Sun, J. Yang, W. Hu, Y. Rao, and Z. Liu (2025)
+Insight-v: exploring long-chain visual reasoning with multimodal large language models.
+
+In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR),
+
+ pp. 9062–9072.
+
+Cited by: §1.
+
+J. St. B. T. Evans and K. E. Stanovich (2013)
+Dual-process theories of higher cognition: advancing the debate.
+
+Perspectives on Psychological Science 8 (3), pp. 223–241.
+
+Note: PMID: 26172965
+
+External Links: Document
+
+Cited by: §1.
+
+Y. Fan, X. Ma, R. Wu, Y. Du, J. Li, Z. Gao, and Q. Li (2025a)
+VideoAgent: a memory-augmented multimodal agent for video understanding.
+
+In Computer Vision – ECCV 2024, A. Leonardis, E. Ricci, S. Roth, O. Russakovsky, T. Sattler, and G. Varol (Eds.),
+
+Cham, pp. 75–92.
+
+External Links: ISBN 978-3-031-72670-5
+
+Cited by: §1.
+
+Z. Fan, L. Yun, M. Yan, Y. Wang, D. Guo, B. Mak, J. Kwok, and Y. R. Fung (2025b)
+End-to-end optimization for multimodal retrieval-augmented generation via reward backpropagation.
+
+In Findings of the Association for Computational Linguistics: EMNLP 2025, C. Christodoulopoulos, T. Chakraborty, C. Rose, and V. Peng (Eds.),
+
+Suzhou, China, pp. 443–466.
+
+External Links: Link,
+Document,
+ISBN 979-8-89176-335-7
+
+Cited by: §G.2,
+§2.2.
+
+Z. Gao, J. Liu, S. Chen, D. Chang, et al. (2021)
+Clip2tv: an empirical study on transformer-based methods for video-text retrieval.
+
+arXiv preprint arXiv:2111.05610 1 (2), pp. 6.
+
+Cited by: §B.1,
+Table 9.
+
+Z. GUO, L. Xia, Y. Yu, T. Ao, and C. Huang (2024)
+LightRAG: simple and fast retrieval-augmented generation.
+
+External Links: Link
+
+Cited by: §B.4.
+
+J. Huang, A. Sharma, S. Sun, L. Xia, D. Zhang, P. Pronin, J. Padmanabhan, G. Ottaviano, and L. Yang (2020)
+Embedding-based retrieval in facebook search.
+
+In Proceedings of the 26th ACM SIGKDD International Conference on Knowledge Discovery & Data Mining,
+
+KDD ’20, New York, NY, USA, pp. 2553–2561.
+
+External Links: ISBN 9781450379984,
+Link,
+Document
+
+Cited by: §1.
+
+A. Hurst, A. Lerer, A. P. Goucher, A. Perelman, A. Ramesh, A. Clark, A. Ostrow, A. Welihinda, A. Hayes, A. Radford, et al. (2024)
+Gpt-4o system card.
+
+arXiv preprint arXiv:2410.21276.
+
+Cited by: §B.1,
+§B.2,
+§4.1.
+
+C. Jiang, H. Liu, X. Yu, et al. (2023)
+Dual-modal attention-enhanced text-video retrieval with triplet partial margin contrastive learning.
+
+In ACM International Conference on Multimedia,
+
+ pp. 4626–4636.
+
+Cited by: §B.1,
+Table 9.
+
+D. Kahneman (2011)
+Thinking, fast and slow.
+
+ Farrar, Straus and Giroux, New York, NY.
+
+Cited by: §1.
+
+J. Kang, M. Ji, Z. Zhao, and T. Bai (2025)
+Memory os of ai agent.
+
+External Links: 2506.06326,
+Link
+
+Cited by: §B.1,
+§4.1,
+Table 1.
+
+L. Kong, X. Xu, J. Ren, W. Zhang, L. Pan, K. Chen, W. T. Ooi, and Z. Liu (2025)
+Multi-modal data-efficient 3d scene understanding for autonomous driving.
+
+IEEE Transactions on Pattern Analysis and Machine Intelligence 47 (5), pp. 3748–3765.
+
+External Links: Document
+
+Cited by: §1.
+
+H. Li, C. Yang, A. Zhang, Y. Deng, X. Wang, and T. Chua (2025)
+Hello again! LLM-powered personalized agent for long-term dialogue.
+
+In Proceedings of the 2025 Conference of the Nations of the Americas Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 1: Long Papers), L. Chiruzzo, A. Ritter, and L. Wang (Eds.),
+
+Albuquerque, New Mexico, pp. 5259–5276.
+
+External Links: Link,
+Document,
+ISBN 979-8-89176-189-6
+
+Cited by: §B.1,
+§4.1.
+
+J. Li, Y. Zhang, X. Yang, J. Qu, J. Xu, S. Yang, J. Ding, and E. C. Ngai (2026)
+OCR-memory: optical context retrieval for long-horizon agent memory.
+
+External Links: 2604.26622,
+Link
+
+Cited by: §G.1,
+§2.1.
+
+K. Li, Y. Wang, Y. Li, Y. Wang, Y. He, L. Wang, and Y. Qiao (2023)
+Unmasked teacher: towards training-efficient video foundation models.
+
+In IEEE/CVF International Conference on Computer Vision,
+
+ pp. 19948–19960.
+
+Cited by: §B.1,
+Table 9,
+§4.1.
+
+S. Lin, C. Lee, M. Shoeybi, J. Lin, B. Catanzaro, and W. Ping (2025)
+MM-embed: universal multimodal retrieval with multimodal llms.
+
+In International Conference on Learning Representations, Y. Yue, A. Garg, N. Peng, F. Sha, and R. Yu (Eds.),
+
+Vol. 2025, pp. 44215–44234.
+
+External Links: Link
+
+Cited by: §G.2,
+§2.2.
+
+F. Liu, C. Yu, W. Meng, and A. Chowdhury (2006)
+Effective keyword search in relational databases.
+
+In Proceedings of the 2006 ACM SIGMOD International Conference on Management of Data,
+
+SIGMOD ’06, New York, NY, USA, pp. 563–574.
+
+External Links: ISBN 1595934340,
+Link,
+Document
+
+Cited by: §1.
+
+H. Liu, C. Li, Q. Wu, and Y. J. Lee (2023)
+Visual instruction tuning.
+
+In Advances in Neural Information Processing Systems, A. Oh, T. Naumann, A. Globerson, K. Saenko, M. Hardt, and S. Levine (Eds.),
+
+Vol. 36, pp. 34892–34916.
+
+External Links: Link
+
+Cited by: Table 8.
+
+J. Liu, Z. Ling, S. Qiu, Y. Liu, S. Han, P. Xia, H. Tu, Z. Zheng, C. Xie, C. Fleming, M. Ding, and H. Yao (2026a)
+Omni-simplemem: autoresearch-guided discovery of lifelong multimodal agent memory.
+
+External Links: 2604.01007,
+Link
+
+Cited by: §B.1,
+§4.1,
+Table 1,
+Table 1,
+Table 1,
+Table 1,
+Table 1,
+Table 1,
+Table 1,
+Table 1,
+Table 1.
+
+J. Liu, Y. Su, P. Xia, S. Han, Z. Zheng, C. Xie, M. Ding, and H. Yao (2026b)
+SimpleMem: efficient lifelong memory for llm agents.
+
+External Links: 2601.02553,
+Link
+
+Cited by: §B.1,
+§G.1,
+§2.1,
+§4.1.
+
+J. Liu, S. Meng, Y. Gao, S. Mao, P. Cai, G. Yan, Y. Chen, Z. Bian, D. Wang, and B. Shi (2025a)
+Aligning vision to language: annotation-free multimodal knowledge graph construction for enhanced llms reasoning.
+
+In Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV),
+
+ pp. 981–992.
+
+Cited by: §B.1,
+§B.2,
+§B.4,
+Table 8,
+Table 8,
+Table 8,
+Table 8,
+§G.2,
+§1,
+§2.2,
+§3.1,
+§4.1.
+
+J. Liu, Y. Sun, W. Cheng, H. Lei, Y. Li, Y. Chen, and D. Wang (2026c)
+Hierarchical memory orchestration for personalized persistent agents.
+
+External Links: 2604.01670,
+Link
+
+Cited by: Table 2.
+
+P. Liu, X. Liu, R. Yao, J. Liu, S. Meng, D. Wang, and J. Ma (2025b)
+HM-rag: hierarchical multi-agent multimodal retrieval augmented generation.
+
+In Proceedings of the 33rd ACM International Conference on Multimedia,
+
+MM ’25, New York, NY, USA, pp. 2781–2790.
+
+External Links: ISBN 9798400720352,
+Link,
+Document
+
+Cited by: §1.
+
+Y. Liu, P. Xiong, L. Xu, et al. (2022)
+TS2-net: token shift and selection transformer for text-video retrieval.
+
+In European Conference on Computer Vision,
+
+ pp. 319–335.
+
+Cited by: §B.1,
+Table 9.
+
+P. Lu, S. Mishra, T. Xia, L. Qiu, K. Chang, S. Zhu, O. Tafjord, P. Clark, and A. Kalyan (2022)
+Learn to explain: multimodal reasoning via thought chains for science question answering.
+
+In Advances in Neural Information Processing Systems, S. Koyejo, S. Mohamed, A. Agarwal, D. Belgrave, K. Cho, and A. Oh (Eds.),
+
+Vol. 35, pp. 2507–2521.
+
+External Links: Link
+
+Cited by: Appendix A,
+§B.1,
+Table 8,
+Table 8,
+Table 8,
+§4.1,
+§4.1.
+
+P. Lu, B. Peng, H. Cheng, M. Galley, K. Chang, Y. N. Wu, S. Zhu, and J. Gao (2023)
+Chameleon: plug-and-play compositional reasoning with large language models.
+
+In Advances in Neural Information Processing Systems, A. Oh, T. Naumann, A. Globerson, K. Saenko, M. Hardt, and S. Levine (Eds.),
+
+Vol. 36, pp. 43447–43478.
+
+External Links: Link
+
+Cited by: §B.1,
+Table 8,
+Table 8,
+§4.1.
+
+G. Luo, Y. Zhou, T. Ren, S. Chen, X. Sun, and R. Ji (2023)
+Cheap and quick: efficient vision-language instruction tuning for large language models.
+
+In Advances in Neural Information Processing Systems, A. Oh, T. Naumann, A. Globerson, K. Saenko, M. Hardt, and S. Levine (Eds.),
+
+Vol. 36, pp. 29615–29627.
+
+External Links: Link
+
+Cited by: §B.1.
+
+H. Luo, L. Ji, M. Zhong, Y. Chen, et al. (2022)
+Clip4clip: an empirical study of clip for end to end video clip retrieval and captioning.
+
+Neurocomputing 508, pp. 293–304.
+
+Cited by: §B.1,
+Table 9,
+§4.1.
+
+W. Luo, Z. Hu, X. Wang, Z. Yu, H. Zhang, and Z. Huang (2026)
+Utility-oriented visual evidence selection for multimodal retrieval-augmented generation.
+
+External Links: 2605.13277,
+Link
+
+Cited by: §G.2,
+§2.2.
+
+Y. Ma, G. Xu, X. Sun, et al. (2022)
+X-clip: end-to-end multi-grained contrastive learning for video-text retrieval.
+
+In ACM International Conference on Multimedia,
+
+ pp. 638–647.
+
+Cited by: §B.1,
+Table 9.
+
+A. Maharana, D. Lee, S. Tulyakov, M. Bansal, F. Barbieri, and Y. Fang (2024)
+Evaluating very long-term conversational memory of llm agents.
+
+arXiv preprint arXiv:2402.17753.
+
+Cited by: Appendix A,
+§4.1,
+Table 1,
+Table 1.
+
+J. L. McClelland, B. L. McNaughton, and R. C. O’Reilly (1995)
+Why there are complementary learning systems in the hippocampus and neocortex: insights from the successes and failures of connectionist models of learning and memory.
+
+Psychological Review 102 (3), pp. 419–457.
+
+External Links: Document
+
+Cited by: §1.
+
+S. Meng, J. Liu, Y. Chen, S. Mao, P. Cai, G. Yan, B. Shi, and D. Wang (2025)
+From ranking to selection: a simple but efficient dynamic passage selector for retrieval augmented generation.
+
+arXiv preprint arXiv:2508.09497.
+
+Cited by: §4.2.
+
+C. Mitra, B. Huang, T. Darrell, and R. Herzig (2024)
+Compositional chain-of-thought prompting for large multimodal models.
+
+In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR),
+
+ pp. 14420–14431.
+
+Cited by: §B.1,
+Table 8.
+
+C. Packer, S. Wooders, K. Lin, V. Fang, S. G. Patil, I. Stoica, and J. E. Gonzalez (2024)
+MemGPT: towards llms as operating systems.
+
+External Links: 2310.08560,
+Link
+
+Cited by: §B.1,
+§G.1,
+§2.1,
+§4.1.
+
+A. Pritzel, B. Uria, S. Srinivasan, A. Puigdomènech Badia, O. Vinyals, et al. (2017)
+Neural episodic control.
+
+In Proceedings of the 34th International Conference on Machine Learning (ICML),
+
+ pp. 2827–2836.
+
+External Links: Link
+
+Cited by: §1.
+
+H. Qian, Z. Liu, P. Zhang, K. Mao, D. Lian, Z. Dou, and T. Huang (2025)
+MemoRAG: boosting long context processing with global memory-enhanced retrieval augmentation.
+
+In Proceedings of the ACM on Web Conference 2025,
+
+WWW ’25, New York, NY, USA, pp. 2366–2377.
+
+External Links: ISBN 9798400712746,
+Link,
+Document
+
+Cited by: §G.1,
+§2.1.
+
+A. Radford, J. W. Kim, C. Hallacy, A. Ramesh, G. Goh, S. Agarwal, et al. (2021)
+Learning transferable visual models from natural language supervision.
+
+arXiv:2103.00020.
+
+External Links: Link
+
+Cited by: §B.1,
+Table 9,
+§4.1.
+
+A. Radford, J. W. Kim, T. Xu, G. Brockman, C. Mcleavey, and I. Sutskever (2023)
+Robust speech recognition via large-scale weak supervision.
+
+In Proceedings of the 40th International Conference on Machine Learning, A. Krause, E. Brunskill, K. Cho, B. Engelhardt, S. Sabato, and J. Scarlett (Eds.),
+
+Proceedings of Machine Learning Research, Vol. 202, pp. 28492–28518.
+
+External Links: Link
+
+Cited by: §B.2,
+§4.1.
+
+P. Rasmussen, P. Paliychuk, T. Beauvais, J. Ryan, and D. Chalef (2025)
+Zep: a temporal knowledge graph architecture for agent memory.
+
+arXiv preprint arXiv:2501.13956.
+
+Cited by: §B.1,
+§4.1.
+
+D. Shah, M. Sanikommu, Yash, et al. (2025)
+SuperMemory.
+
+Note: https://supermemory.ai/Accessed: 2025-11-05
+
+Cited by: §G.1,
+§2.1.
+
+A. Singh, A. Fry, A. Perelman, A. Tart, A. Ganesh, A. El-Kishky, A. McLaughlin, A. Low, A. Ostrow, A. Ananthram, et al. (2026)
+OpenAI gpt-5 system card.
+
+External Links: 2601.03267,
+Link
+
+Cited by: §B.1,
+§4.1.
+
+Y. Su, D. Yang, S. Yao, and T. Yu (2024)
+Language agents: foundations, prospects, and risks.
+
+In Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing: Tutorial Abstracts, J. Li and F. Liu (Eds.),
+
+Miami, Florida, USA, pp. 17–24.
+
+External Links: Link,
+Document
+
+Cited by: §1.
+
+Y. Tai, J. Yang, X. Liu, and C. Xu (2017)
+MemNet: a persistent memory network for image restoration.
+
+In Proceedings of the IEEE International Conference on Computer Vision (ICCV),
+
+Cited by: §1.
+
+A. Terranova, B. Ross, and A. Birch (2025)
+Evaluating long-term memory for long-context question answering.
+
+arXiv preprint arXiv:2510.23730.
+
+Cited by: §B.1,
+§4.1,
+Table 1,
+Table 1,
+Table 1,
+Table 1.
+
+K. Tian, R. Zhao, Z. Xin, B. Lan, and X. Li (2024)
+Holistic features are almost sufficient for text-to-video retrieval.
+
+In CVPR,
+
+ pp. 17138–17147.
+
+Cited by: §B.1,
+Table 9.
+
+Q. Wang, Y. Zhang, Y. Zheng, P. Pan, and X. Hua (2022a)
+Disentangled representation learning for text-video retrieval.
+
+arXiv preprint arXiv:2203.07111.
+
+Cited by: §B.1,
+Table 9.
+
+T. Wang, F. Li, L. Zhu, J. Li, Z. Zhang, and H. T. Shen (2024a)
+Cross-modal retrieval: a systematic review of methods and future directions.
+
+Proceedings of the IEEE 112 (11), pp. 1716–1754.
+
+External Links: Document
+
+Cited by: §G.2,
+§2.2.
+
+X. Wang, X. Yang, Y. Xu, Y. Wu, Z. Li, and N. Zhao (2025a)
+AffordBot: 3d fine-grained embodied reasoning via multimodal large language models.
+
+In The Thirty-ninth Annual Conference on Neural Information Processing Systems,
+
+External Links: Link
+
+Cited by: §1.
+
+Y. Wang, K. Li, Y. Li, et al. (2022b)
+Internvideo: general video foundation models via generative and discriminative learning.
+
+arXiv preprint arXiv:2212.03191.
+
+Cited by: §B.1,
+Table 9,
+§4.1.
+
+Y. Wang and X. Chen (2025)
+Mirix: multi-agent memory system for llm-based agents.
+
+arXiv preprint arXiv:2507.07957.
+
+Cited by: §1,
+§1.
+
+Y. Wang, Y. Gao, X. Chen, H. Jiang, S. Li, J. Yang, Q. Yin, Z. Li, X. Li, B. Yin, et al. (2024b)
+Memoryllm: towards self-updatable large language models.
+
+arXiv preprint arXiv:2402.04624.
+
+Cited by: §G.1,
+§2.1.
+
+Z. Z. Wang, J. Mao, D. Fried, and G. Neubig (2025b)
+Agent workflow memory.
+
+In Forty-second International Conference on Machine Learning,
+
+External Links: Link
+
+Cited by: §1.
+
+C. Wu, Y. Li, K. Mangalam, H. Fan, B. Xiong, J. Malik, and C. Feichtenhofer (2022)
+MeMViT: memory-augmented multiscale vision transformer for efficient long-term video recognition.
+
+In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR),
+
+ pp. 13587–13597.
+
+Cited by: §1.
+
+D. Wu, H. Wang, W. Yu, Y. Zhang, K. Chang, and D. Yu (2025)
+LongMemEval: benchmarking chat assistants on long-term interactive memory.
+
+In The Thirteenth International Conference on Learning Representations,
+
+External Links: Link
+
+Cited by: Appendix A,
+Appendix A,
+§4.1.
+
+W. Wu, X. Wang, H. Luo, J. Wang, Y. Yang, and W. Ouyang (2024)
+Cap4Video++: enhancing video understanding with auxiliary captions.
+
+TPAMI, pp. 1–15.
+
+Cited by: §B.1,
+Table 9.
+
+X. Xiao, Y. Zhang, X. Li, T. Wang, X. Wang, Y. Wei, J. Hamm, and M. Xu (2025)
+Visual instance-aware prompt tuning.
+
+Proceedings of the 33rd ACM International Conference on Multimedia.
+
+External Links: Link
+
+Cited by: §1.
+
+Z. Xiao, D. Zhang, Y. Wu, L. Xu, Y. J. Wang, X. Han, X. Fu, T. Zhong, J. Zeng, M. Song, and G. Chen (2024)
+Chain-of-experts: when LLMs meet complex operations research problems.
+
+In The Twelfth International Conference on Learning Representations,
+
+External Links: Link
+
+Cited by: §B.2.
+
+C. Xie, B. Wang, F. Kong, J. Li, D. Liang, G. Zhang, D. Leng, and Y. Yin (2025)
+FG-CLIP: fine-grained visual and textual alignment.
+
+In Proceedings of the 42nd International Conference on Machine Learning, A. Singh, M. Fazel, D. Hsu, S. Lacoste-Julien, F. Berkenkamp, T. Maharaj, K. Wagstaff, and J. Zhu (Eds.),
+
+Proceedings of Machine Learning Research, Vol. 267, pp. 68777–68793.
+
+External Links: Link
+
+Cited by: §3.1.
+
+H. Xu, Q. Ye, M. Yan, Y. Shi, J. Ye, Y. Xu, C. Li, B. Bi, et al. (2023)
+Mplug-2: a modularized multi-modal foundation model across text, image and video.
+
+In International Conference on Machine Learning,
+
+ pp. 38728–38748.
+
+Cited by: §B.1,
+Table 9.
+
+J. Xu, T. Mei, T. Yao, and Y. Rui (2016)
+MSR-vtt: a large video description dataset for bridging video and language.
+
+In Proceedings of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR),
+
+Cited by: Appendix A,
+§4.1.
+
+W. Xu, Z. Liang, K. Mei, H. Gao, J. Tan, and Y. Zhang (2025)
+A-mem: agentic memory for llm agents.
+
+External Links: 2502.12110,
+Link
+
+Cited by: §B.1,
+§4.1,
+Table 1,
+Table 1,
+Table 1.
+
+H. Xue, Y. Sun, B. Liu, J. Fu, R. Song, H. Li, and J. Luo (2023)
+Clip-vip: adapting pre-trained image-text model to video-language representation alignment.
+
+In International Conference on Learning Representation,
+
+Cited by: §B.1,
+Table 9.
+
+S. Yan, X. Yang, Z. Huang, E. Nie, Z. Ding, Z. Li, X. Ma, K. Kersting, J. Z. Pan, H. Schütze, et al. (2025)
+Memory-r1: enhancing large language model agents to manage and utilize memories via reinforcement learning.
+
+arXiv preprint arXiv:2508.19828.
+
+Cited by: Table 1,
+Table 1.
+
+A. Yang, A. Li, B. Yang, B. Zhang, B. Hui, B. Zheng, B. Yu, C. Gao, C. Huang, C. Lv, et al. (2025a)
+Qwen3 technical report.
+
+arXiv preprint arXiv:2505.09388.
+
+Cited by: §B.1,
+§4.1.
+
+B. Yang, J. Chen, W. Li, W. Yao, and Y. Zhou (2025b)
+Expertized caption auto-enhancement for video-text retrieval.
+
+arXiv preprint arXiv:2502.02885.
+
+Cited by: §B.1,
+Table 9,
+§4.1.
+
+X. Yang, W. Wu, S. Feng, M. Wang, D. Wang, Y. Li, Q. Sun, Y. Zhang, X. Fu, and S. Poria (2023)
+Mm-bigbench: evaluating multimodal models on multimodal content comprehension tasks.
+
+arXiv preprint arXiv:2310.09036.
+
+Cited by: Table 8,
+Table 8.
+
+F. Yao, C. Tian, J. Liu, Z. Zhang, Q. Liu, L. Jin, S. Li, X. Li, and X. Sun (2023)
+Thinking like an expert:multimodal hypergraph-of-thought (hot) reasoning to boost foundation modals.
+
+External Links: 2308.06207,
+Link
+
+Cited by: §B.1,
+Table 8,
+§4.1.
+
+J. Yao, S. Liu, Y. Wang, L. Mei, B. Bi, Y. Ge, Z. Li, and X. Cheng (2025a)
+Who is in the spotlight: the hidden bias undermining multimodal retrieval-augmented generation.
+
+In Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing, C. Christodoulopoulos, T. Chakraborty, C. Rose, and V. Peng (Eds.),
+
+Suzhou, China, pp. 15183–15193.
+
+External Links: Link,
+Document,
+ISBN 979-8-89176-332-6
+
+Cited by: §3.1.
+
+J. Yao, S. Liu, Y. Wang, L. Mei, B. Bi, Y. Ge, Z. Li, and X. Cheng (2025b)
+Who is in the spotlight: the hidden bias undermining multimodal retrieval-augmented generation.
+
+In Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing, C. Christodoulopoulos, T. Chakraborty, C. Rose, and V. Peng (Eds.),
+
+Suzhou, China, pp. 15183–15193.
+
+External Links: Link,
+Document,
+ISBN 979-8-89176-332-6
+
+Cited by: §G.2,
+§2.2.
+
+D. Yin, F. Brahman, A. Ravichander, K. Chandu, K. Chang, Y. Choi, and B. Y. Lin (2024)
+Agent lumos: unified and modular training for open-source language agents.
+
+In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), L. Ku, A. Martins, and V. Srikumar (Eds.),
+
+Bangkok, Thailand, pp. 12380–12403.
+
+External Links: Link,
+Document
+
+Cited by: §G.1,
+§2.1.
+
+H. Yu, T. Chen, J. Feng, J. Chen, W. Dai, Q. Yu, Y. Zhang, W. Ma, J. Liu, M. Wang, et al. (2025)
+MemAgent: reshaping long-context llm with multi-conv rl-based memory agent.
+
+arXiv preprint arXiv:2507.02259.
+
+Cited by: §G.1,
+§2.1.
+
+C. Zhang, H. Zhang, S. Wu, D. Wu, T. Xu, X. Zhao, Y. Gao, Y. Hu, and E. Chen (2025a)
+NoteLLM-2: multimodal large representation models for recommendation.
+
+In Proceedings of the 31st ACM SIGKDD Conference on Knowledge Discovery and Data Mining V.1,
+
+KDD ’25, New York, NY, USA, pp. 2815–2826.
+
+External Links: ISBN 9798400712456,
+Link,
+Document
+
+Cited by: §1.
+
+G. Zhang, M. Fu, and S. Yan (2025b)
+MemGen: weaving generative latent memory for self-evolving agents.
+
+arXiv preprint arXiv:2509.24704.
+
+Cited by: §G.1,
+§2.1.
+
+W. Zhang, F. Yin, H. Yen, D. Chen, and X. Ye (2025c)
+Query-focused retrieval heads improve long-context reasoning and re-ranking.
+
+In Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing, C. Christodoulopoulos, T. Chakraborty, C. Rose, and V. Peng (Eds.),
+
+Suzhou, China, pp. 23791–23805.
+
+External Links: Link,
+Document,
+ISBN 979-8-89176-332-6
+
+Cited by: §B.1,
+§4.1.
+
+Z. Zhang, Q. Dai, X. Bo, C. Ma, R. Li, X. Chen, J. Zhu, Z. Dong, and J. Wen (2025d)
+A survey on the memory mechanism of large language model-based agents.
+
+ACM Trans. Inf. Syst. 43 (6).
+
+External Links: ISSN 1046-8188,
+Link,
+Document
+
+Cited by: §G.1,
+§1,
+§2.1.
+
+G. Zheng, B. Yang, J. Tang, H. Zhou, and S. Yang (2023)
+DDCoT: duty-distinct chain-of-thought prompting for multimodal reasoning in language models.
+
+In Advances in Neural Information Processing Systems, A. Oh, T. Naumann, A. Globerson, K. Saenko, M. Hardt, and S. Levine (Eds.),
+
+Vol. 36, pp. 5168–5191.
+
+External Links: Link
+
+Cited by: §B.1,
+Table 8.
+
+W. Zhong, L. Guo, Q. Gao, H. Ye, and Y. Wang (2024)
+MemoryBank: enhancing large language models with long-term memory.
+
+Proceedings of the AAAI Conference on Artificial Intelligence 38 (17), pp. 19724–19731.
+
+External Links: Link,
+Document
+
+Cited by: §B.1,
+§G.1,
+§2.1,
+§4.1.
+
+J. Zhou, Y. Xiong, Z. Liu, Z. Liu, S. Xiao, Y. Wang, B. Zhao, C. J. Zhang, and D. Lian (2025)
+MegaPairs: massive data synthesis for universal multimodal retrieval.
+
+In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers), W. Che, J. Nabende, E. Shutova, and M. T. Pilehvar (Eds.),
+
+Vienna, Austria, pp. 19076–19095.
+
+External Links: Link,
+Document,
+ISBN 979-8-89176-251-0
+
+Cited by: §G.2,
+§2.2.
+
+Y. Zhou, X. Guo, B. Bayar, and S. H. Sengamedu (2026)
+Amory: building coherent narrative-driven agent memory through agentic reasoning.
+
+In Proceedings of the 19th Conference of the European Chapter of the Association for Computational Linguistics (Volume 1: Long Papers), V. Demberg, K. Inui, and L. Marquez (Eds.),
+
+Rabat, Morocco, pp. 3926–3938.
+
+External Links: Link,
+Document,
+ISBN 979-8-89176-380-7
+
+Cited by: §G.1,
+§2.1.
+
+X. Zhu, Z. Li, X. Wang, X. Jiang, P. Sun, et al. (2022)
+Multi-modal knowledge graph construction and application.
+
+arXiv:2202.05786.
+
+External Links: Link
+
+Cited by: §2.2.
+
+Appendix A Datasets
+
+LoCoMo (Maharana et al., 2024).
+
+LoCoMo222https://github.com/snap-research/locomo is a benchmark for long-term multimodal dialogue understanding. It consists of 10 high-quality dialogues, each spanning up to 32 sessions, with an average of 600 turns and 16,618 tokens per conversation. The dialogues are generated by LLM-based agents guided by unique personas and temporal event graphs, resulting in coherent and contextually rich conversations over long horizons. Each dialogue supports image sharing and reaction annotations, providing a combination of textual and visual modalities. LoCoMo emphasizes temporal reasoning, persona consistency, and multimodal grounding over extended interactions, making it a particularly demanding benchmark for models that must maintain context and interpret visual cues over hundreds of turns.
+
+LongMemEval (Wu et al., 2025).
+
+LongMemEval is a benchmark proposed by Wu et al. (Wu et al., 2025) for evaluating long-term memory capabilities in LLM-based conversational assistants. It is designed to assess whether models can effectively store, retrieve, update, and reason over information across long and multi-session interactions.
+The benchmark evaluates several key memory abilities, including:
+
+• 
+
+Information Extraction: extracting salient facts from historical conversations;
+
+• 
+
+Multi-session Reasoning: reasoning across multiple dialogue sessions;
+
+• 
+
+Temporal Reasoning: understanding temporal relations and state changes;
+
+• 
+
+Knowledge Updates: handling user information updates and overwriting outdated facts;
+
+• 
+
+Abstention: refusing to answer when the required information is absent.
+
+LongMemEval contains hundreds of manually curated questions embedded in realistic multi-session chat histories with very long contexts, making it substantially more challenging than traditional short-context benchmarks. The benchmark also studies memory system designs such as indexing, retrieval, and memory-aware query expansion for improving long-context conversational QA performance.
+Experimental results show that even state-of-the-art long-context LLMs and commercial conversational assistants exhibit significant performance degradation in long-term memory scenarios, highlighting the limitations of current memory mechanisms in persistent conversational settings.
+
+ScienceQA (Lu et al., 2022).
+
+ScienceQA333https://github.com/lupantech/ScienceQA is a multimodal dataset designed for science question answering, containing 21,208 questions across physics, chemistry, and biology domains. Approximately 48.7% of instances include images, such as diagrams, charts, and illustrations, which require models to perform cross-modal reasoning between textual descriptions and visual content. Each question is multiple-choice with four candidate answers. In addition to images, ScienceQA provides image captions to facilitate reasoning for text-only models, allowing fair comparisons between unimodal and multimodal approaches. The dataset is particularly challenging because visual content often conveys critical information that is not explicitly described in the question text, necessitating integrated visual–textual comprehension.
+
+MSR-VTT (Xu et al., 2016).
+
+MSR-VTT444https://www.microsoft.com/en-us/research/publication/msr-vtt-large-video-description-dataset-bridging-video-language-supplementary-material/ is a large-scale video–text dataset widely used for video understanding and cross-modal retrieval. It contains 10,000 YouTube video clips spanning 20 diverse categories such as sports, music, and cooking. Each video is paired with 20 human-annotated captions, resulting in 200K video–sentence pairs. Videos vary in duration, visual complexity, and motion patterns, posing challenges for models in temporal alignment, action recognition, and semantic grounding of dynamic visual content. MSR-VTT is commonly used to benchmark video–text retrieval, captioning, and cross-modal reasoning capabilities, requiring models to integrate spatiotemporal cues from videos with natural-language semantics.
+
+Collectively, these datasets cover diverse multimodal reasoning scenarios: LoCoMo and LongMemEval evaluate long-term conversational context and persona reasoning, ScienceQA emphasizes scientific diagram comprehension, and MSR-VTT tests video–text alignment and dynamic visual understanding. They provide a comprehensive evaluation suite for models capable of integrating visual and textual information across different temporal and semantic scales.
+
+Example instances from each dataset are shown in Figures 3–5, illustrating the typical content and modalities of LoCoMo, ScienceQA, and MSR-VTT.
+
+Question: Which of these states is farthest north?
+
+Choices:
+
+• 
+
+Nebraska
+
+• 
+
+South Carolina
+
+• 
+
+Oklahoma
+
+• 
+
+West Virginia
+
+Figure 3: An example instance from the ScienceQA dataset, showing a question with a corresponding diagram.
+
+Speaker: Jolene
+
+BLIP Caption: a photo of a room with a bench and a window
+
+Query: serene yoga studio windows natural light
+
+Dialogue ID: D1:6
+
+Text:
+Sorry about your loss, Deb. My mother also passed away last year.
+This is my room in her house; I also have many memories there.
+Is there anything special about it you remember?
+
+Figure 4: A representative visual-text dialogue snippet from the LoCoMo dataset. The figure shows the shared image along with its associated caption, speaker metadata, query, and conversational text.
+
+Figure 5: An example frame from the MSR-VTT dataset, paired with its corresponding caption.
+
+Appendix B Implementation Details
+
+B.1 Baselines
+
+For long-context memory benchmarks including LoCoMo and LongMemEval, we compare against strong proprietary and open-source LLMs, including GPT-3.5-Turbo Brown et al. (2020), GPT-4o-mini Hurst et al. (2024), Qwen2.5-7B-Instruct Yang et al. (2025a), and GPT-5.1 Singh et al. (2026).
+We further compare with representative memory and retrieval frameworks, including MemoryBank Zhong et al. (2024), A-MEM Xu et al. (2025), EpMem Terranova et al. (2025), Mem0 Chhikara et al. (2025), MemoryOS Kang et al. (2025), MemGPT Packer et al. (2024), Zep Rasmussen et al. (2025), LangMem555https://langchain-ai.github.io/langmem/, LD-Agent Li et al. (2025), QRRetriever Zhang et al. (2025c), SimpleMem Liu et al. (2026b), Omni-SimpleMem Liu et al. (2026a).
+For ScienceQA, we compare models across general-domain reasoning in zero- and few-shot settings, covering both text-only and multimodal paradigms.
+Specifically, text-based LLMs include GPT Model Lu et al. (2022), CoT Lu et al. (2022), HoT-T5-Large Yao et al. (2023) and DDCoT Zheng et al. (2023), while multimodal VLMs encompass, LaVIN Luo et al. (2023), BLIP-2, CCOT Mitra et al. (2024), and GraphVis Deng et al. (2024).
+We also include the tool-augmented VLM Chameleon Lu et al. (2023) and the RAG-enhanced model VaLiK Liu et al. (2025a) as strong multimodal reasoning baselines.
+For LoCoMo, we include GPT-3.5-Turbo Brown et al. (2020), GPT-4o-mini Hurst et al. (2024), and Qwen2.5-7B-Instruct Yang et al. (2025a), covering strong proprietary and open-source models with robust reasoning abilities. We conduct a comprehensive comparison against several state-of-the-art memory-augmented frameworks, including A-Mem Xu et al. (2025), EpMem Terranova et al. (2025), Mem0 Chhikara et al. (2025), MemoryOS Kang et al. (2025), MemGPT Packer et al. (2024), Zep Rasmussen et al. (2025), and LangMem666https://langchain-ai.github.io/langmem/. All models are tested under identical prompting and evaluation protocols to ensure fair cross-modal comparison.
+For MSR-VTT, We compare our approach with a comprehensive set of representative methods, including InternVideo Wang et al. (2022b), UMT-L Li et al. (2023), CLIP-VIP Xue et al. (2023), mPLUG-2 Xu et al. (2023), VAST Chen et al. (2024), CLIP2TV Gao et al. (2021), DRL Wang et al. (2022a), TS2-Net Liu et al. (2022), CLIP4Clip Luo et al. (2022), X-CLIP Ma et al. (2022), DMAE Jiang et al. (2023), Cap4Video++ Wu et al. (2024), TeachClip Tian et al. (2024), ExCae Yang et al. (2025b) and the CLIP Radford et al. (2021) baseline. Our baseline uses only the CLIP text encoder, which yields an extremely lightweight model compared with video based architectures.
+
+B.2 Multimodal Preprocessing
+
+For all experiments, we convert multimodal inputs, including images, audio, and videos, into unified textual representations. Images are captioned using GPT-4o-mini Hurst et al. (2024); audio is transcribed via Whisper Radford et al. (2023); videos are either uniformly sampled into frames and captioned with a VLM. Each resulting text segment is treated as an independent chunk.
+
+Following prior work on multimodal knowledge grounding Liu et al. (2025a), we additionally enrich each chunk using the CoE principle Xiao et al. (2024), which injects contextual, observational, and explanatory information where appropriate. This enriches the downstream memory extraction and improves knowledge completeness.
+
+B.3 Memory Extraction Prompts
+
+We use a unified prompting pipeline to convert the textualized multimodal chunks, together with the original textual data, into three forms of memory: core, semantic, and episodic. The templates used for LLM extraction shown in Tables 12–14.
+These extracted memories constitute the parameterized memory corpus used during downstream retrieval and reasoning.
+
+B.4 Knowledge Graph Construction
+
+We then apply an LLM-based entity and relation extraction step to convert each memory into a structured MMKG Liu et al. (2025a). Among several existing frameworks, we draw inspiration from LightRAG GUO et al. (2024) due to its robustness and scalability in similar settings. Accordingly, we adopt a graph construction strategy akin to theirs, creating one graph per memory instance. This decoupled design improves scalability: graph insertion remains efficient as each graph stays relatively small, and retrieval avoids the bottlenecks typically observed in monolithic, large-scale knowledge graphs.
+
+B.5 Training Details
+
+We build MMKGs from the training split of ScienceQA, the session-level dialogues of LoCoMo, and the full MSR-VTT dataset (excluding its labels), all of which serve as the basis for parameterized memory generation. Qwen2.5-7B is used as the backbone language model for supervised fine-tuning. The objective is to encode the multimodal knowledge distilled from ScienceQA, LoCoMo, and MSR-VTT directly into the model parameters.
+
+Training follows the causal language modeling paradigm. Each training example is constructed as a Question-Retrieved pair, and the loss is applied only to the output segment. Key hyperparameters include: sequence length of 2048, AdamW optimizer with a learning rate of [MATH] , linear learning rate scheduler with 10% warm-up, and gradient clipping with a maximum norm of 1.0. All experiments are conducted on a single A100 80GB GPU.
+
+Appendix C Algorithms
+
+The core procedures of our memory management system are detailed in the following algorithms. Specifically, Algorithm 1 outlines the online memory inference workflow, while the subsequent memory update and construction process is formalized in Algorithm 2.
+
+Algorithm 1 MemVerse Online Memory Inference
+
+1: Input: query [MATH] , short-term memory [MATH] , long-term memory [MATH] , parametric memory [MATH] 
+
+2: Output: response [MATH] and memory context [MATH] 
+
+3: Initialize [MATH] 
+
+4:  [MATH] 
+
+5:  [MATH] 
+
+6:  [MATH] 
+
+7: if [MATH] then
+
+8:   [MATH] 
+
+9:   [MATH] 
+
+10:  return [MATH] 
+
+11: end if
+
+12:  [MATH] 
+
+13: for each [MATH] do
+
+14:   [MATH] {1-hop seed entities}
+
+15:   [MATH] {2-hop expansion}
+
+16:   [MATH] 
+
+17: end for
+
+18:  [MATH] 
+
+19:  [MATH] 
+
+20: return [MATH] 
+
+Algorithm 2 MemVerse Memory Construction and Parametric Distillation
+
+1: Input: conversation history [MATH] , long-term memory [MATH] , orchestrator [MATH] , parametric memory [MATH] 
+
+2: Output: updated memory structures [MATH] and [MATH] 
+
+3:  [MATH] 
+{extract and categorize memory entries}
+
+4: for each memory type [MATH] do
+
+5:  for each memory entry [MATH] do
+
+6:    [MATH] 
+{extract entities and relations}
+
+7:    [MATH] 
+{entity deduplication and alignment}
+
+8:    [MATH] 
+{relation insertion and graph update}
+
+9:  end for
+
+10: end for
+
+11: if [MATH] then
+
+12:   [MATH] 
+{construct training pairs from LTM}
+
+13:   [MATH] 
+
+14: end if
+
+15: return [MATH] 
+
+Appendix D Additional Results
+
+Method
+#T-Param
+Subject
+Context Modality
+Grade
+Average
+
+NAT
+SOC
+LAN
+TXT
+IMG
+NO
+G1-6
+G7-12
+
+Human Lu et al. (2022)
+
+-
+90.23
+84.97
+87.48
+89.60
+87.50
+88.10
+91.59
+82.42
+88.40
+
+GPT-4 Liu et al. (2023)
+
+-
+84.06
+73.45
+87.36
+81.87
+70.75
+90.73
+84.69
+79.10
+82.69
+
+CoT (GPT-3) Lu et al. (2022)
+
+173B
+75.44
+70.87
+78.09
+74.68
+67.43
+79.93
+78.23
+69.68
+75.17
+
+CoT (UnifiedQA) Lu et al. (2022)
+
+223M
+71.00
+76.04
+78.91
+66.42
+66.53
+81.81
+77.06
+68.82
+74.11
+
+CoT (GPT-4) Lu et al. (2023)
+
+1T+
+85.48
+72.44
+90.27
+82.65
+71.49
+92.89
+86.66
+79.04
+83.99
+
+DDCoT Zheng et al. (2023)
+
+175B
+80.15
+76.72
+82.82
+78.89
+72.53
+85.02
+82.86
+75.21
+80.15
+
+HoT-T5-Large Yao et al. (2023)
+
+738M
+84.46
+79.08
+84.64
+82.89
+75.81
+88.15
+83.88
+82.47
+83.38
+
+Chameleon (ChatGPT) Lu et al. (2023)
+
+175B+
+81.62
+70.64
+84.00
+79.77
+70.80
+86.62
+81.86
+76.53
+79.93
+
+LaVIN-13B Yang et al. (2023)
+
+13B
+-
+-
+-
+-
+-
+-
+-
+-
+77.54
+
+BLIP-2 Yang et al. (2023)
+
+-
+-
+-
+-
+-
+-
+-
+-
+-
+74.17
+
+CCOT Mitra et al. (2024)
+
+7B
+-
+-
+-
+-
+-
+-
+-
+-
+76.84
+
+GraphVis Deng et al. (2024)
+
+7B
+-
+-
+-
+-
+-
+-
+-
+-
+73.18
+
+Qwen2.5-7B Liu et al. (2025a)
+
+7B
+76.20
+67.83
+77.27
+74.49
+65.79
+79.02
+77.72
+69.35
+74.72
+
+Qwen2.5-7B (Mmkg) Liu et al. (2025a)
+
+7B
+73.98
+66.37
+78.18
+71.65
+64.30
+79.65
+76.51
+68.03
+73.47
+
+Qwen2.5-7B (Visual Genome) Liu et al. (2025a)
+
+7B
+76.78
+67.04
+78.09
+74.05
+66.19
+79.72
+78.08
+69.68
+75.08
+
+Qwen2.5-7B (MemVerse)
+7B
+74.51
+68.5
+78.73
+75.92
+66.19
+81.95
+79.70
+64.73
+75.62
+
+Qwen2.5-72B Liu et al. (2025a)
+
+72B
+79.64
+67.10
+84.90
+77.56
+65.00
+87.93
+80.25
+74.85
+78.37
+
+Qwen2.5-72B (MemVerse)
+72B
+77.53
+68.95
+85.36
+78.68
+66.39
+89.20
+82.31
+77.76
+80.25
+
+GPT-4o-mini
+-
+77.31
+73.45
+86.91
+74.05
+66.86
+87.93
+83.37
+71.85
+76.82
+
+GPT-4o-mini (MemVerse)
+-
+85.26
+81.55
+89.09
+83.28
+78.19
+91.50
+88.11
+80.75
+85.48
+
+Table 8: Performance comparison (%) on ScienceQA benchmark. #T-Params denotes trainable parameters. Categories: NAT (natural science), SOC (social science), LAN (language), TXT (text context), IMG-Cap (image caption), NO (no context), G1-6 (grades 1-6), G7-12 (grades 7-12).
+Method groups: (1) Human performance baseline, (2) Zero/Few-shot text-only LLMs, (3) Zero/Few-shot Multimodal VLMs, (4) LLMs/VLMs enhanced with memory mechanisms or external knowledge for multimodal reasoning. The best results are highlighted in blue, while the second-best results are denoted in light blue.
+
+Method
+Backbone
+Text-to-Video
+Video-to-Text
+
+R@1 [MATH] 
+
+R@5 [MATH] 
+
+R@10 [MATH] 
+
+R@1 [MATH] 
+
+R@5 [MATH] 
+
+R@10 [MATH] 
+
+Pre-trained Foundation Model
+
+InternVideo Wang et al. (2022b)
+
+ViT-H/14
+55.2
+79.6
+87.5
+57.9
+79.2
+86.4
+
+UMT-L Li et al. (2023)
+
+ViT-L/14
+58.8
+81.0
+87.1
+58.6
+81.6
+86.5
+
+CLIP-VIP Xue et al. (2023)
+
+ViT-B/16
+57.7
+80.5
+88.2
+–
+–
+–
+
+mPLUG-2 Xu et al. (2023)
+
+ViT-L/14
+53.1
+77.6
+84.7
+–
+–
+–
+
+VAST Chen et al. (2024)
+
+ViT-G/14
+63.9
+84.3
+89.6
+–
+–
+–
+
+ViT-based
+
+CLIP2TV Gao et al. (2021)
+
+ViT-B/16
+49.3
+74.7
+83.6
+46.9
+75.0
+85.1
+
+DRL Wang et al. (2022a)
+
+ViT-B/16
+49.4
+76.4
+84.2
+47.0
+77.1
+84.4
+
+TS2-Net Liu et al. (2022)
+
+ViT-B/16
+47.8
+76.8
+85.2
+47.8
+76.0
+84.6
+
+Clip4Clip Luo et al. (2022)
+
+ViT-B/16
+46.4
+72.1
+82.0
+45.4
+73.4
+82.4
+
+X-CLIP Ma et al. (2022)
+
+ViT-B/16
+49.3
+75.8
+84.8
+48.9
+76.8
+84.5
+
+DMAE Jiang et al. (2023)
+
+ViT-B/16
+49.9
+75.8
+85.5
+49.6
+76.3
+85.0
+
+Cap4Video++ Wu et al. (2024)
+
+ViT-B/16
+52.3
+76.8
+85.8
+50.0
+75.9
+86.0
+
+TeachClip Tian et al. (2024)
+
+ViT-B/16
+48.0
+75.9
+83.5
+–
+–
+–
+
+ExCae Yang et al. (2025b)
+
+ViT-G/14
+67.7
+92.7
+96.2
+69.3
+92.5
+96.3
+
+CLIP Radford et al. (2021)
+
+-
+29.7
+48.9
+58.8
+21.4
+38.6
+44.3
+
+MemVerse
+-
+90.4
+95.6
+98.1
+89.2
+92.7
+99.0
+
+Table 9: Comparison with SOTA methods on the MSR-VTT dataset. The best results are highlighted in blue bold.
+
+ScienceQA
+
+Table 8 presents the performance of various methods on the ScienceQA benchmark.
+Overall, our MemVerse enhanced models achieve the state-of-the-art performance across most evaluation metrics. Specifically, the highest accuracy in terms of average score is 85.48%, achieved by the GPT-4o-mini equipped with MemVerse.
+For subject-specific scores, the MemVerse-enhanced model also obtains the top performance in natural science with 85.26%, social science with 81.55%, and language with 89.09%.
+In terms of context modalities, it achieves the best results for both text context with 83.28% and image caption with 78.19%, demonstrating that our memory mechanism effectively leverages multimodal knowledge.
+
+It is worth noting that, on the ScienceQA dataset, short-term memory contributes relatively little, as the test questions are largely non-sequential with limited contextual dependencies.
+The parametric memory, trained using the long-term memory, achieves comparable accuracy to long-term retrieval but with significantly faster access.
+Specifically, using the RAG approach requires on average 20.17 seconds per question, while retrieving from the compressed long-term memory only takes 8.26 seconds on average.
+The parametric memory further reduces the average retrieval time to 2.28 seconds, achieving an acceleration of approximately 89% compared to RAG and 72% compared to long-term retrieval, while maintaining similar performance.
+This demonstrates that parametric memory offers a practical trade-off between speed and effectiveness in knowledge-augmented reasoning.
+
+MSR-VTT
+
+To evaluate generalization, we conduct experiments on the MSR-VTT dataset. During inference, the query text retrieves relevant entries from the memory graph to perform query rewriting before final matching. As shown in Table 9, MemVerse achieves R@1 scores of 90.4% (text-to-video) and 89.2% (video-to-text), outperforming the CLIP baseline by 60.7% and 67.8% points, respectively. This dramatic leap demonstrates that memory-augmented retrieval significantly enhances semantic matching.
+
+Notably, our approach achieves these improvements without exposing the ground-truth alignment between captions and videos to the knowledge graph or the paramatric module, ensuring fair evaluation. During memory construction, pairs of captions are partially aligned and connected through LLM’s powerful understanding, judgment, and reasoning capabilities, forming linked representations that are stored in the memory.
+During retrieval, the query text can effectively leverage these stored associations, resulting in highly accurate matching.
+As a result, this memory-based approach overcomes the limitations of directly using large LLMs or VLMs for retrieval over massive multimodal candidate pools. Training such large video models is extremely costly due to the scale of the data, and their limited context windows prevent them from processing all candidates simultaneously. By storing semantic relationships extracted with the understanding, judgment, and reasoning capabilities of models like GPT-4o-mini, our method allows lightweight embedding-based models to efficiently retrieve highly relevant entries while still leveraging the rich reasoning captured in the memory. This effectively combines the scalability of embedding-based retrieval with the semantic power of large pretrained models, demonstrating the key advantage of our approach.
+
+Appendix E Memory Evolution Performance
+
+Table 10 analyzes how the parametric memory evolves as the model undergoes periodic updates with incrementally accumulated memory. We simulate a realistic memory growth scenario in which the model internalizes retrieved knowledge in sequential stages. The baseline corresponds to the original Qwen2.5-7B model without any parametric memory, while the subsequent rows ( [MATH] , [MATH] , [MATH] , [MATH] ) represent the model after fine-tuning on the earliest [MATH] segments of the retrieved memory. This setting allows us to examine how partial, temporally ordered memory updates influence long-term retention, stability, and generalization.
+
+The results indicate that early memory updates already provide meaningful improvements in several modality categories. With only [MATH] of accumulated knowledge, the model exhibits stronger parametric recall in retrieval-oriented modalities such as NO and IMG, suggesting that even early retrieved examples offer strong supervisory signals for internalizing memory access patterns. Increasing the update interval to [MATH] yields broader gains across subject areas—particularly SOC and NAT—demonstrating that mid-stage memory provides more semantically diverse supervision that enhances the stability of the learned memory.
+
+The most favorable performance emerges at the 75% update stage, achieving the highest overall accuracy (75.69). The observed plateau and slight degradation in performance when using 100% of the memory can be attributed to the nature of the ScienceQA dataset and the strength of the Qwen-2.5B-7B base models. ScienceQA primarily tests broadly applicable scientific knowledge, which the base model already captures quite well; as a result, adding more memory provides little additional benefit. In contrast, for smaller models such as 1.5B, the memory is far from sufficient, and increasing the memory size yields more noticeable improvements. These observations highlight the importance of periodic, well-paced memory updates rather than relying solely on full-memory consolidation, as the benefits depend on both model capacity and dataset characteristics.
+Overall, these results validate the design motivation of our parametric memory mechanism: incremental updates enable the model to gradually absorb retrieved knowledge while preserving generalization.
+
+Appendix F Scalability Analysis of MemVerse
+
+Method
+Subject
+Context Modalit
+Grade
+Average
+
+NAT
+SOC
+LAN
+TXT
+IMG
+NO
+G1-6
+G7-12
+
+Qwen2.5-7B
+76.20
+67.83
+77.27
+74.49
+65.79
+79.02
+77.72
+69.35
+74.72
+
++25% Memory
+76.07
+67.60
+78.14
+74.33
+65.94
+83.34
+79.11
+65.99
+75.12
+
++50% Memory
+76.49
+69.29
+77.82
+74.65
+65.49
+81.74
+78.56
+65.06
+75.43
+
++75% Memory
+76.89
+68.62
+80.64
+75.07
+65.81
+85.71
+80.43
+67.17
+75.69
+
++100% Memory
+74.51
+68.50
+78.73
+75.92
+66.19
+81.95
+79.70
+64.73
+75.62
+
+Table 10: Performance of the parametric memory under periodic knowledge accumulation.
+The baseline corresponds to the original Qwen2.5-7B model without memory updates, while the 25%, 50%, 75%, and 100% rows represent staged fine-tuning with progressively larger partitions of retrieved knowledge.
+This setup simulates incremental memory growth and reveals how intermediate update intervals (50%–75%) yield the most stable and effective parametric memory consolidation.
+
+Method
+Subject
+Context Modality
+Grade
+Average
+
+NAT
+SOC
+LAN
+TXT
+IMG
+NO
+G1-6
+G7-12
+
+Qwen2.5-1.5B
+-
+-
+-
+-
+-
+-
+-
+-
+53.93
+
++Param.
+-
+-
+-
+-
+-
+-
+-
+-
+61.54
+
+Qwen2.5-7B
+76.20
+67.83
+77.27
+74.49
+65.79
+79.02
+77.72
+69.35
+74.72
+
++Param.
+74.51
+68.5
+78.73
+75.92
+66.19
+81.95
+79.7
+64.73
+75.62
+
+Qwen2.5-14B
+75.67
+67.27
+81.91
+70.58
+63.96
+85.99
+79.99
+67.83
+75.64
+
++Param.
+75.98
+68.17
+82.36
+71.26
+65.25
+86.76
+80.69
+67.24
+76.88
+
+Qwen2.5-32B
+77.53
+69.29
+85.00
+72.68
+66.58
+88.78
+82.34
+69.48
+77.74
+
++Param.
+78.11
+69.29
+87.36
+72.92
+66.39
+90.87
+82.71
+71.39
+78.66
+
+Qwen2.5-72B
+79.64
+67.10
+84.90
+77.56
+65.00
+87.93
+80.25
+74.85
+78.37
+
++Param.
+77.53
+68.95
+85.36
+78.68
+66.39
+89.2
+82.31
+77.76
+80.25
+
+Table 11: Scalability Analysis of parametric Memory on ScienceQA Benchmark (%) Categories: NAT (natural science), SOC (social science), LAN (language), TXT (text context), IMG-Cap (image caption), NO (no context), G1-6 (grades 1-6), G7-12 (grades 7-12).
+Method groups: (1) Qwen2.5 models with varying scales (1.5B, 7B, 14B, 32B, 72B) as base models; (2) Corresponding base models enhanced with Parametric Memory (fixed Qwen2.5-7B parametric memory module). For each model scale, bold indicates the better-performing result between the base model and its parametric memory-enhanced variant.
+
+Table 11 presents a comprehensive comparison of baseline Qwen2.5 models and their counterparts augmented with parametric memory across multiple subject categories, context modalities, and grade levels. A consistent trend emerges: incorporating parametric memory leads to noticeable performance improvements across nearly all model scales, demonstrating its effectiveness as a lightweight enhancement mechanism.
+
+For smaller models such as Qwen2.5–1.5B, parametric memory yields a substantial gain of [MATH] points on the overall average, indicating that limited-capacity models benefit significantly from externalized abstraction and compressed history integration. As model size increases, the magnitude of improvement becomes more nuanced. For mid-sized models (7B and 14B), parametric memory continues to provide stable gains of [MATH] and [MATH] points, respectively, suggesting that even moderately capable models profit from additional memory-based supervision for stabilizing reasoning across heterogeneous subject and modality conditions.
+
+Larger models exhibit an even more interesting behavior. For Qwen2.5–32B, parametric memory contributes a solid improvement of [MATH] points, particularly boosting performance in categories such as natural science (NAT), language (LAN), and reasoning-heavy modalities (NO). Notably, the 72B model, despite already strong baseline performance, still benefits by [MATH] points, showing that parametric memory remains complementary to large-scale pretraining. The gains on high-grade (G7–12) questions are especially pronounced, indicating that parametric memory enhances multi-step reasoning and cross-modal grounding.
+
+Overall, the results demonstrate that parametric memory consistently improves accuracy across scales, with the largest relative benefits observed in smaller models and meaningful enhancements retained even at the 72B level. This highlights the robustness and scalability of the proposed parametric memory mechanism, illustrating its role as an efficient tool for strengthening knowledge retention and improving generalization across diverse tasks.
+
+Appendix G More Related Work Discussion
+
+G.1 Memory for LLM Agents.
+
+Memory is a fundamental component of LLM-based agents, shaping their ability to adapt, generalize, and operate over long-horizon interactions Zhang et al. (2025d). Existing approaches can generally be categorized into parametric and non-parametric paradigms. Parametric memory incorporates knowledge directly into model parameters through mechanisms such as trajectory-based fine-tuning Chen et al. (2023), modular adaptation Yin et al. (2024), or latent memory tokens Wang et al. (2024b). More recent methods further combine parametric learning with latent or reinforcement-driven memory optimization, including MemAgent Yu et al. (2025) and MemGen Zhang et al. (2025b).
+Non-parametric memory instead relies on external storage and retrieval systems to maintain persistent and scalable context. Representative works such as MemGPT Packer et al. (2024), MemoryBank Zhong et al. (2024), and MemoRAG Qian et al. (2025) employ hierarchical retrieval, temporal relevance modeling, and dual-system memory mechanisms for long-term reasoning. Recent studies further emphasize memory efficiency and structured consolidation. SimpleMem Liu et al. (2026b) introduces semantic compression and intent-aware retrieval to improve token efficiency in long conversations, while OCR-Memory Li et al. (2026) leverages optical rendering of trajectories as high-density memory representations for scalable long-horizon recall. Amory Zhou et al. (2026) explores narrative-driven memory construction through episodic consolidation and coherence-aware retrieval, improving long-term conversational consistency. In addition, production-oriented systems such as Mem0 Chhikara et al. (2025) and SuperMemory Shah et al. (2025) focus on scalable memory orchestration with hierarchical summarization and efficient read/write operations. Collectively, these works demonstrate a shift from static memory storage toward adaptive, structured, and retrieval-augmented memory systems for autonomous agents.
+However, retrieval-based memory often suffers from interaction inefficiency, while purely parametric memory lacks reliable long-term retention. MemVerse adopts a Complementary Learning Systems (CLS)-based fast–slow memory framework that jointly enables efficient recall and stable memory consolidation.
+
+G.2 Multimodal Knowledge Retrieval
+
+Multimodal retrieval has become a key component for knowledge-intensive reasoning in MLLM systems. Recent multimodal RAG frameworks focus on improving retrieval robustness, cross-modal alignment, and reasoning quality Abootorabi et al. (2025); Liu et al. (2025a). Existing methods explore end-to-end optimization through reward-guided retrieval and generation Fan et al. (2025b), position-aware retrieval for mitigating modality-sensitive reasoning bias Yao et al. (2025b), and universal multimodal retrievers trained across diverse tasks and modalities Lin et al. (2025). Other works improve retrieval scalability and adaptability via synthetic multimodal training pairs Zhou et al. (2025), cross-modal question generation for zero-shot retrieval Choi et al. (2025), and utility-oriented evidence selection for downstream reasoning Luo et al. (2026).
+However, most approaches still rely on embedding-space alignment and flat retrieval structures, limiting their ability to model complex real-world semantics and hidden cross-modal relations at scale Wang et al. (2024a). In contrast, MemVerse organizes multimodal experiences into structured Multimodal Knowledge Graphs (MMKGs), enabling richer semantic retrieval while transforming multimodal retrieval into unified text-based retrieval without information loss.
+
+Appendix H Example Cases
+
+Figure 6: An example of memory retrieval.
+
+As shown in Figure 6, this is an example of a memory retrieval case.
+The figure illustrates how a stored memory can be queried and retrieved, demonstrating the process clearly.
+
+Core Memory Extraction Prompt
+
+You are the Core Memory Manager, part of the personal assistant system. The personal assistant processes various types of user messages including text, images, transcribed voice messages, and other content. Other agents include Meta Memory Manager, Semantic Memory Manager, Episodic Memory Manager, and Chat Agent. You do not see or interact directly with these other agents, but you share the same memory base.
+
+The system will receive various types of messages from users, including text, images, transcribed voice recordings, and other multimedia content. Once messages accumulate to a certain amount, they will be sent to you along with potential conversations between the user and the Chat Agent. Your role is to analyze the input messages and conversations, understand what the user is communicating and experiencing, and save details about the user. This includes the user’s name, personality, preferences, personal profile facts, and long-term project details.
+
+Memory Components:
+
+1. Core Memory: Contains fundamental information about the user, such as name, personality, and simple facts to facilitate communication. Example: Include anything related to the user in the human block, such as "Is a software engineer", "Loves to play Cyberpunk", "Has publications: 1. … 2. …", etc. If a block is over 90% full, call core_memory_rewrite to reduce it to around 45% full, keeping the most important information. Include the block label in every function call. Core memory is organized into multiple blocks. Line indicators like "Line 1:", "Line 2:" are for reference and not part of the block.
+
+2. Episodic Memory: Stores time-ordered, event-based interactions, acting as a diary of user and assistant events.
+
+3. Semantic Memory: Contains general knowledge about concepts or objects, including understanding of people, places, or new concepts.
+
+Single Function Call Process:
+
+1. Examine all messages and conversations thoroughly to extract every detail about the user’s preferences, personal information, and vital facts.
+
+2. Identify user behaviors, preferences, personal details, and any information useful for future conversations.
+
+3. Extract more information than what is mentioned in Meta Memory Manager instructions; proactively identify user details.
+
+4. Make one comprehensive core memory update using the most appropriate function (core_memory_append or core_memory_rewrite) to capture all relevant information.
+
+5. Skip update if no new information is available by calling finish_memory_update.
+
+Important Notes:
+
+- Only one function call per batch, except when receiving messages from the Chat Agent.
+
+- Core memory is essential for understanding the user and needs to persist; update even if similar information exists elsewhere.
+
+- Ensure the update is thorough, as core memory is not guaranteed to persist like other memory types.
+
+- Focus on user preferences, personal facts, personality traits, and any details that would improve future interactions.
+
+Table 12: Prompt template for Core Memory Extraction
+
+Semantic Memory Extraction Prompt
+
+You are the Semantic Memory Manager, one of four agents in the personal assistant memory system. The other agents are Meta Memory Manager, Episodic Memory Manager, and the Chat Agent. You do not interact directly with these agents, but you share the same memory base.
+
+The system receives various types of user messages, including text, images, transcribed voice recordings, and other multimedia content. Once a batch of messages is accumulated, they will be sent to you along with potential conversations between the user and the Chat Agent. Your responsibility is to analyze these inputs, extract general knowledge about concepts or objects, save them into Semantic Memory, and update existing entries if new information becomes available.
+
+Memory Components:
+
+1. Core Memory: Stores foundational and persistent context about the user and assistant personas, including backgrounds, preferences, and enduring information.
+
+2. Episodic Memory: Stores time-ordered, event-based interactions between the user and assistant, acting as a diary or log.
+
+3. Semantic Memory (your primary domain): Stores general knowledge, concepts, definitions, and abstract facts. Each entry includes:
+
+  - Name: Name of the concept or object (e.g., "MemoryLLM" or "Jane")
+
+  - Summary: Concise explanation of the concept or object
+
+  - Details: Extended description including context, examples, or insights
+
+  - Source: Reference where the knowledge originates (e.g., user message, image caption)
+
+  - Tree_Path: Hierarchical categorization as an array of strings (e.g., [’favorites’,’pets’,’dog’] or [’work’,’projects’,’ai-research’])
+
+Semantic Memory Manager Role:
+
+- Receive general knowledge updates from Meta Memory Manager, Chat Agent, or other sources.
+
+- Create new semantic entries or update existing ones with clear concept, concise definition, detailed context, and proper metadata.
+
+- Distinguish between context-specific experiences (stored in Episodic Memory) and general knowledge that applies universally.
+
+- Represent each concept for efficient retrieval and reasoning.
+
+Single Function Call Process:
+
+1. Analyze Content: Identify new concepts to add and existing concepts that require updates based on semantic memory items in the system prompt.
+
+2. Choose Action:
+
+  - semantic_memory_insert: For primarily new concepts
+
+  - semantic_memory_update: For updating existing concepts
+
+  - check_semantic_memory: If verification of current content is required
+
+3. Make Update: Execute one function call addressing the most critical semantic memory needs.
+
+4. Skip Update if Necessary: If no new information is available, call finish_memory_update.
+
+Important Guidelines:
+
+- Only one function call per batch, except when receiving messages from the Chat Agent.
+
+- Pay attention to the system prompt containing up to 50 relevant semantic memory items.
+
+- Use exact item_ids from the system prompt; do not rely on chat history.
+
+- Ensure old_semantic_item_ids in semantic_memory_update and semantic_item_ids in check_semantic_memory match the IDs in the system prompt.
+
+- Do not make function calls if there is nothing new to update.
+
+- Consolidate duplicates when detected, combining similar concepts in the single update.
+
+Table 13: Prompt template for Semantic Memory Extraction
+
+Episodic Memory Extraction Prompt
+
+You are the Episodic Memory Manager, part of the personal assistant system. The system also includes other agents: Meta Memory Manager, Semantic Memory Manager, Core Memory Manager, and Chat Agent. You do not interact directly with these agents, but you share the same memory base.
+
+The system receives various types of user messages, including text, images, transcribed voice recordings, and other multimedia content. Once a batch of messages is accumulated, they will be sent to you, along with potential conversations between the user and the Chat Agent. Your role is to analyze these inputs, extract details about the user’s activities, and update the episodic memory accordingly.
+
+Overview of Memory Components:
+
+1. Core Memory: Stores fundamental information about the user, such as name, personality traits, and simple facts that facilitate communication.
+
+2. Episodic Memory: Stores time-ordered, event-based information from interactions, acting as a "diary" of user and assistant events. Each event has attributes:
+
+  - event_type: Type or category of the event (e.g., user_message, inferred_result, system_notification)
+
+  - summary: Short, concise textual summary of the event (e.g., "John shared a photo of his vacation in Paris.")
+
+  - details: Full description capturing all relevant information (e.g., "John sent an image showing the Eiffel Tower with the caption ’Amazing sunset view from our hotel room’.")
+
+  - actor: The source of the event (user or assistant)
+
+  - tree_path: Hierarchical categorization (e.g., ["personal", "travel", "vacation"])
+
+3. Semantic Memory: Contains general knowledge about concepts or objects, such as a person, place, or software.
+
+Episodic Memory Update Protocol:
+
+1. Analyze all messages to identify the user’s activities and determine significant events.
+
+2. Choose one of the update functions:
+
+  - episodic_memory_merge: Minor updates to existing events.
+
+  - episodic_memory_insert: Significant new events or completely new topics.
+
+  - episodic_memory_replace: Consolidate repeated events or rewrite long summaries.
+
+3. Execute one function call with detailed details and appropriate tree_path.
+
+4. Skip update if no new information by calling finish_memory_update.
+
+Important Guidelines:
+
+- Only make one function call per batch, except when receiving messages from the Chat Agent.
+
+- Monitor up to 50 most recent and 50 most relevant events in the system prompt.
+
+- Use exact event_ids from the system prompt.
+
+- Include detailed descriptions in details.
+
+- Use tree_path to create hierarchical categories.
+
+- Avoid appending to events exceeding 5000 characters; use episodic_memory_insert instead.
+
+- If no new information, do not make function calls.
+
+- When multiple activities occur simultaneously, prioritize the most significant activity.
+
+Table 14: Prompt template for Episodic Memory Extraction
+
+ Experimental support, please
+ view the build logs
+ for errors. Generated by
+
+ L
+ A
+ T
+ E
+
+ xml
+
+ .
+
+ Instructions for reporting errors
+
+ We are continuing to improve HTML versions of papers, and your feedback helps enhance accessibility and mobile
+ support. To report errors in the HTML that will help us improve conversion and rendering, choose any of the
+ methods listed below:
+
+ Click the "Report Issue" ( ) button, located in the page header.
+
+ Tip: You can select the relevant text first, to include it in your report.
+
+ Our team has already identified the following issues. We appreciate your time reviewing and reporting rendering errors we
+ may not have found yet. Your efforts will help us improve the HTML versions for all readers, because disability
+ should not be a barrier to accessing research. Thank you for your continued support in championing open access for
+ all.
+
+ Have a free development cycle? Help support accessibility at arXiv! Our collaborators at LaTeXML maintain a list of packages that need conversion, and welcome developer contributions.
+
+ We gratefully acknowledge support from
+ our major funders,
+ member institutions, ,
+ and all contributors.
+
+ About
+ ·
+ Help
+ ·
+ Contact
+ ·
+ Subscribe
+ ·
+ Copyright
+ ·
+ Privacy
+ ·
+ Accessibility
+ ·
+ Operational Status (opens in new tab)
+
+ Major funding support from
+
