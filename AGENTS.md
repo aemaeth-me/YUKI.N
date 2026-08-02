@@ -44,6 +44,10 @@ Composition -> Interface / Infrastructure / Application / Domain
 - 计算相互独立、组合结构比执行步骤更重要时，优先 `Applicative`。
 - 后一步依赖前一步结果，或顺序、短路、资源生命周期、事务语义重要时，使用 `Monad`。
 - `Applicative IO` 不表示并行；并行必须显式使用 `Concurrently`、`async` 等受控机制。
+- 禁止三层及以上连续 `>>= \x ->` 右漂移嵌套（bind 金字塔）：参数设计先行，
+  函数直接接收其所需值；相互独立的取值用 `liftA2` / `liftA3` 一次取出；前后
+  依赖的步骤用 `>=>` / `<=<` 组合或提名为具名函数；确需顺序取多值时，`>>=`
+  至多连续两步取值，其余逻辑移入具名 where/顶层函数。
 - 新增或迁移的模块不得增加 HLint warning；现有 warning 按模块逐步清理，不借机机械改写无关代码。
 
 ### 测试中的 do 记法

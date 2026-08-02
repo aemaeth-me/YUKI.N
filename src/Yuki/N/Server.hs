@@ -5,7 +5,7 @@ module Yuki.N.Server
   )
 where
 
-import Control.Applicative ((<|>))
+import Control.Applicative (liftA2, (<|>))
 import Control.Monad (join, (>=>))
 import Data.Aeson (FromJSON (..), ToJSON, Value (..), eitherDecode, encode, object, toJSON, withObject, (.!=), (.:), (.:?), (.=))
 import Data.Aeson.Types (parseEither)
@@ -311,16 +311,13 @@ application cors inspection configs runs dispatches runtimeFor request respond =
    where
     go service =
       withBody "invalid dispatch request: " $ \(CreateDispatchRequest input) ->
-        if TextValue.null (TextValue.strip input)
-          then respond (bad "dispatch input must not be empty")
-          else
-            activeIncarnation cognition identifier
-              >>= either
-                (respond . cognitionError)
-                ( \incarnation ->
-                    dispatchServiceGenerate service incarnation input
-                      >>= respond . jsonResponse cors status202 [] . toJSON
-                )
+        bool (publish service input) (respond (bad "dispatch input must not be empty")) (TextValue.null (TextValue.strip input))
+    publish service input =
+      activeIncarnation cognition identifier
+        >>= either (respond . cognitionError) (announce service input)
+    announce service input incarnation =
+      dispatchServiceGenerate service incarnation input
+        >>= respond . jsonResponse cors status202 [] . toJSON
   readDispatch identifier service =
     getDispatch (dispatchServiceStore service) identifier
       >>= respond . maybe (missing "dispatch not found") ok
@@ -708,21 +705,16 @@ application cors inspection configs runs dispatches runtimeFor request respond =
   incarnationTasks identifier service =
     tasksForIncarnation identifier service includeArchived >>= respond . ok
   homeThread identifier service =
-    maybe
-      (respond (missing "incarnation not found"))
-      ( \cognition ->
-          incarnationRead (cognitionIncarnations cognition) identifier >>= \case
-            Nothing -> respond (missing "incarnation not found")
-            Just incarnation
-              | incarnationStatus incarnation == IncarnationArchived -> respond (missing "incarnation not found")
-              | otherwise ->
-                  ensureHomeSession (serviceSessions service) identifier (Just (incarnationName incarnation))
-                    >>= \meta ->
-                      threadConfigRead (serviceConfigs service) (homeThreadId identifier)
-                        >>= respond . ok . homeView identifier meta
-      )
-      (inspectionCognition =<< inspection)
+    maybe (respond (missing "incarnation not found")) present (inspectionCognition =<< inspection)
    where
+    present cognition =
+      incarnationRead (cognitionIncarnations cognition) identifier
+        >>= maybe (respond (missing "incarnation not found")) loadHome
+    loadHome incarnation
+      | incarnationStatus incarnation == IncarnationArchived = respond (missing "incarnation not found")
+      | otherwise =
+          liftA2 (homeView identifier) (ensureHomeSession (serviceSessions service) identifier (Just (incarnationName incarnation))) (threadConfigRead (serviceConfigs service) (homeThreadId identifier))
+            >>= respond . ok
     homeView identity meta config =
       object
         [ "threadId" .= homeThreadId identity,

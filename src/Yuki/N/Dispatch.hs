@@ -373,27 +373,27 @@ confirmDraft dispatches service incarnations newThreadId identifier =
     | dispatchStatus draft /= Draft =
         pure (ConfirmConflict ("dispatch is not draft: " <> identifier))
     | otherwise =
-        incarnationRead incarnations (dispatchIncarnationId draft) >>= \case
-          Nothing -> report draft ("unknown incarnation: " <> dispatchIncarnationId draft)
-          Just incarnation
-            | incarnationStatus incarnation == IncarnationArchived ->
-                report draft ("incarnation is archived: " <> dispatchIncarnationId draft)
-            | otherwise -> newThreadId >>= execute draft
-  execute draft threadId =
-    createSession sessions threadId (Just (dispatchTitle draft)) (dispatchIncarnationId draft) Nothing Nothing >>= \case
-      Left failure -> report draft failure
-      Right _ ->
-        attempt (threadConfigWrite configs threadId (dispatchConfig draft)) >>= \case
-          Left failure -> rollbacks [rollbackSession] threadId failure draft
-          Right () ->
-            attempt (transcriptSave transcripts threadId [ChatUser (dispatchPrompt draft)]) >>= \case
-              Left failure -> rollbacks [rollbackConfig, rollbackSession] threadId failure draft
-              Right () ->
-                markDispatchDispatched dispatches identifier threadId >>= \case
-                  Left failure -> rollbacks [rollbackTranscript, rollbackConfig, rollbackSession] threadId failure draft
-                  Right _ -> pure (ConfirmOk threadId)
-  rollbacks actions threadId failure draft =
-    mapM_ ($ threadId) actions *> report draft failure
+        incarnationRead incarnations (dispatchIncarnationId draft)
+          >>= maybe (report draft ("unknown incarnation: " <> dispatchIncarnationId draft)) (proceed draft)
+  proceed draft incarnation
+    | incarnationStatus incarnation == IncarnationArchived =
+        report draft ("incarnation is archived: " <> dispatchIncarnationId draft)
+    | otherwise = newThreadId >>= open draft
+  open draft threadId =
+    createSession sessions threadId (Just (dispatchTitle draft)) (dispatchIncarnationId draft) Nothing Nothing
+      >>= either (report draft) (const (stage draft threadId [rollbackSession threadId] (provisions draft threadId)))
+  provisions draft threadId =
+    [ (threadConfigWrite configs threadId (dispatchConfig draft), rollbackConfig threadId),
+      (transcriptSave transcripts threadId [ChatUser (dispatchPrompt draft)], rollbackTranscript threadId)
+    ]
+  stage draft threadId rollbacks [] =
+    markDispatchDispatched dispatches identifier threadId
+      >>= either (rollbackAll rollbacks draft) (const (pure (ConfirmOk threadId)))
+  stage draft threadId rollbacks ((action, undo) : rest) =
+    attempt action
+      >>= either (rollbackAll rollbacks draft) (const (stage draft threadId (undo : rollbacks) rest))
+  rollbackAll rollbacks draft failure =
+    sequence_ rollbacks *> report draft failure
   rollbackSession threadId = archiveSession service threadId $> ()
   rollbackConfig = threadConfigDelete configs
   rollbackTranscript = transcriptDelete transcripts
