@@ -65,6 +65,42 @@ const seed = {
 
 const counters = { deliveries: 0, changes: 0 };
 
+const incarnations = new Map([
+  [
+    yuki,
+    {
+      id: yuki,
+      name: "Yuki",
+      direction: "默认助手方向",
+      impressionModel: null,
+      revision: 1,
+      status: "active",
+    },
+  ],
+]);
+
+const incarnationJson = (incarnation) => ({
+  id: incarnation.id,
+  name: incarnation.name,
+  direction: incarnation.direction,
+  promptRevision: null,
+  impressionModel: incarnation.impressionModel,
+  revision: incarnation.revision,
+  status: incarnation.status,
+  created: now - 9000,
+  updated: now - 100,
+});
+
+const fleetEntries = () =>
+  [...incarnations.values()].map((incarnation) => ({
+    id: incarnation.id,
+    name: incarnation.name,
+    state: incarnation.status === "archived" ? "idle" : "active",
+    activeRuns: 0,
+    waitingDrafts: 0,
+    lastDeliveryAt: incarnation.id === yuki ? now - 100 : null,
+  }));
+
 const query = (url, name) => new URL(url, "http://x").searchParams.get(name);
 
 const pageOf = (items, url, filter, sortKey) => {
@@ -89,7 +125,7 @@ const json = (response, status, value) => {
 
 const startFakeBackend = async () => {
   const streamClients = [];
-  const server = http.createServer((request, response) => {
+  const server = http.createServer(async (request, response) => {
     const url = request.url ?? "/";
     const pathname = new URL(url, "http://x").pathname;
 
@@ -120,6 +156,17 @@ const startFakeBackend = async () => {
       return;
     }
 
+    if (pathname === "/__smoke/clear-incarnations") {
+      incarnations.clear();
+      json(response, 200, { ok: true });
+      return;
+    }
+
+    if (pathname === "/fleet") {
+      json(response, 200, { incarnations: fleetEntries(), runs: [] });
+      return;
+    }
+
     const match = (pattern) => {
       const parts = pattern.split("/").filter(Boolean);
       const actual = pathname.split("/").filter(Boolean);
@@ -143,6 +190,136 @@ const startFakeBackend = async () => {
       counters.changes += 1;
       const { body } = pageOf(seed.changes, url, { incarnation: captured.id, threadId: query(url, "threadId"), runId: query(url, "runId") }, "at");
       json(response, 200, body);
+      return;
+    }
+    if ((captured = match("/incarnations/:id/activity"))) {
+      json(response, 200, {
+        incarnationId: captured.id,
+        home: { threadId: `home-${captured.id}`, activeRunId: null },
+        runs: [],
+        waitingDrafts: [],
+        recentDeliveries: [],
+      });
+      return;
+    }
+    if (pathname === "/incarnations" && request.method === "POST") {
+      let body = "";
+      for await (const chunk of request) body += chunk;
+      const payload = JSON.parse(body);
+      if (incarnations.has(payload.id)) {
+        json(response, 409, { error: `incarnation already exists: ${payload.id}` });
+        return;
+      }
+      const created = {
+        id: payload.id,
+        name: payload.name,
+        direction: payload.direction,
+        impressionModel: payload.impressionModel ?? null,
+        revision: 1,
+        status: "active",
+        patchOnce: true,
+      };
+      incarnations.set(created.id, created);
+      json(response, 200, {
+        incarnation: incarnationJson(created),
+        prompt: null,
+        promptError: null,
+      });
+      return;
+    }
+    if ((captured = match("/incarnations/:id/archive"))) {
+      const incarnation = incarnations.get(captured.id);
+      if (incarnation === undefined) {
+        json(response, 404, { error: "unknown incarnation" });
+        return;
+      }
+      if (incarnation.status !== "active") {
+        json(response, 409, { error: "incarnation is already archived" });
+        return;
+      }
+      incarnation.status = "archived";
+      incarnation.revision += 1;
+      json(response, 200, incarnationJson(incarnation));
+      return;
+    }
+    if ((captured = match("/incarnations/:id/restore"))) {
+      const incarnation = incarnations.get(captured.id);
+      if (incarnation === undefined) {
+        json(response, 404, { error: "unknown incarnation" });
+        return;
+      }
+      incarnation.status = "active";
+      incarnation.revision += 1;
+      json(response, 200, incarnationJson(incarnation));
+      return;
+    }
+    if ((captured = match("/incarnations/:id/delete"))) {
+      const incarnation = incarnations.get(captured.id);
+      if (incarnation === undefined) {
+        json(response, 404, { error: "unknown incarnation" });
+        return;
+      }
+      if (incarnation.status !== "archived") {
+        json(response, 409, { error: "incarnation is not archived" });
+        return;
+      }
+      incarnations.delete(captured.id);
+      json(response, 200, { deleted: captured.id });
+      return;
+    }
+    if ((captured = match("/incarnations/:id"))) {
+      if (request.method === "GET") {
+        const incarnation = incarnations.get(captured.id);
+        if (incarnation === undefined) {
+          json(response, 404, { error: "incarnation not found" });
+          return;
+        }
+        if (
+          incarnation.status === "archived" &&
+          query(url, "archived") !== "true"
+        ) {
+          json(response, 404, { error: "incarnation not found" });
+          return;
+        }
+        json(response, 200, incarnationJson(incarnation));
+        return;
+      }
+      if (request.method === "PATCH") {
+        let body = "";
+        for await (const chunk of request) body += chunk;
+        const payload = JSON.parse(body);
+        const incarnation = incarnations.get(captured.id);
+        if (incarnation === undefined) {
+          json(response, 404, { error: "unknown incarnation" });
+          return;
+        }
+        if (
+          payload.expectedRevision !== incarnation.revision ||
+          incarnation.patchOnce === true
+        ) {
+          const stale = incarnation.revision + 1;
+          incarnation.revision = stale;
+          incarnation.direction = "并发修改后的方向";
+          delete incarnation.patchOnce;
+          json(response, 409, {
+            error: `stale incarnation revision: expected ${payload.expectedRevision}, actual ${stale}`,
+          });
+          return;
+        }
+        incarnation.name = payload.name;
+        incarnation.direction = payload.direction;
+        if (payload.impressionModel !== undefined) {
+          incarnation.impressionModel = payload.impressionModel;
+        }
+        incarnation.revision += 1;
+        json(response, 200, {
+          incarnation: incarnationJson(incarnation),
+          prompt: null,
+          promptError: null,
+        });
+        return;
+      }
+      json(response, 404, { error: "not found" });
       return;
     }
     if (pathname === "/threads") {
@@ -336,6 +513,114 @@ const main = async () => {
       ["/yuki/yuki/chat/task-1", "/yuki/yuki/chat/task-2"],
       "task rows link to their chats",
     );
+
+    // ---- yuki creation dialog + fleet refetch ----
+    await page.locator(".brand").click();
+    await page.waitForSelector(".fleet-head");
+    assert.equal(await page.locator(".fleet-head .fleet-new").count(), 1, "fleet header shows create button");
+    await page.locator(".fleet-head .fleet-new").click();
+    await page.waitForSelector("#yuki-create-backdrop");
+    assert.match(await visibleText(page, "#yuki-create-backdrop"), /小写字母开头，可含数字与连字符/);
+
+    const createInputs = page.locator("#yuki-create-backdrop .draft-input");
+    await createInputs.nth(0).fill("1bad");
+    await createInputs.nth(1).fill("新伙伴");
+    await page.locator("#yuki-create-backdrop .draft-textarea").fill("温和的助手人格");
+    await page.locator("#yuki-create-backdrop .draft-action-primary").click();
+    await waitFor(
+      async () => (await visibleText(page, "#yuki-create-backdrop .draft-error")).includes("id 不合法"),
+      "bad id rejected client-side",
+    );
+
+    await createInputs.nth(0).fill("partner");
+    await page.locator("#yuki-create-backdrop .draft-action-primary").click();
+    await page.waitForSelector(".wb-header", { timeout: 15000 });
+    assert.match(await page.url(), /\/yuki\/partner\/now$/, "create lands on the new workbench");
+    await waitFor(
+      async () => (await visibleText(page, ".wb-header")).includes("新伙伴"),
+      "fleet refetch populates the new yuki name in the header",
+    );
+
+    // ---- persona panel: edit + 409 retry ----
+    await page.locator(".wb-persona-button").click();
+    await page.waitForSelector("#persona-backdrop");
+    await waitFor(
+      async () => (await page.locator("#persona-backdrop .persona-loading").count()) === 0,
+      "persona panel loads",
+    );
+    assert.match(await visibleText(page, "#persona-backdrop .persona-id"), /partner/);
+    assert.match(await visibleText(page, "#persona-backdrop .state-badge"), /活跃/);
+
+    const personaName = page.locator("#persona-backdrop .draft-input").nth(0);
+    await personaName.fill("新伙伴改名");
+    await page.locator("#persona-backdrop .draft-action-primary").click();
+    await waitFor(
+      async () =>
+        (await visibleText(page, "#persona-backdrop .draft-error")).includes("已被并发修改"),
+      "stale save shows concurrency notice",
+    );
+    await waitFor(
+      async () => (await personaName.inputValue()) === "新伙伴",
+      "409 refetch restores server state into the form",
+    );
+    await waitFor(
+      async () =>
+        (await page.locator("#persona-backdrop .draft-textarea").inputValue()).includes("并发修改后的方向"),
+      "refetched direction replaces local edits",
+    );
+
+    await personaName.fill("第二次改名");
+    await page.locator("#persona-backdrop .draft-action-primary").click();
+    await waitFor(
+      async () => (await personaName.inputValue()) === "第二次改名"
+        && (await page.locator("#persona-backdrop .draft-error").count()) === 0,
+      "retried save succeeds",
+    );
+
+    // ---- persona panel: archive then delete ----
+    const archiveButton = page.locator("#persona-backdrop .persona-lifecycle-action", { hasText: "归档" });
+    await archiveButton.click();
+    await waitFor(
+      async () => (await visibleText(page, "#persona-backdrop .persona-lifecycle-action")).includes("确认归档？"),
+      "archive arms for confirmation",
+    );
+    await archiveButton.click();
+    await waitFor(
+      async () => (await visibleText(page, "#persona-backdrop .state-badge")) === "已归档",
+      "archive flips the panel to archived",
+    );
+    assert.equal(
+      await page.locator("#persona-backdrop .persona-lifecycle-action", { hasText: "恢复" }).count(),
+      1,
+      "restore appears once archived",
+    );
+
+    const deleteButton = page.locator("#persona-backdrop .persona-lifecycle-action", { hasText: "删除" });
+    await deleteButton.click();
+    await waitFor(
+      async () =>
+        (await visibleText(page, "#persona-backdrop .persona-lifecycle-action")).includes(
+          "删除这位 Yuki 及其全部对话与记忆",
+        ),
+      "delete arms with the danger label",
+    );
+    await deleteButton.click();
+    await page.waitForSelector(".fleet-head", { timeout: 15000 });
+    assert.match(await page.url(), /\/fleet$/, "delete returns to the fleet");
+    await waitFor(
+      async () => (await page.locator(".yuki-card").count()) === 1,
+      "deleted yuki card is gone after fleet refetch",
+    );
+    assert.doesNotMatch(await visibleText(page, ".fleet-grid"), /第二次改名/);
+
+    // ---- empty fleet state carries the same create button ----
+    await fetch(`http://127.0.0.1:${backend.port}/__smoke/clear-incarnations`);
+    await page.locator(".brand").click();
+    await page.waitForSelector(".fleet-empty");
+    assert.match(await visibleText(page, ".fleet-empty"), /还没有 Yuki/);
+    await page.locator(".fleet-empty .fleet-new").click();
+    await page.waitForSelector("#yuki-create-backdrop");
+    await page.locator("#yuki-create-backdrop .draft-dialog-close").click();
 
     assert.deepEqual(pageErrors, [], "no page errors");
     console.log(

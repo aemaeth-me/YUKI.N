@@ -1,4 +1,4 @@
-module Yuki.Telemetry.Decode exposing (deliveryDecoder, draftDecoder, fleetEntryDecoder, frameDecoder, fsChangeDecoder, liveStatusDecoder)
+module Yuki.Telemetry.Decode exposing (deliveryDecoder, draftDecoder, fleetEntryDecoder, fleetSnapshotDecoder, frameDecoder, fsChangeDecoder, liveStatusDecoder)
 
 import Json.Decode as Decode exposing (Decoder)
 import Yuki.Telemetry.Types exposing (..)
@@ -121,6 +121,13 @@ liveStatusDecoder =
         |> decodeAndMap (Decode.field "activeTools" (Decode.list activeToolDecoder))
         |> decodeAndMap (Decode.field "workers" Decode.int)
         |> decodeAndMap (Decode.field "lastActivity" (Decode.maybe Decode.string))
+
+
+fleetSnapshotDecoder : Decoder ( List FleetEntry, List LiveStatus )
+fleetSnapshotDecoder =
+    Decode.map2 Tuple.pair
+        (Decode.field "incarnations" (Decode.list fleetEntryDecoder))
+        (Decode.field "runs" (Decode.list liveStatusDecoder))
 
 
 fleetEntryDecoder : Decoder FleetEntry

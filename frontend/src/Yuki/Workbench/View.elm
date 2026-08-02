@@ -10,6 +10,8 @@ import Yuki.Conversation.View as Conversation
 import Yuki.Delivery.View as DeliveryView
 import Yuki.Dispatch.State as DispatchState
 import Yuki.Dispatch.View as DispatchView
+import Yuki.Persona.State as PersonaState
+import Yuki.Persona.View as PersonaView
 import Yuki.Run.Monitor as Monitor
 import Yuki.Run.StatusCard as StatusCard
 import Yuki.Telemetry.State exposing (TelemetryState)
@@ -24,7 +26,10 @@ view : TelemetryState -> State.Model -> String -> WorkbenchView -> Html State.Ms
 view telemetry wb yuki viewName =
     div [ class "workbench" ]
         [ header [ class "wb-header" ]
-            [ h1 [ class "wb-title" ] [ text (yukiName telemetry yuki) ]
+            [ div [ class "wb-title-row" ]
+                [ h1 [ class "wb-title" ] [ text (yukiName telemetry yuki) ]
+                , button [ class "wb-persona-button", onClick (State.PersonaMsg (PersonaState.Open yuki)) ] [ text "人格" ]
+                ]
             , nav [ class "wb-nav" ] (List.map (navLink yuki viewName) navItems)
             ]
         , div [ class "wb-body" ]
@@ -48,6 +53,7 @@ view telemetry wb yuki viewName =
                     Html.map State.MonitorMsg (Monitor.view telemetry (cardConfig wb yuki) wb.monitor yuki runId)
             ]
         , DispatchView.dialog State.DispatchMsg wb.dispatch
+        , PersonaView.dialog State.PersonaMsg wb.persona
         ]
 
 

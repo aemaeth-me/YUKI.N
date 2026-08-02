@@ -3135,7 +3135,10 @@ textarea::placeholder {
 .conn-degraded { color: #e5c07b; }
 .conn-offline { color: #888; }
 .app-body { flex: 1; padding: 1rem; }
-.fleet-title { margin: 0 0 1rem; }
+.fleet-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+.fleet-title { margin: 0; }
+.fleet-new { color: #5fd08a; border: 1px solid #5fd08a55; border-radius: 999px; padding: 0.28rem 0.95rem; font-size: 0.82rem; }
+.fleet-new:hover { border-color: #5fd08a; }
 .fleet-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.75rem; }
 .yuki-card { display: block; border: 1px solid var(--line, #2a2a35); border-radius: 8px; padding: 0.75rem; text-decoration: none; color: inherit; background: var(--paper, #16161d); }
 .yuki-card.is-active { border-color: #5fd08a66; }
@@ -3150,12 +3153,16 @@ textarea::placeholder {
 .yuki-idle { opacity: 0.5; }
 .yuki-stats { font-size: 0.78rem; opacity: 0.7; }
 .yuki-waiting { margin-top: 0.35rem; font-size: 0.78rem; color: #e5c07b; }
-.fleet-empty { opacity: 0.6; padding: 2rem 0; }
+.fleet-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 0.8rem; opacity: 0.6; padding: 2rem 0; }
+.fleet-empty-text { font-size: 0.9rem; }
 
 /* workbench frame */
 .workbench { display: flex; flex-direction: column; gap: 1rem; max-width: 72rem; margin: 0 auto; }
 .wb-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; border-bottom: 1px solid var(--line, #2a2a35); padding-bottom: 0.55rem; }
+.wb-title-row { display: flex; align-items: center; gap: 0.7rem; }
 .wb-title { margin: 0; font-size: 1.15rem; font-weight: 600; }
+.wb-persona-button { font-size: 0.78rem; padding: 0.2rem 0.7rem; border-radius: 999px; border: 1px solid var(--line, #2a2a35); color: inherit; opacity: 0.85; }
+.wb-persona-button:hover { opacity: 1; border-color: #5fd08a88; }
 .wb-nav { display: flex; gap: 0.25rem; flex-wrap: wrap; }
 .wb-nav-link { padding: 0.28rem 0.75rem; border-radius: 999px; border: 1px solid transparent; color: inherit; opacity: 0.62; text-decoration: none; font-size: 0.82rem; }
 .wb-nav-link:hover { opacity: 1; }
@@ -3388,6 +3395,7 @@ input.rsc-steer-input:not([type="checkbox"]):not([type="radio"]):not([type="file
 .draft-capability-name { flex: 0 0 4.5rem; opacity: 0.6; }
 .draft-capability-value { min-width: 0; overflow-wrap: anywhere; }
 .draft-agent-note { font-size: 0.75rem; opacity: 0.7; }
+.draft-helper { font-size: 0.72rem; opacity: 0.55; }
 .draft-error { color: #e06c75; font-size: 0.78rem; }
 .draft-editor-actions { display: flex; align-items: center; gap: 0.8rem; justify-content: flex-end; }
 .draft-action { font-size: 0.8rem; padding: 0.25rem 0.9rem; border-radius: 999px; border: 1px solid var(--line, #2a2a35); color: inherit; opacity: 0.85; }
@@ -3397,6 +3405,18 @@ input.rsc-steer-input:not([type="checkbox"]):not([type="radio"]):not([type="file
 .draft-editor-locked .draft-input, .draft-editor-locked .draft-textarea { opacity: 0.6; }
 .draft-row-open { width: 100%; text-align: left; cursor: pointer; color: inherit; }
 .draft-row-open:hover { border-color: #e5c07b; }
+
+/* persona panel */
+.state-archived { color: #8b8b93; }
+.persona-id-row { display: flex; align-items: center; gap: 0.6rem; }
+.persona-id { font-family: var(--mono); font-size: 0.8rem; opacity: 0.8; }
+.persona-loading { font-size: 0.8rem; opacity: 0.6; padding: 0.5rem 0; }
+.persona-lifecycle { display: flex; flex-direction: column; gap: 0.4rem; border-top: 1px dashed var(--line, #2a2a35); padding-top: 0.6rem; }
+.persona-lifecycle-label { font-size: 0.66rem; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.55; }
+.persona-lifecycle-actions { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.persona-lifecycle-danger { color: #e06c75; border-color: #e06c7555; }
+.persona-lifecycle-armed { color: #e06c75; border-color: #e06c7555; background: #e06c750d; }
+.persona-lifecycle-action[disabled] { opacity: 0.45; }
 
 @media (max-width: 700px) {
   .wb-header { flex-direction: column; align-items: flex-start; }

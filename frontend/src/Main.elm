@@ -10,7 +10,8 @@ import Json.Encode as Encode
 import Time
 import Url exposing (Url)
 import Url.Parser as Parser exposing ((</>), Parser)
-import Yuki.Fleet.View as Fleet
+import Yuki.Fleet.State as Fleet
+import Yuki.Fleet.View as FleetView
 import Yuki.Telemetry.Decode as TelemetryDecode
 import Yuki.Telemetry.State as TelemetryState exposing (TelemetryState)
 import Yuki.Telemetry.Types exposing (..)
@@ -82,6 +83,7 @@ type alias Model =
     , telemetry : TelemetryState
     , endpoint : String
     , runStamp : String
+    , fleet : Fleet.Model
     , workbench : Workbench.Model
     }
 
@@ -94,6 +96,7 @@ type Msg
     | TransportEventReceived Decode.Value
     | InspectionResult Decode.Value
     | Tick Time.Posix
+    | FleetMsg Fleet.Msg
     | WorkbenchMsg Workbench.Msg
     | NoOp
 
@@ -122,6 +125,7 @@ init flags url nav =
         , telemetry = TelemetryState.init
         , endpoint = flags.endpoint
         , runStamp = flags.runStamp
+        , fleet = Fleet.init
         , workbench = Workbench.init
         }
         route
@@ -196,13 +200,24 @@ update msg model =
         InspectionResult value ->
             case Decode.decodeValue resultEnvelope value of
                 Ok ( kind, status, body ) ->
-                    workbenchUpdate (Workbench.InspectionResult kind status body) model
+                    case String.split "/" kind of
+                        "fleet" :: _ ->
+                            fleetResult status body model
+
+                        "create" :: _ ->
+                            fleetUpdate (Fleet.Result kind status body) model
+
+                        _ ->
+                            workbenchUpdate (Workbench.InspectionResult kind status body) model
 
                 Err _ ->
                     ( model, Cmd.none )
 
         Tick posix ->
             workbenchUpdate (Workbench.Tick posix) model
+
+        FleetMsg fleetMsg ->
+            fleetUpdate fleetMsg model
 
         WorkbenchMsg wbMsg ->
             workbenchUpdate wbMsg model
@@ -215,7 +230,7 @@ onRoute : Model -> Route -> ( Model, Cmd Msg )
 onRoute model route =
     case route of
         RouteFleet ->
-            ( { model | route = route }, Cmd.none )
+            ( { model | route = route }, fleetRefetch model )
 
         RouteWorkbench yuki viewName ->
             workbenchUpdate (Workbench.Entered yuki viewName) { model | route = route }
@@ -278,6 +293,42 @@ workbenchUpdate msg model =
             Workbench.update (workbenchEffects model) msg model.workbench
     in
     ( { model | workbench = workbench }, cmd )
+
+
+fleetUpdate : Fleet.Msg -> Model -> ( Model, Cmd Msg )
+fleetUpdate msg model =
+    let
+        ( fleet, cmd ) =
+            Fleet.update (fleetEffects model) msg model.fleet
+    in
+    ( { model | fleet = fleet }, cmd )
+
+
+fleetEffects : Model -> Fleet.Effects Msg
+fleetEffects model =
+    { endpoint = model.endpoint
+    , inspect = inspect
+    , navigate = Nav.pushUrl model.nav
+    }
+
+
+fleetRefetch : Model -> Cmd Msg
+fleetRefetch model =
+    inspect (Fleet.request "fleet" "GET" "/fleet" Nothing model.endpoint)
+
+
+fleetResult : Int -> Decode.Value -> Model -> ( Model, Cmd Msg )
+fleetResult status body model =
+    if status >= 400 then
+        ( model, Cmd.none )
+
+    else
+        case Decode.decodeValue TelemetryDecode.fleetSnapshotDecoder body of
+            Ok ( entries, runs ) ->
+                ( { model | telemetry = TelemetryState.apply (FrameFleet entries runs) model.telemetry }, Cmd.none )
+
+            Err _ ->
+                ( model, Cmd.none )
 
 
 workbenchEffects : Model -> Workbench.Effects Msg
@@ -376,7 +427,7 @@ pageView : Model -> Html Msg
 pageView model =
     case model.route of
         RouteFleet ->
-            Fleet.view model.telemetry
+            Html.map FleetMsg (FleetView.view model.telemetry model.fleet)
 
         RouteWorkbench yuki viewName ->
             Html.map WorkbenchMsg (WorkbenchView.view model.telemetry model.workbench yuki viewName)

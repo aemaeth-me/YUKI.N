@@ -9,6 +9,7 @@ import Yuki.Conversation.State as Conversation
 import Yuki.Conversation.Types as ConversationTypes
 import Yuki.Delivery.State as Delivery
 import Yuki.Dispatch.State as Dispatch
+import Yuki.Persona.State as Persona
 import Yuki.Run.Monitor as Monitor
 import Yuki.Run.StatusCard as StatusCard
 import Yuki.Telemetry.State exposing (TelemetryState)
@@ -46,6 +47,7 @@ type alias Model =
     , view : Maybe WorkbenchView
     , conversation : Conversation.Model
     , dispatch : Dispatch.Model
+    , persona : Persona.Model
     , delivery : Delivery.Model
     , changes : Changes.Model
     , monitor : Monitor.Model
@@ -70,6 +72,7 @@ init =
     , view = Nothing
     , conversation = Conversation.init
     , dispatch = Dispatch.init
+    , persona = Persona.init
     , delivery = Delivery.init
     , changes = Changes.init
     , monitor = Monitor.init
@@ -83,6 +86,7 @@ type Msg
     | StatusCard StatusCard.Msg
     | ConversationMsg ConversationTypes.Msg
     | DispatchMsg Dispatch.Msg
+    | PersonaMsg Persona.Msg
     | DeliveryMsg Delivery.Msg
     | ChangesMsg Changes.Msg
     | MonitorMsg Monitor.Msg
@@ -174,6 +178,9 @@ update effects msg model =
                     Dispatch.update (dispatchEffects effects) dispatchMsg model.dispatch
             in
             ( { model | dispatch = dispatch }, cmd )
+
+        PersonaMsg personaMsg ->
+            personaUpdate effects personaMsg model
 
         DeliveryMsg deliveryMsg ->
             deliveryUpdate effects deliveryMsg model
@@ -317,6 +324,9 @@ handleResult effects kind status body model =
         "dispatch" :: rest ->
             dispatchUpdate effects (Dispatch.Result (String.join "/" rest) status body) model
 
+        "persona" :: rest ->
+            personaUpdate effects (Persona.Result (String.join "/" rest) status body) model
+
         "deliveries" :: _ ->
             deliveryUpdate effects (Delivery.Result kind status body) model
 
@@ -358,6 +368,23 @@ dispatchUpdate effects dispatchMsg model =
             Dispatch.update (dispatchEffects effects) dispatchMsg model.dispatch
     in
     ( { model | dispatch = dispatch }, cmd )
+
+
+personaUpdate : Effects msg -> Persona.Msg -> Model -> ( Model, Cmd msg )
+personaUpdate effects personaMsg model =
+    let
+        ( persona, cmd ) =
+            Persona.update (personaEffects effects) personaMsg model.persona
+    in
+    ( { model | persona = persona }, cmd )
+
+
+personaEffects : Effects msg -> Persona.Effects msg
+personaEffects effects =
+    { endpoint = effects.endpoint
+    , inspect = effects.inspect
+    , navigate = effects.navigate
+    }
 
 
 deliveryUpdate : Effects msg -> Delivery.Msg -> Model -> ( Model, Cmd msg )
