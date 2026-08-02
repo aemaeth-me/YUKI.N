@@ -2,16 +2,21 @@ port module Main exposing (main)
 
 import Browser
 import Browser.Navigation as Nav
+import Dict
 import Html exposing (..)
-import Html.Attributes exposing (class, classList, href)
+import Html.Attributes exposing (class, href)
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode
+import Time
 import Url exposing (Url)
 import Url.Parser as Parser exposing ((</>), Parser)
 import Yuki.Fleet.View as Fleet
 import Yuki.Telemetry.Decode as TelemetryDecode
 import Yuki.Telemetry.State as TelemetryState exposing (TelemetryState)
 import Yuki.Telemetry.Types exposing (..)
+import Yuki.Workbench.State as Workbench
+import Yuki.Workbench.Types exposing (WorkbenchView(..))
+import Yuki.Workbench.View as WorkbenchView
 
 
 port runAgent : Encode.Value -> Cmd msg
@@ -71,19 +76,12 @@ type Route
     | RouteWorkbench String WorkbenchView
 
 
-type WorkbenchView
-    = ViewNow
-    | ViewChat
-    | ViewTasks
-    | ViewDeliveries
-    | ViewChanges
-
-
 type alias Model =
     { nav : Nav.Key
     , route : Route
     , telemetry : TelemetryState
-    , lastYuki : String
+    , endpoint : String
+    , workbench : Workbench.Model
     }
 
 
@@ -91,6 +89,9 @@ type Msg
     = LinkClicked Browser.UrlRequest
     | UrlChanged Url
     | ActivityFrameReceived Decode.Value
+    | InspectionResult Decode.Value
+    | Tick Time.Posix
+    | WorkbenchMsg Workbench.Msg
     | NoOp
 
 
@@ -108,13 +109,18 @@ main =
 
 init : Flags -> Url -> Nav.Key -> ( Model, Cmd Msg )
 init flags url nav =
-    ( { nav = nav
-      , route = parse url
-      , telemetry = TelemetryState.init
-      , lastYuki = flags.incarnationId
-      }
-    , Cmd.none
-    )
+    let
+        route =
+            parse url
+    in
+    onRoute
+        { nav = nav
+        , route = route
+        , telemetry = TelemetryState.init
+        , endpoint = flags.endpoint
+        , workbench = Workbench.init
+        }
+        route
 
 
 parse : Url -> Route
@@ -140,6 +146,7 @@ viewParser =
         , Parser.map ViewTasks (Parser.s "tasks")
         , Parser.map ViewDeliveries (Parser.s "deliveries")
         , Parser.map ViewChanges (Parser.s "changes")
+        , Parser.map ViewRun (Parser.s "run" </> Parser.string)
         ]
 
 
@@ -153,7 +160,7 @@ update msg model =
             ( model, Nav.load href )
 
         UrlChanged url ->
-            ( { model | route = parse url }, Cmd.none )
+            onRoute model (parse url)
 
         ActivityFrameReceived value ->
             case Decode.decodeValue connDecoder value of
@@ -163,13 +170,74 @@ update msg model =
                 Err _ ->
                     case Decode.decodeValue TelemetryDecode.frameDecoder value of
                         Ok frame ->
-                            ( { model | telemetry = TelemetryState.apply frame model.telemetry }, Cmd.none )
+                            let
+                                before =
+                                    model.telemetry
+
+                                after =
+                                    TelemetryState.apply frame before
+                            in
+                            tickRefetch { model | telemetry = after } before after
 
                         Err _ ->
                             ( model, Cmd.none )
 
+        InspectionResult value ->
+            case Decode.decodeValue resultEnvelope value of
+                Ok ( kind, status, body ) ->
+                    workbenchUpdate (Workbench.InspectionResult kind status body) model
+
+                Err _ ->
+                    ( model, Cmd.none )
+
+        Tick posix ->
+            workbenchUpdate (Workbench.Tick posix) model
+
+        WorkbenchMsg wbMsg ->
+            workbenchUpdate wbMsg model
+
         NoOp ->
             ( model, Cmd.none )
+
+
+onRoute : Model -> Route -> ( Model, Cmd Msg )
+onRoute model route =
+    case route of
+        RouteFleet ->
+            ( { model | route = route }, Cmd.none )
+
+        RouteWorkbench yuki viewName ->
+            workbenchUpdate (Workbench.Entered yuki viewName) { model | route = route }
+
+
+tickRefetch : Model -> TelemetryState -> TelemetryState -> ( Model, Cmd Msg )
+tickRefetch model before after =
+    case model.route of
+        RouteWorkbench yuki ViewNow ->
+            if Dict.get yuki before.tick /= Dict.get yuki after.tick then
+                workbenchUpdate (Workbench.ActivityChanged yuki) model
+
+            else
+                ( model, Cmd.none )
+
+        _ ->
+            ( model, Cmd.none )
+
+
+workbenchUpdate : Workbench.Msg -> Model -> ( Model, Cmd Msg )
+workbenchUpdate msg model =
+    let
+        ( workbench, cmd ) =
+            Workbench.update (effects model) msg model.workbench
+    in
+    ( { model | workbench = workbench }, cmd )
+
+
+effects : Model -> Workbench.Effects Msg
+effects model =
+    { endpoint = model.endpoint
+    , inspect = inspect
+    }
 
 
 connDecoder : Decoder Connection
@@ -199,9 +267,20 @@ connDecoder =
             )
 
 
+resultEnvelope : Decoder ( String, Int, Decode.Value )
+resultEnvelope =
+    Decode.map3 (\kind status body -> ( kind, status, body ))
+        (Decode.field "kind" Decode.string)
+        (Decode.field "status" Decode.int)
+        (Decode.field "body" Decode.value)
+
+
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    activityEvent ActivityFrameReceived
+    Sub.batch
+        [ activityEvent ActivityFrameReceived
+        , Time.every 1000 Tick
+        ]
 
 
 view : Model -> Browser.Document Msg
@@ -244,26 +323,4 @@ pageView model =
             Fleet.view model.telemetry
 
         RouteWorkbench yuki viewName ->
-            div [ class "workbench" ]
-                [ h1 [] [ text yuki ]
-                , p [] [ text (viewLabel viewName ++ " 视图即将上线") ]
-                ]
-
-
-viewLabel : WorkbenchView -> String
-viewLabel viewName =
-    case viewName of
-        ViewNow ->
-            "现在"
-
-        ViewChat ->
-            "主对话"
-
-        ViewTasks ->
-            "任务"
-
-        ViewDeliveries ->
-            "交付"
-
-        ViewChanges ->
-            "变更"
+            Html.map WorkbenchMsg (WorkbenchView.view model.telemetry model.workbench yuki viewName)

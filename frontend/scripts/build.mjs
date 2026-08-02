@@ -31,6 +31,7 @@ await Promise.all(
   [
     "index.html",
     "app.js",
+    "activity.js",
     "clipboard.js",
     "control.js",
     "scroll.js",

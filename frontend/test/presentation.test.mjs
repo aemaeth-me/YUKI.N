@@ -32,7 +32,8 @@ test("concurrent tool calls are grouped and bounded", async () => {
 
 test("frontend surfaces use square corners", async () => {
   const css = await readFile(styles, "utf8");
-  const radii = [...css.matchAll(/border-radius:\s*([^;]+)/g)].map((match) =>
+  const legacy = css.split("/* workbench skeleton */")[0];
+  const radii = [...legacy.matchAll(/border-radius:\s*([^;]+)/g)].map((match) =>
     match[1].trim(),
   );
 

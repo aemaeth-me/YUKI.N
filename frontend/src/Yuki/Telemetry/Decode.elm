@@ -1,4 +1,4 @@
-module Yuki.Telemetry.Decode exposing (frameDecoder)
+module Yuki.Telemetry.Decode exposing (deliveryDecoder, draftDecoder, fleetEntryDecoder, frameDecoder, liveStatusDecoder)
 
 import Json.Decode as Decode exposing (Decoder)
 import Yuki.Telemetry.Types exposing (..)
@@ -137,7 +137,7 @@ fleetEntryDecoder =
 deliveryDecoder : Decoder DeliveryRecord
 deliveryDecoder =
     Decode.map7 DeliveryRecord
-        (Decode.field "deliveryId" Decode.string)
+        (Decode.field "id" Decode.string)
         (Decode.field "runId" Decode.string)
         (Decode.field "threadId" Decode.string)
         (Decode.field "incarnationId" Decode.string)
@@ -172,7 +172,7 @@ originDecoder =
 fsChangeDecoder : Decoder FsChangeRecord
 fsChangeDecoder =
     Decode.succeed FsChangeRecord
-        |> decodeAndMap (Decode.field "fsChangeId" Decode.string)
+        |> decodeAndMap (Decode.field "id" Decode.string)
         |> decodeAndMap (Decode.field "runId" Decode.string)
         |> decodeAndMap (Decode.field "threadId" Decode.string)
         |> decodeAndMap (Decode.field "incarnationId" Decode.string)
