@@ -36,7 +36,7 @@ import Data.Functor (($>), (<&>))
 import Data.List (find, sortOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (catMaybes, fromMaybe, isNothing, listToMaybe, mapMaybe)
+import Data.Maybe (catMaybes, fromMaybe, isJust, isNothing, listToMaybe, mapMaybe)
 import Data.Ord (Down (..))
 import Data.Set (Set)
 import Data.Set qualified as Set
@@ -1752,10 +1752,12 @@ closeExperience cognition incarnation input outcome messages =
       appendRunEvents cognition incarnation input outcome messages >>= \events ->
         case reverse events of
           [] -> pure ()
-          finalEvent : _ ->
-            commitFinalContext >>= \epoch ->
-              enqueueConsolidation cognition incarnation events >>= \requestEvent ->
-                projectClosure epoch requestEvent (experienceEventId finalEvent)
+          finalEvent : _
+            | isJust (AGUI.runParentId input) -> pure ()
+            | otherwise ->
+                commitFinalContext >>= \epoch ->
+                  enqueueConsolidation cognition incarnation events >>= \requestEvent ->
+                    projectClosure epoch requestEvent (experienceEventId finalEvent)
  where
   identity = incarnationId incarnation
   task = AGUI.runThreadId input

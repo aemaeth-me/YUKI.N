@@ -146,12 +146,11 @@ spawnTool parent =
           (_, Error message) ->
             pure (ToolOutcome ("invalid tool arguments: " <> Text.pack message) True False)
           (Just registry, Success (SpawnCall prompt objective)) ->
-            liftA2 (+) (countActive registry context) (countFinished registry context) >>= \active ->
+            countActive registry context >>= \active ->
               if active >= limit
                 then pure (ToolOutcome "worker parallel limit reached" True False)
                 else spawn registry context prompt objective
   countActive registry context = length <$> childrenOf registry (toolContextRunId context)
-  countFinished registry context = length <$> completionsOf registry (toolContextRunId context)
   spawn registry context prompt objective =
     runtimeNewId parent >>= \subRunId ->
       let sub = childRuntime parent context
