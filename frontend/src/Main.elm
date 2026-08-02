@@ -224,8 +224,11 @@ onRoute model route =
 tickRefetch : Model -> TelemetryState -> TelemetryState -> ( Model, Cmd Msg )
 tickRefetch model before after =
     case model.route of
-        RouteWorkbench yuki ViewNow ->
+        RouteWorkbench yuki viewName ->
             if Dict.get yuki before.tick /= Dict.get yuki after.tick then
+                refetchView yuki viewName model
+
+            else if runLeft viewName before after || runAppeared viewName before after then
                 workbenchUpdate (Workbench.ActivityChanged yuki) model
 
             else
@@ -233,6 +236,39 @@ tickRefetch model before after =
 
         _ ->
             ( model, Cmd.none )
+
+
+refetchView : String -> WorkbenchView -> Model -> ( Model, Cmd Msg )
+refetchView yuki viewName model =
+    case viewName of
+        ViewChat _ ->
+            ( model, Cmd.none )
+
+        ViewTasks ->
+            ( model, Cmd.none )
+
+        _ ->
+            workbenchUpdate (Workbench.ActivityChanged yuki) model
+
+
+runLeft : WorkbenchView -> TelemetryState -> TelemetryState -> Bool
+runLeft viewName before after =
+    case viewName of
+        ViewRun runId ->
+            Dict.member runId before.runs && not (Dict.member runId after.runs)
+
+        _ ->
+            False
+
+
+runAppeared : WorkbenchView -> TelemetryState -> TelemetryState -> Bool
+runAppeared viewName before after =
+    case viewName of
+        ViewRun runId ->
+            not (Dict.member runId before.runs) && Dict.member runId after.runs
+
+        _ ->
+            False
 
 
 workbenchUpdate : Workbench.Msg -> Model -> ( Model, Cmd Msg )
@@ -251,6 +287,7 @@ workbenchEffects model =
     , inspect = inspect
     , runAgent = runAgent
     , cancelAgent = cancelAgent
+    , copyText = copyText
     , navigate = Nav.pushUrl model.nav
     , telemetry = model.telemetry
     }

@@ -1,4 +1,4 @@
-module Yuki.Telemetry.Decode exposing (deliveryDecoder, draftDecoder, fleetEntryDecoder, frameDecoder, liveStatusDecoder)
+module Yuki.Telemetry.Decode exposing (deliveryDecoder, draftDecoder, fleetEntryDecoder, frameDecoder, fsChangeDecoder, liveStatusDecoder)
 
 import Json.Decode as Decode exposing (Decoder)
 import Yuki.Telemetry.Types exposing (..)

@@ -5,9 +5,12 @@ import Html exposing (..)
 import Html.Attributes exposing (class, classList, href)
 import Html.Events exposing (onClick)
 import Time exposing (Posix)
+import Yuki.Changes.View as ChangesView
 import Yuki.Conversation.View as Conversation
+import Yuki.Delivery.View as DeliveryView
 import Yuki.Dispatch.State as DispatchState
 import Yuki.Dispatch.View as DispatchView
+import Yuki.Run.Monitor as Monitor
 import Yuki.Run.StatusCard as StatusCard
 import Yuki.Telemetry.State exposing (TelemetryState)
 import Yuki.Telemetry.Types exposing (..)
@@ -35,11 +38,14 @@ view telemetry wb yuki viewName =
                 ViewTasks ->
                     tasksView telemetry wb yuki
 
-                ViewRun runId ->
-                    runView telemetry wb yuki runId
+                ViewDeliveries ->
+                    Html.map State.DeliveryMsg (DeliveryView.view wb.now wb.delivery yuki)
 
-                _ ->
-                    placeholderView
+                ViewChanges ->
+                    Html.map State.ChangesMsg (ChangesView.view wb.now wb.changes yuki)
+
+                ViewRun runId ->
+                    Html.map State.MonitorMsg (Monitor.view telemetry (cardConfig wb yuki) wb.monitor yuki runId)
             ]
         , DispatchView.dialog State.DispatchMsg wb.dispatch
         ]
@@ -72,14 +78,6 @@ navLink yuki current ( path, viewName, label ) =
         , href ("/yuki/" ++ yuki ++ "/" ++ path)
         ]
         [ text label ]
-
-
-placeholderView : Html State.Msg
-placeholderView =
-    div [ class "wb-placeholder" ]
-        [ h2 [] [ text "即将上线" ]
-        , p [] [ text "该视图正在打磨中，敬请期待。" ]
-        ]
 
 
 chatView : TelemetryState -> State.Model -> String -> Maybe String -> Html State.Msg
@@ -289,7 +287,10 @@ activeThreadIds telemetry =
 
 taskRow : Posix -> List String -> SessionMeta -> Html State.Msg
 taskRow now activeThreads meta =
-    div [ class "wb-task-row" ]
+    a
+        [ class "wb-task-row wb-task-row-link"
+        , href ("/yuki/" ++ meta.incarnationId ++ "/chat/" ++ meta.id)
+        ]
         [ span [ class "wb-task-row-title" ] [ text meta.title ]
         , div [ class "wb-task-row-meta" ]
             [ if List.member meta.id activeThreads then
@@ -305,21 +306,3 @@ taskRow now activeThreads meta =
             , span [ class "wb-task-row-time" ] [ text (relativeTime now meta.updated) ]
             ]
         ]
-
-
-runView : TelemetryState -> State.Model -> String -> String -> Html State.Msg
-runView telemetry wb yuki runId =
-    case Dict.get runId telemetry.runs of
-        Just run ->
-            let
-                cfg =
-                    cardConfig wb yuki
-            in
-            div [ class "run-monitor" ]
-                [ Html.map State.StatusCard (StatusCard.view { cfg | wide = True } run) ]
-
-        Nothing ->
-            div [ class "run-missing" ]
-                [ p [] [ text "该 Run 不在活跃列表中" ]
-                , a [ href ("/yuki/" ++ yuki ++ "/now") ] [ text "← 返回现在视图" ]
-                ]

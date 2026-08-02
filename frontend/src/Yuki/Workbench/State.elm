@@ -4,9 +4,12 @@ import Dict exposing (Dict)
 import Json.Decode as Decode
 import Json.Encode as Encode
 import Time exposing (Posix)
+import Yuki.Changes.State as Changes
 import Yuki.Conversation.State as Conversation
 import Yuki.Conversation.Types as ConversationTypes
+import Yuki.Delivery.State as Delivery
 import Yuki.Dispatch.State as Dispatch
+import Yuki.Run.Monitor as Monitor
 import Yuki.Run.StatusCard as StatusCard
 import Yuki.Telemetry.State exposing (TelemetryState)
 import Yuki.Telemetry.Types exposing (RunId)
@@ -20,6 +23,7 @@ type alias Effects msg =
     , inspect : Encode.Value -> Cmd msg
     , runAgent : Encode.Value -> Cmd msg
     , cancelAgent : Encode.Value -> Cmd msg
+    , copyText : String -> Cmd msg
     , navigate : String -> Cmd msg
     , telemetry : TelemetryState
     }
@@ -39,8 +43,12 @@ type alias Model =
     , actionStatus : Dict RunId String
     , now : Posix
     , yuki : Maybe String
+    , view : Maybe WorkbenchView
     , conversation : Conversation.Model
     , dispatch : Dispatch.Model
+    , delivery : Delivery.Model
+    , changes : Changes.Model
+    , monitor : Monitor.Model
     }
 
 
@@ -59,8 +67,12 @@ init =
     , actionStatus = Dict.empty
     , now = Time.millisToPosix 0
     , yuki = Nothing
+    , view = Nothing
     , conversation = Conversation.init
     , dispatch = Dispatch.init
+    , delivery = Delivery.init
+    , changes = Changes.init
+    , monitor = Monitor.init
     }
 
 
@@ -71,6 +83,9 @@ type Msg
     | StatusCard StatusCard.Msg
     | ConversationMsg ConversationTypes.Msg
     | DispatchMsg Dispatch.Msg
+    | DeliveryMsg Delivery.Msg
+    | ChangesMsg Changes.Msg
+    | MonitorMsg Monitor.Msg
     | AgentEvent Decode.Value
     | TransportEvent Decode.Value
     | Tick Posix
@@ -83,7 +98,7 @@ update effects msg model =
         Entered yuki view ->
             let
                 withYuki =
-                    { model | yuki = Just yuki }
+                    { model | yuki = Just yuki, view = Just view }
             in
             case view of
                 ViewNow ->
@@ -103,15 +118,32 @@ update effects msg model =
                     in
                     ( { withYuki | conversation = conversation }, cmd )
 
-                _ ->
-                    ( withYuki, Cmd.none )
+                ViewDeliveries ->
+                    deliveryUpdate effects (Delivery.Enter yuki) withYuki
+
+                ViewChanges ->
+                    changesUpdate effects (Changes.Enter yuki) withYuki
+
+                ViewRun runId ->
+                    monitorUpdate effects (Monitor.Enter yuki runId) withYuki
 
         ActivityChanged yuki ->
-            if model.fetchPending then
-                ( model, Cmd.none )
+            case model.view of
+                Just ViewDeliveries ->
+                    deliveryUpdate effects (Delivery.ActivityChanged yuki) model
 
-            else
-                fetchActivity effects yuki model
+                Just ViewChanges ->
+                    changesUpdate effects (Changes.ActivityChanged yuki) model
+
+                Just (ViewRun runId) ->
+                    monitorUpdate effects (Monitor.ActivityChanged yuki runId) model
+
+                _ ->
+                    if model.fetchPending then
+                        ( model, Cmd.none )
+
+                    else
+                        fetchActivity effects yuki model
 
         InspectionResult kind status body ->
             handleResult effects kind status body model
@@ -142,6 +174,20 @@ update effects msg model =
                     Dispatch.update (dispatchEffects effects) dispatchMsg model.dispatch
             in
             ( { model | dispatch = dispatch }, cmd )
+
+        DeliveryMsg deliveryMsg ->
+            deliveryUpdate effects deliveryMsg model
+
+        ChangesMsg changesMsg ->
+            changesUpdate effects changesMsg model
+
+        MonitorMsg monitorMsg ->
+            case monitorMsg of
+                Monitor.Card cardMsg ->
+                    handleCard effects cardMsg model
+
+                _ ->
+                    monitorUpdate effects monitorMsg model
 
         AgentEvent value ->
             let
@@ -190,6 +236,29 @@ dispatchEffects effects =
     { endpoint = effects.endpoint
     , inspect = effects.inspect
     , navigate = effects.navigate
+    }
+
+
+deliveryEffects : Effects msg -> Delivery.Effects msg
+deliveryEffects effects =
+    { endpoint = effects.endpoint
+    , inspect = effects.inspect
+    , copyText = effects.copyText
+    }
+
+
+changesEffects : Effects msg -> Changes.Effects msg
+changesEffects effects =
+    { endpoint = effects.endpoint
+    , inspect = effects.inspect
+    }
+
+
+monitorEffects : Effects msg -> Monitor.Effects msg
+monitorEffects effects =
+    { endpoint = effects.endpoint
+    , inspect = effects.inspect
+    , telemetry = effects.telemetry
     }
 
 
@@ -248,6 +317,21 @@ handleResult effects kind status body model =
         "dispatch" :: rest ->
             dispatchUpdate effects (Dispatch.Result (String.join "/" rest) status body) model
 
+        "deliveries" :: _ ->
+            deliveryUpdate effects (Delivery.Result kind status body) model
+
+        "artifact" :: _ ->
+            deliveryUpdate effects (Delivery.Result kind status body) model
+
+        "changes" :: _ ->
+            changesUpdate effects (Changes.Result kind status body) model
+
+        "summary" :: _ ->
+            monitorUpdate effects (Monitor.Result kind status body) model
+
+        "monitor" :: _ ->
+            monitorUpdate effects (Monitor.Result kind status body) model
+
         "steer" :: rest ->
             finishAction (String.join "/" rest) "已发送" status body model
 
@@ -274,6 +358,33 @@ dispatchUpdate effects dispatchMsg model =
             Dispatch.update (dispatchEffects effects) dispatchMsg model.dispatch
     in
     ( { model | dispatch = dispatch }, cmd )
+
+
+deliveryUpdate : Effects msg -> Delivery.Msg -> Model -> ( Model, Cmd msg )
+deliveryUpdate effects deliveryMsg model =
+    let
+        ( delivery, cmd ) =
+            Delivery.update (deliveryEffects effects) deliveryMsg model.delivery
+    in
+    ( { model | delivery = delivery }, cmd )
+
+
+changesUpdate : Effects msg -> Changes.Msg -> Model -> ( Model, Cmd msg )
+changesUpdate effects changesMsg model =
+    let
+        ( changes, cmd ) =
+            Changes.update (changesEffects effects) changesMsg model.changes
+    in
+    ( { model | changes = changes }, cmd )
+
+
+monitorUpdate : Effects msg -> Monitor.Msg -> Model -> ( Model, Cmd msg )
+monitorUpdate effects monitorMsg model =
+    let
+        ( monitor, cmd ) =
+            Monitor.update (monitorEffects effects) monitorMsg model.monitor
+    in
+    ( { model | monitor = monitor }, cmd )
 
 
 finishAction : RunId -> String -> Int -> Decode.Value -> Model -> ( Model, Cmd msg )

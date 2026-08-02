@@ -1,4 +1,4 @@
-module Yuki.Workbench.Format exposing (elapsedSeconds, formatDuration, formatRelative, formatTokens)
+module Yuki.Workbench.Format exposing (elapsedSeconds, formatBytes, formatDuration, formatRelative, formatTokens)
 
 import Time
 
@@ -6,6 +6,18 @@ import Time
 elapsedSeconds : Time.Posix -> Int -> Int
 elapsedSeconds now stampSeconds =
     max 0 (Time.posixToMillis now // 1000 - stampSeconds)
+
+
+formatBytes : Int -> String
+formatBytes bytes =
+    if bytes < 1024 then
+        String.fromInt bytes ++ " B"
+
+    else if bytes < 1048576 then
+        compact (toFloat bytes / 1024) "KB"
+
+    else
+        compact (toFloat bytes / 1048576) "MB"
 
 
 formatDuration : Int -> String
