@@ -208,6 +208,7 @@ application cors inspection configs runs runtimeFor request respond =
   route "POST" ["incarnations"] = withCognition createIncarnation
   route "GET" ["incarnations", incarnationId] = withCognition (readIncarnation incarnationId)
   route "GET" ["incarnations", incarnationId, "tasks"] = withSessions (incarnationTasks incarnationId)
+  route "GET" ["incarnations", incarnationId, "home"] = withSessions (homeThread incarnationId)
   route "PATCH" ["incarnations", incarnationId] = withCognition (updateIncarnation incarnationId)
   route "POST" ["incarnations", incarnationId, "archive"] = withCognition (archiveIncarnation incarnationId)
   route "POST" ["incarnations", incarnationId, "restore"] = withCognition (restoreIncarnation incarnationId)
@@ -392,7 +393,7 @@ application cors inspection configs runs runtimeFor request respond =
                   activeTaskRuns owned >>= \case
                     running@(_ : _) -> respond (conflict (activeRunMessage running))
                     [] ->
-                      let active = filter (not . sessionArchived) owned
+                      let active = filter (not . sessionArchived) . filter (not . sessionIsHome) $ owned
                        in archiveOwnedTasks service active >>= \case
                             Left failure -> respond (sessionError failure)
                             Right archived ->
@@ -634,9 +635,37 @@ application cors inspection configs runs runtimeFor request respond =
     listFor identity =
       contextEpochList (cognitionContexts cognition) identity task >>= respond . ok
   sessionList service =
-    listSessions (serviceSessions service) includeArchived >>= respond . ok
+    listSessions (serviceSessions service) includeArchived
+      >>= respond . ok . filter (matches (kindQuery request))
+   where
+    matches (Just "home") = sessionIsHome
+    matches (Just "task") = not . sessionIsHome
+    matches _ = const True
+    kindQuery = fmap Text.decodeUtf8 . join . lookup "kind" . queryString
   incarnationTasks identifier service =
     tasksForIncarnation identifier service includeArchived >>= respond . ok
+  homeThread identifier service =
+    maybe
+      (respond (missing "incarnation not found"))
+      ( \cognition ->
+          incarnationRead (cognitionIncarnations cognition) identifier >>= \case
+            Nothing -> respond (missing "incarnation not found")
+            Just incarnation
+              | incarnationStatus incarnation == IncarnationArchived -> respond (missing "incarnation not found")
+              | otherwise ->
+                  ensureHomeSession (serviceSessions service) identifier (Just (incarnationName incarnation))
+                    >>= \meta ->
+                      threadConfigRead (serviceConfigs service) (homeThreadId identifier)
+                        >>= respond . ok . homeView identifier meta
+      )
+      (inspectionCognition =<< inspection)
+   where
+    homeView identity meta config =
+      object
+        [ "threadId" .= homeThreadId identity,
+          "meta" .= meta,
+          "config" .= config
+        ]
   tasksForIncarnation identifier service archived =
     filter ((== identifier) . sessionOwnerId) <$> listSessions (serviceSessions service) archived
   createThread service =
@@ -672,22 +701,28 @@ application cors inspection configs runs runtimeFor request respond =
   renameThread threadId service =
     withBody "invalid rename request: " $ \(RenameSessionRequest title) ->
       renameSession (serviceSessions service) threadId title >>= sessionResult
-  archiveThread threadId service = archiveSession service threadId >>= sessionResult
+  homeGuard service threadId continue =
+    findSession (serviceSessions service) threadId >>= \case
+      Just meta | sessionIsHome meta -> respond (jsonResponse cors status400 [] (message "home_session_immutable"))
+      _ -> continue
+  archiveThread threadId service = homeGuard service threadId (archiveSession service threadId >>= sessionResult)
   restoreThread threadId service =
-    maybe
-      (restoreSession service threadId >>= sessionResult)
-      ( \cognition ->
-          incarnationForThread cognition threadId >>= \case
-            Left failure -> respond (cognitionError failure)
-            Right _ -> restoreSession service threadId >>= sessionResult
-      )
-      (inspectionCognition =<< inspection)
+    homeGuard service threadId $
+      maybe
+        (restoreSession service threadId >>= sessionResult)
+        ( \cognition ->
+            incarnationForThread cognition threadId >>= \case
+              Left failure -> respond (cognitionError failure)
+              Right _ -> restoreSession service threadId >>= sessionResult
+        )
+        (inspectionCognition =<< inspection)
   forkThread source service =
-    refreshTaskProjection source service >>= \case
-      Left failure -> respond (cognitionError failure)
-      Right () ->
-        withBody "invalid fork request: " $ \(ForkSessionRequest target title node) ->
-          forkSession service source target node title >>= sessionResult
+    homeGuard service source $
+      refreshTaskProjection source service >>= \case
+        Left failure -> respond (cognitionError failure)
+        Right () ->
+          withBody "invalid fork request: " $ \(ForkSessionRequest target title node) ->
+            forkSession service source target node title >>= sessionResult
   sleepThread threadId service =
     case inspectionCognition =<< inspection of
       Nothing ->
@@ -779,7 +814,10 @@ application cors inspection configs runs runtimeFor request respond =
       Left failure -> respond (cognitionError failure)
       Right () -> exportSession service threadId >>= respond . maybe (missing "thread not found") ok
   importThread service =
-    withBody "invalid import request: " (importSession service >=> sessionResult)
+    withBody "invalid import request: " $ \incoming ->
+      homeGuard service (importTarget incoming) (importSession service incoming >>= sessionResult)
+   where
+    importTarget incoming = fromMaybe (sessionId (bundleMeta (importBundle incoming))) (importTargetId incoming)
   sessionResult = either (respond . sessionError) (respond . ok)
   sessionError errorText
     | "unknown thread:" `TextValue.isPrefixOf` errorText = missing errorText

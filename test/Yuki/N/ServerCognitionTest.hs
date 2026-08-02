@@ -21,11 +21,12 @@ import Network.Wai.Test
 import Test.Tasty
 import Test.Tasty.HUnit
 import Yuki.N.Agent (Runtime (..))
-import Yuki.N.Cognition (Cognition, newCognition)
+import Yuki.N.Cognition (Cognition (..), newCognition)
+import Yuki.N.Incarnation (Incarnation (..), IncarnationStore (..))
 import Yuki.N.Inspect (newInspection, withCognition, withSessionService)
 import Yuki.N.Model
 import Yuki.N.Server (application)
-import Yuki.N.Sessions (SessionService (..))
+import Yuki.N.Sessions (SessionService (..), SessionStore (..), sessionIsHome)
 import Yuki.N.TestSupport
 import Yuki.N.Transcript (transcriptSave)
 
@@ -36,7 +37,9 @@ serverCognitionTests =
     [ testCase "incarnation create/update/archive/restore/delete lifecycle over HTTP" incarnationLifecycleOverHttp,
       testCase "long-term memory list/detail/search/void/receipts over HTTP" memoryLifecycleOverHttp,
       testCase "working memory, sleep cycles, experiences, impression and epochs over HTTP" workingRoutesOverHttp,
-      testCase "thread sleep/import/fork/export transfer over HTTP" threadTransferOverHttp
+      testCase "thread sleep/import/fork/export transfer over HTTP" threadTransferOverHttp,
+      testCase "home session ensures idempotently and 404s unknown or archived incarnations" homeOverHttp,
+      testCase "home session rejects archive, restore, fork and import" homeImmutableOverHttp
     ]
 
 incarnationLifecycleOverHttp :: Assertion
@@ -178,6 +181,66 @@ threadTransferOverHttp =
     simpleStatus unknownSleep @?= status404
 
 -- fixtures and helpers
+
+homeOverHttp :: Assertion
+homeOverHttp =
+  cognitionFixture $ \app cognition service -> do
+    created <- incarnationCreate (cognitionIncarnations cognition) "north" "North" "build the tower" Nothing >>= expectTextRight
+    home <- get app ["incarnations", "north", "home"]
+    simpleStatus home @?= status200
+    decodeText "threadId" (simpleBody home) >>= (@?= "home-north")
+    decodeText "meta.kind" (simpleBody home) >>= (@?= "home")
+    decodeText "meta.title" (simpleBody home) >>= (@?= "North")
+    decodeText "meta.incarnationId" (simpleBody home) >>= (@?= "north")
+    again <- get app ["incarnations", "north", "home"]
+    simpleStatus again @?= status200
+    decodeText "threadId" (simpleBody again) >>= (@?= "home-north")
+    metas <- listSessions (serviceSessions service) True
+    assertBool "exactly one home session" (length (filter sessionIsHome metas) == 1)
+    missing <- get app ["incarnations", "ghost", "home"]
+    simpleStatus missing @?= status404
+    archivedIncarnation <-
+      incarnationArchive (cognitionIncarnations cognition) "north" (incarnationRevision created)
+        >>= expectTextRight
+    archivedHome <- get app ["incarnations", "north", "home"]
+    simpleStatus archivedHome @?= status404
+    deleted <-
+      post
+        app
+        ["incarnations", "north", "delete"]
+        (object ["expectedRevision" .= incarnationRevision archivedIncarnation])
+    simpleStatus deleted @?= status200
+    gone <- findSession (serviceSessions service) "home-north"
+    gone @?= Nothing
+
+homeImmutableOverHttp :: Assertion
+homeImmutableOverHttp =
+  cognitionFixture $ \app cognition service -> do
+    _ <- incarnationCreate (cognitionIncarnations cognition) "north" "North" "build the tower" Nothing >>= expectTextRight
+    home <- get app ["incarnations", "north", "home"]
+    simpleStatus home @?= status200
+    task <- post app ["threads"] (createThread "t1" "north")
+    simpleStatus task @?= status200
+    archived <- post app ["threads", "home-north", "archive"] (object [])
+    restored <- post app ["threads", "home-north", "restore"] (object [])
+    forked <- post app ["threads", "home-north", "fork"] (object ["threadId" .= ("home-fork" :: Text)])
+    let homeMeta = object ["id" .= ("home-north" :: Text), "title" .= ("Home" :: Text), "created" .= (0 :: Int), "updated" .= (0 :: Int)]
+        homeBundle = object ["version" .= (1 :: Int), "meta" .= homeMeta, "config" .= object [], "transcript" .= ([] :: [Value])]
+    imported <- post app ["threads", "import"] (object ["bundle" .= homeBundle, "threadId" .= ("home-north" :: Text)])
+    sequence_
+      [ simpleStatus archived @?= status400,
+        decodeText "error" (simpleBody archived) >>= (@?= "home_session_immutable"),
+        simpleStatus restored @?= status400,
+        decodeText "error" (simpleBody restored) >>= (@?= "home_session_immutable"),
+        simpleStatus forked @?= status400,
+        decodeText "error" (simpleBody forked) >>= (@?= "home_session_immutable"),
+        simpleStatus imported @?= status400,
+        decodeText "error" (simpleBody imported) >>= (@?= "home_session_immutable")
+      ]
+    stillHome <- findSession (serviceSessions service) "home-north"
+    fmap sessionIsHome stillHome @?= Just True
+    taskArchive <- post app ["threads", "t1", "archive"] (object [])
+    simpleStatus taskArchive @?= status200
 
 sleepMessages :: [ChatMessage]
 sleepMessages =

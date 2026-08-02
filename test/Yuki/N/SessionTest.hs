@@ -15,6 +15,7 @@ import Data.Aeson
 import Data.Aeson.Types (parseMaybe)
 import Data.ByteString.Lazy qualified as LazyByteString
 import Data.IORef
+import Data.List (sort)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Network.HTTP.Types
@@ -49,7 +50,9 @@ sessionTests =
       testCase "agent requests auto-index valid sessions and reject archived ones" sessionAgentIndex,
       testCase "session meta roundtrips through JSON including kind" sessionKindRoundtrip,
       testCase "session meta JSON without kind defaults to task" sessionKindDefaultsToTask,
-      testCase "sessionIsHome distinguishes home from task" sessionIsHomePredicate
+      testCase "sessionIsHome distinguishes home from task" sessionIsHomePredicate,
+      testCase "ensureHomeSession is idempotent and one per incarnation" sessionHomeEnsure,
+      testCase "thread list filters by kind over HTTP" sessionKindFilterOverHttp
     ]
 
 sessionIndexPersists :: Assertion
@@ -281,3 +284,48 @@ sessionIsHomePredicate = do
   let meta = SessionMeta "alpha" "Alpha" "yuki" 0 0 False Nothing Nothing
   sessionIsHome (meta SessionHome) @?= True
   sessionIsHome (meta SessionTask) @?= False
+
+sessionHomeEnsure :: Assertion
+sessionHomeEnsure = withWorkDir $ \dir -> do
+  store <- newSessionStore dir
+  first <- ensureHomeSession store "art" (Just "Art")
+  sessionId first @?= "home-art"
+  sessionKind first @?= SessionHome
+  sessionIncarnationId first @?= "art"
+  sessionTitle first @?= "Art"
+  second <- ensureHomeSession store "art" (Just "Art")
+  sessionId second @?= "home-art"
+  sessionKind second @?= SessionHome
+  sessionTitle second @?= "Art"
+  found <- findSession store "home-art"
+  fmap sessionKind found @?= Just SessionHome
+  allSessions <- listSessions store True
+  assertBool "one home session per incarnation" (length (filter sessionIsHome allSessions) == 1)
+  unnamed <- ensureHomeSession store "zen" Nothing
+  sessionId unnamed @?= "home-zen"
+  sessionKind unnamed @?= SessionHome
+  sessionTitle unnamed @?= "zen"
+  expanded <- listSessions store True
+  assertBool "one home session per each incarnation" (length (filter sessionIsHome expanded) == 2)
+  reopened <- newSessionStore dir
+  persisted <- findSession reopened "home-art"
+  fmap sessionKind persisted @?= Just SessionHome
+  fmap sessionTitle persisted @?= Just "Art"
+
+sessionKindFilterOverHttp :: Assertion
+sessionKindFilterOverHttp = withWorkDir $ \dir -> do
+  service <- sessionServiceAt dir (const (pure ()))
+  base <- testRuntime okModel [] Parallel
+  let inspection = withSessionService service (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service)))
+      app = application Nothing (Just inspection) Nothing Nothing (const (pure base))
+  _ <- createSession (serviceSessions service) "task-a" (Just "Task A") "yuki" Nothing Nothing >>= expectTextRight
+  _ <- ensureHomeSession (serviceSessions service) "yuki" (Just "Yuki")
+  allThreads <- runSession (request (httpGet ["threads"])) app
+  tasks <- runSession (request ((httpGet ["threads"]) {queryString = [("kind", Just "task")]})) app
+  homes <- runSession (request ((httpGet ["threads"]) {queryString = [("kind", Just "home")]})) app
+  unknown <- runSession (request ((httpGet ["threads"]) {queryString = [("kind", Just "bogus")]})) app
+  let ids body = either assertFailure (pure . sort . fmap sessionId) (eitherDecode body :: Either String [SessionMeta])
+  ids (simpleBody allThreads) >>= (@?= ["home-yuki", "task-a"])
+  ids (simpleBody tasks) >>= (@?= ["task-a"])
+  ids (simpleBody homes) >>= (@?= ["home-yuki"])
+  ids (simpleBody unknown) >>= (@?= ["home-yuki", "task-a"])
