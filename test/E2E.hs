@@ -248,6 +248,7 @@ wiredRuntime manager artifacts settings = do
         runtimeSplice = Nothing,
         runtimeContext = Nothing,
         runtimeRuns = Nothing,
+        runtimeIdentity = defaultIdentity,
         runtimeSteer = const (pure []),
         runtimeFollowUp = const (pure [])
       }

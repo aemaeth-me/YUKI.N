@@ -1,9 +1,10 @@
 module Yuki.N (runFromEnvironment) where
 
-import Control.Applicative ((<|>))
+import Control.Applicative (liftA2, liftA3, (<|>))
 import Control.Exception (bracket)
 import Control.Monad (join)
 import Data.Aeson (toJSON)
+import Data.Bool (bool)
 import Data.Foldable (traverse_)
 import Data.Functor ((<&>))
 import Data.Map.Strict qualified as Map
@@ -34,9 +35,9 @@ import Yuki.N.Memory (ThreadStore (..), newThreadStore)
 import Yuki.N.Model (Model)
 import Yuki.N.Provider.OpenAI
 import Yuki.N.Providers (ProviderRegistry, loadAuthJson, loadProviders, providerConfig, providerKeyMap, providerListing)
-import Yuki.N.Runs (RunRegistry, newRunRegistry)
+import Yuki.N.Runs (RunKind (..), RunRegistry, newRunRegistry)
 import Yuki.N.Server
-import Yuki.N.Sessions (SessionMeta (..), SessionService (..), SessionStore (..), migrateSessionOwners, newSessionStore)
+import Yuki.N.Sessions (SessionMeta (..), SessionService (..), SessionStore (..), migrateSessionOwners, newSessionStore, sessionIsHome)
 import Yuki.N.SubAgent (registerSubAgent)
 import Yuki.N.ThreadConfig
 import Yuki.N.Tools (backgroundTools, workTools)
@@ -131,28 +132,26 @@ serve env manager journal artifacts settings runs background =
       (providerListing manager registry keyMap)
   base fallbacks = runtime background defaultHooks manager journal artifacts settings fallbacks <&> \foundation -> foundation {runtimeRuns = Just runs}
   resolve cognition sessions store registry keyMap transcriptHooks' fallbacks threadId =
-    base fallbacks >>= \foundation ->
-      threadConfigRead store threadId >>= \session ->
-        findSession sessions threadId >>= \meta ->
-          let resolved = resolveThreadConfig session defaults
-              identity =
-                fromMaybe
-                  "yuki"
-                  ( (nonBlank . sessionIncarnationId =<< meta)
-                      <|> (nonBlank =<< configIncarnationId resolved)
-                  )
-           in inject foundation resolved {configIncarnationId = Just identity}
+    liftA3 (,,) (base fallbacks) (threadConfigRead store threadId) (findSession sessions threadId)
+      >>= \(foundation, session, meta) ->
+        let config = resolveThreadConfig session defaults
+            identity = fromMaybe "yuki" ((nonBlank . sessionIncarnationId =<< meta) <|> (nonBlank =<< configIncarnationId config))
+            resolvedConfig = config {configIncarnationId = Just identity}
+            runIdentity = RunIdentity (maybe RunTask (bool RunTask RunHome . sessionIsHome) meta) identity
+         in resolveRuntime manager (settingsProvider settings) artifacts foundation resolvedConfig registry keyMap
+              >>= cognitivize resolvedConfig runIdentity
    where
-    inject foundation config =
-      resolveRuntime manager (settingsProvider settings) artifacts foundation config registry keyMap >>= \resolved ->
-        ensureIncarnation cognition (fromMaybe "yuki" (configIncarnationId config)) >>= \incarnation ->
-          attachCognition cognition incarnation resolved >>= \cognitive ->
-            agentsMdSection (cwdPath (configCwd config)) <&> \section ->
-              registerSubAgent
-                cognitive
-                  { runtimeSystemPrompt = appendAgentsMd section (runtimeSystemPrompt cognitive),
-                    runtimeHooks = runtimeHooks cognitive <> transcriptHooks'
-                  }
+    cognitivize config runIdentity resolved =
+      liftA2 (,) (ensureIncarnation cognition (fromMaybe "yuki" (configIncarnationId config))) (agentsMdSection (cwdPath (configCwd config)))
+        >>= uncurry (assemble config runIdentity resolved)
+    assemble config runIdentity resolved incarnation section =
+      attachCognition cognition incarnation resolved <&> \cognitive ->
+        registerSubAgent
+          cognitive
+            { runtimeSystemPrompt = appendAgentsMd section (runtimeSystemPrompt cognitive),
+              runtimeHooks = runtimeHooks cognitive <> transcriptHooks',
+              runtimeIdentity = runIdentity
+            }
     nonBlank value
       | Text.null clean = Nothing
       | otherwise = Just clean
@@ -322,6 +321,7 @@ runtime background hooks manager journal artifacts settings fallbacks =
                 (settingsSpliceChars settings)
             ),
         runtimeRuns = Nothing,
+        runtimeIdentity = defaultIdentity,
         runtimeSteer = const (pure []),
         runtimeFollowUp = const (pure [])
       }

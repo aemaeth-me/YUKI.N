@@ -1,5 +1,6 @@
 module Yuki.N.RunsTest
   ( terminationTests,
+    runTreeIndex,
     failureCheckpoint,
     disconnectAccounts,
     cancelOverHttp,
@@ -30,6 +31,7 @@ import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Foldable (traverse_)
 import Data.Functor (($>))
 import Data.IORef
+import Data.List (find)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Network.HTTP.Types
@@ -59,8 +61,32 @@ terminationTests =
       testCase "cancel announces run.cancelled, finishes the stream and accounts" cancelOverHttp,
       testCase "browser control module cancels a real backend stream over loopback" browserControlE2E,
       testCase "afterRun runs exactly once on success, failure and cancel" oncePerTerminal,
-      testCase "replays a cancelled journaled run without divergence" cancelReplay
+      testCase "replays a cancelled journaled run without divergence" cancelReplay,
+      testCase "run tree index tracks descriptors, children and release" runTreeIndex
     ]
+
+runTreeIndex :: Assertion
+runTreeIndex = do
+  runs <- newRunRegistry
+  withRunRegistrationFor runs "parent" (RunDescriptor "task-a" "yuki" Nothing RunTask (Just "do a thing")) $ do
+    withRunRegistrationFor runs "child" (RunDescriptor "task-a" "yuki" (Just "parent") RunWorker (Just "sub task")) $ do
+      infos <- activeRuns runs
+      let byId = zip (fmap runInfoId infos) infos
+          lookupInfo identifier = snd <$> find ((== identifier) . fst) byId
+      length infos @?= 2
+      fmap runInfoKind (lookupInfo "parent") @?= Just RunTask
+      fmap runInfoKind (lookupInfo "child") @?= Just RunWorker
+      fmap runInfoObjective (lookupInfo "child") @?= Just (Just "sub task")
+      fmap runInfoIncarnation (lookupInfo "child") @?= Just "yuki"
+      fmap ((> 0) . runInfoStartedAt) (lookupInfo "parent") @?= Just True
+      kids <- childrenOf runs "parent"
+      fmap runInfoId kids @?= ["child"]
+      threads <- activeThreads runs
+      threads @?= ["task-a"]
+    released <- childrenOf runs "parent"
+    released @?= []
+  final <- activeRuns runs
+  final @?= []
 failAfterTool :: IORef Int -> Model
 failAfterTool turns =
   fakeModel $ \_ emit ->

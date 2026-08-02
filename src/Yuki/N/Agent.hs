@@ -1,6 +1,7 @@
 module Yuki.N.Agent
   ( AgentHooks (..),
     BackendTool (..),
+    RunIdentity (..),
     RunOutcome (..),
     artifactReadTool,
     ResponseState,
@@ -11,6 +12,7 @@ module Yuki.N.Agent
     closeModelTurn,
     compactHistory,
     defaultHooks,
+    defaultIdentity,
     emptyResponse,
     failAgent,
     forcedCompaction,
@@ -52,7 +54,7 @@ import Data.IORef
 import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (catMaybes, fromMaybe, isJust, mapMaybe, maybeToList)
+import Data.Maybe (catMaybes, fromMaybe, isJust, listToMaybe, mapMaybe, maybeToList)
 import Data.Set (Set)
 import Data.Set qualified as Set
 import Data.Text (Text)
@@ -75,7 +77,16 @@ import Yuki.N.Background (BackgroundRegistry)
 import Yuki.N.Context
 import Yuki.N.Journal
 import Yuki.N.Model
-import Yuki.N.Runs (RunCancelled (..), RunRegistry, drainFollowUps, drainSteering, withRunRegistrationFor)
+import Yuki.N.Runs (RunCancelled (..), RunDescriptor (..), RunKind (..), RunRegistry, drainFollowUps, drainSteering, withRunRegistrationFor)
+
+data RunIdentity = RunIdentity
+  { identityKind :: RunKind,
+    identityIncarnation :: Text
+  }
+  deriving stock (Eq, Show)
+
+defaultIdentity :: RunIdentity
+defaultIdentity = RunIdentity RunTask ""
 
 data Runtime = Runtime
   { runtimeModel :: Model,
@@ -94,6 +105,7 @@ data Runtime = Runtime
     runtimeSplice :: Maybe SpliceConfig,
     runtimeContext :: Maybe ContextConfig,
     runtimeRuns :: Maybe RunRegistry,
+    runtimeIdentity :: RunIdentity,
     runtimeSteer :: Int -> IO [ChatMessage],
     runtimeFollowUp :: Int -> IO [ChatMessage]
   }
@@ -204,7 +216,7 @@ instance FromJSON ArtifactRead where
 runAgent :: Runtime -> AGUI.RunAgentInput -> (Event -> IO ()) -> IO ()
 runAgent runtime input emit =
   newIORef [] >>= \checkpoint ->
-    maybe id (\registry -> withRunRegistrationFor registry runId (AGUI.runThreadId input)) (runtimeRuns runtime) (settle checkpoint)
+    maybe id (\registry -> withRunRegistrationFor registry runId (descriptorOf runtime input)) (runtimeRuns runtime) (settle checkpoint)
  where
   runId = AGUI.runId input
   journal = subJournal runId <$> runtimeJournal runtime
@@ -285,6 +297,24 @@ data Terminal
   = Completed [ChatMessage]
   | Failed Text Text
   | Cancelled
+
+descriptorOf :: Runtime -> AGUI.RunAgentInput -> RunDescriptor
+descriptorOf runtime input =
+  RunDescriptor
+    (AGUI.runThreadId input)
+    (identityIncarnation identity)
+    (AGUI.runParentId input)
+    (maybe (identityKind identity) (const RunWorker) (AGUI.runParentId input))
+    (objectiveOf input)
+ where
+  identity = runtimeIdentity runtime
+
+objectiveOf :: AGUI.RunAgentInput -> Maybe Text
+objectiveOf input =
+  Text.take 120 <$> listToMaybe [text | AGUI.User message <- AGUI.runMessages input, Just text <- [contentText (AGUI.userContent message)]]
+ where
+  contentText (AGUI.UserText text) = Just text
+  contentText (AGUI.UserParts parts) = listToMaybe [text | AGUI.InputText text <- parts]
 
 newtype ContextOverflow = ContextOverflow ProviderFailure
   deriving stock Show

@@ -543,7 +543,7 @@ cognitionArchiveActiveRun = withWorkDir $ \dir -> do
     (serviceConfigs service)
     "art-live-task"
     emptyThreadConfig {configIncarnationId = Just "art"}
-  _ <- forkIO (withRunRegistrationFor runs "art-live-run" "art-live-task" (takeMVar release))
+  _ <- forkIO (withRunRegistrationFor runs "art-live-run" (RunDescriptor "art-live-task" "art" Nothing RunTask Nothing) (takeMVar release))
   registered <- waitUntil (elem "art-live-task" <$> activeThreads runs)
   let view = testView (serviceConfigs service)
       inspection =
