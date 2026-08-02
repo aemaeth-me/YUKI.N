@@ -18,6 +18,7 @@ import System.Environment (getEnvironment)
 import System.Exit (die)
 import System.FilePath ((</>))
 import Yuki.N.AGUI.Types (toolName)
+import Yuki.N.AGUI.Types qualified as AGUI
 import Yuki.N.Agent
 import Yuki.N.AgentsMd (agentsMdSection, appendAgentsMd)
 import Yuki.N.Artifact (ArtifactStore, SpliceConfig (..), artifactReadToolName, newArtifactStore)
@@ -39,6 +40,7 @@ import Yuki.N.Runs (RunKind (..), RunRegistry, newRunRegistry)
 import Yuki.N.Server
 import Yuki.N.Sessions (SessionMeta (..), SessionService (..), SessionStore (..), migrateSessionOwners, newSessionStore, sessionIsHome)
 import Yuki.N.SubAgent (registerSubAgent)
+import Yuki.N.Telemetry (newTelemetry, noteEvent)
 import Yuki.N.ThreadConfig
 import Yuki.N.Tools (backgroundTools, workTools)
 import Yuki.N.Transcript (TranscriptStore (..), newTranscriptStore, transcriptHooks)
@@ -62,50 +64,51 @@ boot env settings =
 
 serve :: Map.Map String String -> Manager -> Maybe Journal -> Maybe ArtifactStore -> Settings -> RunRegistry -> BackgroundRegistry -> IO ()
 serve env manager journal artifacts settings runs background =
-  loadAuthJson >>= \auth ->
-    loadProviders env >>= \registry ->
-      let keyMap = providerKeyMap env auth registry
-       in fallbackModels manager settings registry keyMap
-            >>= \fallbacks ->
-              newCognition
-                (cognitionDir settings)
-                (cognitionModelsOf manager settings <> fallbacks)
-                journal
-                >>= either
-                  (die . Text.unpack)
-                  ( \cognition ->
-                      legacyMemoryOf settings
-                        >>= \memory ->
-                          transcriptOf settings
-                            >>= \(transcriptHooks', transcripts) ->
-                              configStore
-                                >>= \store ->
-                                  newSessionStore (settingsDataDir settings)
-                                    >>= \sessions ->
-                                      newDispatchStore (settingsDataDir settings)
-                                        >>= \dispatches ->
-                                          let service = SessionService sessions transcripts store (shutdownBackgroundThread background)
-                                              dispatchService =
-                                                newDispatchService
-                                                  dispatches
-                                                  service
-                                                  (cognitionIncarnations cognition)
-                                                  newId
-                                                  ( generateDraft
-                                                      invokeModel
-                                                      (cognitionModelsOf manager settings <> fallbacks)
-                                                      (settingsDispatchGenerateTimeout settings)
-                                                      journal
-                                                  )
-                                           in migrateSessionOwners sessions store
-                                                >>= either
-                                                  (die . Text.unpack)
-                                                  ( \() ->
-                                                      migrateLegacy cognition memory transcripts service defaults
-                                                        *> putStrLn (banner settings)
-                                                        *> runServer settings (inspection cognition memory transcripts service) (Just (view store registry keyMap)) (Just runs) (Just dispatchService) (resolve cognition sessions store registry keyMap transcriptHooks' fallbacks)
-                                                  )
-                  )
+  newTelemetry >>= \telemetry ->
+    loadAuthJson >>= \auth ->
+      loadProviders env >>= \registry ->
+        let keyMap = providerKeyMap env auth registry
+         in fallbackModels manager settings registry keyMap
+              >>= \fallbacks ->
+                newCognition
+                  (cognitionDir settings)
+                  (cognitionModelsOf manager settings <> fallbacks)
+                  journal
+                  >>= either
+                    (die . Text.unpack)
+                    ( \cognition ->
+                        legacyMemoryOf settings
+                          >>= \memory ->
+                            transcriptOf settings
+                              >>= \(transcriptHooks', transcripts) ->
+                                configStore
+                                  >>= \store ->
+                                    newSessionStore (settingsDataDir settings)
+                                      >>= \sessions ->
+                                        newDispatchStore (settingsDataDir settings)
+                                          >>= \dispatches ->
+                                            let service = SessionService sessions transcripts store (shutdownBackgroundThread background)
+                                                dispatchService =
+                                                  newDispatchService
+                                                    dispatches
+                                                    service
+                                                    (cognitionIncarnations cognition)
+                                                    newId
+                                                    ( generateDraft
+                                                        invokeModel
+                                                        (cognitionModelsOf manager settings <> fallbacks)
+                                                        (settingsDispatchGenerateTimeout settings)
+                                                        journal
+                                                    )
+                                             in migrateSessionOwners sessions store
+                                                  >>= either
+                                                    (die . Text.unpack)
+                                                    ( \() ->
+                                                        migrateLegacy cognition memory transcripts service defaults
+                                                          *> putStrLn (banner settings)
+                                                          *> runServer settings (inspection cognition memory transcripts service) (Just (view store registry keyMap)) (Just runs) (Just dispatchService) (resolve telemetry cognition sessions store registry keyMap transcriptHooks' fallbacks)
+                                                    )
+                    )
  where
   inspection cognition memory transcripts sessions =
     Just
@@ -130,9 +133,9 @@ serve env manager journal artifacts settings runs background =
       defaults
       (pure (Right [openAIModelName (settingsProvider settings)]))
       (providerListing manager registry keyMap)
-  base fallbacks = runtime background defaultHooks manager journal artifacts settings fallbacks <&> \foundation -> foundation {runtimeRuns = Just runs}
-  resolve cognition sessions store registry keyMap transcriptHooks' fallbacks threadId =
-    liftA3 (,,) (base fallbacks) (threadConfigRead store threadId) (findSession sessions threadId)
+  base telemetry fallbacks = runtime background defaultHooks manager journal artifacts settings fallbacks <&> \foundation -> foundation {runtimeRuns = Just runs, runtimeTelemetry = Just telemetry}
+  resolve telemetry cognition sessions store registry keyMap transcriptHooks' fallbacks threadId =
+    liftA3 (,,) (base telemetry fallbacks) (threadConfigRead store threadId) (findSession sessions threadId)
       >>= \(foundation, session, meta) ->
         let config = resolveThreadConfig session defaults
             identity = fromMaybe "yuki" ((nonBlank . sessionIncarnationId =<< meta) <|> (nonBlank =<< configIncarnationId config))
@@ -149,9 +152,11 @@ serve env manager journal artifacts settings runs background =
         registerSubAgent
           cognitive
             { runtimeSystemPrompt = appendAgentsMd section (runtimeSystemPrompt cognitive),
-              runtimeHooks = runtimeHooks cognitive <> transcriptHooks',
+              runtimeHooks = runtimeHooks cognitive <> transcriptHooks' <> telemetryObserver telemetry,
               runtimeIdentity = runIdentity
             }
+    telemetryObserver telemetry =
+      defaultHooks {observeEvent = \input event -> noteEvent telemetry (AGUI.runId input) event}
     nonBlank value
       | Text.null clean = Nothing
       | otherwise = Just clean
@@ -321,6 +326,7 @@ runtime background hooks manager journal artifacts settings fallbacks =
                 (settingsSpliceChars settings)
             ),
         runtimeRuns = Nothing,
+        runtimeTelemetry = Nothing,
         runtimeIdentity = defaultIdentity,
         runtimeSteer = const (pure []),
         runtimeFollowUp = const (pure [])

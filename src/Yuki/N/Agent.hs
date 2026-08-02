@@ -78,6 +78,7 @@ import Yuki.N.Context
 import Yuki.N.Journal
 import Yuki.N.Model
 import Yuki.N.Runs (RunCancelled (..), RunDescriptor (..), RunKind (..), RunRegistry, drainFollowUps, drainSteering, withRunRegistrationFor)
+import Yuki.N.Telemetry (Telemetry, telemetryRunStarting, telemetryRunStopping)
 
 data RunIdentity = RunIdentity
   { identityKind :: RunKind,
@@ -105,6 +106,7 @@ data Runtime = Runtime
     runtimeSplice :: Maybe SpliceConfig,
     runtimeContext :: Maybe ContextConfig,
     runtimeRuns :: Maybe RunRegistry,
+    runtimeTelemetry :: Maybe Telemetry,
     runtimeIdentity :: RunIdentity,
     runtimeSteer :: Int -> IO [ChatMessage],
     runtimeFollowUp :: Int -> IO [ChatMessage]
@@ -216,9 +218,16 @@ instance FromJSON ArtifactRead where
 runAgent :: Runtime -> AGUI.RunAgentInput -> (Event -> IO ()) -> IO ()
 runAgent runtime input emit =
   newIORef [] >>= \checkpoint ->
-    maybe id (\registry -> withRunRegistrationFor registry runId (descriptorOf runtime input)) (runtimeRuns runtime) (settle checkpoint)
+    registered (tracked (settle checkpoint))
  where
   runId = AGUI.runId input
+  descriptor = descriptorOf runtime input
+  registered = maybe id (\registry -> withRunRegistrationFor registry runId descriptor) (runtimeRuns runtime)
+  tracked =
+    maybe
+      id
+      (\telemetry -> bracket_ (telemetryRunStarting telemetry runId descriptor (runtimeMaxTurns runtime) (modelName (runtimeModel runtime))) (telemetryRunStopping telemetry runId))
+      (runtimeTelemetry runtime)
   journal = subJournal runId <$> runtimeJournal runtime
   runtime' =
     runtime

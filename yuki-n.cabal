@@ -75,6 +75,7 @@ library
         Yuki.N.Providers
         Yuki.N.Replay
         Yuki.N.Runs
+        Yuki.N.Telemetry
         Yuki.N.Server
         Yuki.N.Sessions
         Yuki.N.SubAgent
@@ -134,6 +135,7 @@ test-suite yuki-n-test
         Yuki.N.Provider.OpenAITest,
         Yuki.N.ProvidersTest,
         Yuki.N.RunsTest,
+        Yuki.N.TelemetryTest,
         Yuki.N.ServerTest,
         Yuki.N.ServerCognitionTest,
         Yuki.N.SessionTest,

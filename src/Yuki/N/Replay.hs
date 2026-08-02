@@ -234,6 +234,8 @@ replay hooks input settings runId runEntries =
         runtimeSplice = runSettingsSplice settings,
         runtimeContext = runSettingsContext settings,
         runtimeRuns = Nothing,
+        runtimeTelemetry = Nothing,
+        runtimeIdentity = defaultIdentity,
         runtimeSteer = replayQueue steerCursor,
         runtimeFollowUp = replayQueue followUpCursor
       }

@@ -321,6 +321,7 @@ testRuntime model tools execution =
           runtimeSplice = Nothing,
           runtimeContext = Nothing,
           runtimeRuns = Nothing,
+          runtimeTelemetry = Nothing,
           runtimeIdentity = defaultIdentity,
           runtimeSteer = const (pure []),
           runtimeFollowUp = const (pure [])

@@ -26,6 +26,7 @@ import Yuki.N.MemoryTest
 import Yuki.N.Provider.OpenAITest
 import Yuki.N.ProvidersTest
 import Yuki.N.RunsTest
+import Yuki.N.TelemetryTest
 import Yuki.N.ServerCognitionTest
 import Yuki.N.ServerTest
 import Yuki.N.SessionTest
@@ -46,6 +47,7 @@ main =
         providerFileTests,
         agentTests,
         terminationTests,
+        telemetryTests,
         steeringTests,
         retryTests,
         fallbackTests,
