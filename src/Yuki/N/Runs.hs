@@ -1,5 +1,7 @@
 module Yuki.N.Runs
-  ( RunCancelled (..),
+  ( CompletionOutcome (..),
+    RunCancelled (..),
+    RunCompletion (..),
     RunDescriptor (..),
     RunHandle (..),
     RunInfo (..),
@@ -9,25 +11,33 @@ module Yuki.N.Runs
     activeThreads,
     cancelRun,
     childrenOf,
+    completionFor,
+    completionsOf,
     drainFollowUps,
     drainSteering,
     followUpRun,
     newRunRegistry,
+    noteCompletion,
     steerRun,
     withRunRegistration,
     withRunRegistrationFor,
+    writeCompletion,
   )
 where
 
+import Control.Applicative (liftA2)
 import Control.Concurrent (ThreadId, myThreadId, throwTo)
-import Control.Exception (Exception, bracket_)
+import Control.Exception (Exception, SomeAsyncException, SomeException, bracket_, displayException, fromException, throwIO, try)
 import Data.Functor (($>))
 import Data.IORef
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Set qualified as Set
 import Data.Text (Text)
+import Data.Text qualified as Text
+import Data.Text.IO qualified as TextIO
 import Data.Time.Clock.POSIX (getPOSIXTime)
+import System.IO (stderr)
 import Yuki.N.Model (ChatMessage)
 
 data RunKind = RunHome | RunTask | RunWorker
@@ -61,17 +71,35 @@ data RunInfo = RunInfo
   }
   deriving stock (Eq, Show)
 
-newtype RunRegistry = RunRegistry (IORef (Map Text RunHandle))
+data CompletionOutcome
+  = Completed
+  | Failed Text
+  | Cancelled
+  deriving stock (Eq, Show)
+
+data RunCompletion = RunCompletion
+  { completionRunId :: Text,
+    completionParent :: Maybe Text,
+    completionOutcome :: CompletionOutcome,
+    completionResult :: Text,
+    completionAt :: Integer
+  }
+  deriving stock (Eq, Show)
+
+data RunRegistry = RunRegistry
+  { registryRuns :: IORef (Map Text RunHandle),
+    registryCompletions :: IORef (Map Text RunCompletion)
+  }
 
 newRunRegistry :: IO RunRegistry
-newRunRegistry = RunRegistry <$> newIORef Map.empty
+newRunRegistry = liftA2 RunRegistry (newIORef Map.empty) (newIORef Map.empty)
 
 withRunRegistration :: RunRegistry -> Text -> IO a -> IO a
 withRunRegistration registry runId =
   withRunRegistrationFor registry runId (RunDescriptor runId "" Nothing RunTask Nothing)
 
 withRunRegistrationFor :: RunRegistry -> Text -> RunDescriptor -> IO a -> IO a
-withRunRegistrationFor (RunRegistry ref) runId descriptor =
+withRunRegistrationFor registry runId descriptor =
   bracket_ acquire release
  where
   acquire =
@@ -80,8 +108,20 @@ withRunRegistrationFor (RunRegistry ref) runId descriptor =
         newIORef [] >>= \followUp ->
           getPOSIXTime >>= \now ->
             mutate (Map.insert runId (RunHandle thread descriptor (round now) steer followUp))
-  release = mutate (Map.delete runId)
-  mutate f = atomicModifyIORef' ref (\runs -> (f runs, ()))
+  release =
+    mutate (Map.delete runId)
+      *> case descriptorParent descriptor of
+        Nothing -> readIORef (registryCompletions registry) >>= \table -> dropIds (completionSubtree table runId)
+        Just _ -> pure ()
+  mutate f = atomicModifyIORef' (registryRuns registry) (\runs -> (f runs, ()))
+  dropIds ids = atomicModifyIORef' (registryCompletions registry) (\table -> (foldr Map.delete table ids, ()))
+
+completionSubtree :: Map Text RunCompletion -> Text -> [Text]
+completionSubtree completions root =
+  root : concatMap (completionSubtree completions . completionRunId) (children root)
+ where
+  children identifier =
+    filter ((== Just identifier) . completionParent) (Map.elems completions)
 
 runInfoOf :: Text -> RunHandle -> RunInfo
 runInfoOf runId (RunHandle _ descriptor startedAt _ _) =
@@ -95,30 +135,30 @@ runInfoOf runId (RunHandle _ descriptor startedAt _ _) =
     startedAt
 
 activeRuns :: RunRegistry -> IO [RunInfo]
-activeRuns (RunRegistry ref) =
-  Map.foldrWithKey (\runId handle -> (runInfoOf runId handle :)) [] <$> readIORef ref
+activeRuns registry =
+  Map.foldrWithKey (\runId handle -> (runInfoOf runId handle :)) [] <$> readIORef (registryRuns registry)
 
 childrenOf :: RunRegistry -> Text -> IO [RunInfo]
 childrenOf registry parent =
   filter ((== Just parent) . runInfoParent) <$> activeRuns registry
 
 activeThreads :: RunRegistry -> IO [Text]
-activeThreads (RunRegistry ref) =
-  Set.toList . Set.fromList . fmap (descriptorTaskId . runHandleDescriptor) . Map.elems <$> readIORef ref
+activeThreads registry =
+  Set.toList . Set.fromList . fmap (descriptorTaskId . runHandleDescriptor) . Map.elems <$> readIORef (registryRuns registry)
 
 cancelRun :: RunRegistry -> Text -> IO Bool
-cancelRun (RunRegistry ref) runId =
-  readIORef ref
+cancelRun registry runId =
+  readIORef (registryRuns registry)
     >>= maybe (pure False) (\handle -> throwTo (runHandleThread handle) (RunCancelled runId) $> True)
       . Map.lookup runId
 
 steerRun :: RunRegistry -> Text -> ChatMessage -> IO Bool
-steerRun (RunRegistry ref) =
-  queueRun runHandleSteer ref
+steerRun registry =
+  queueRun runHandleSteer (registryRuns registry)
 
 followUpRun :: RunRegistry -> Text -> ChatMessage -> IO Bool
-followUpRun (RunRegistry ref) =
-  queueRun runHandleFollowUp ref
+followUpRun registry =
+  queueRun runHandleFollowUp (registryRuns registry)
 
 queueRun :: (RunHandle -> IORef [ChatMessage]) -> IORef (Map Text RunHandle) -> Text -> ChatMessage -> IO Bool
 queueRun field ref runId message =
@@ -127,18 +167,41 @@ queueRun field ref runId message =
   push handle = atomicModifyIORef' (field handle) (\queued -> (message : queued, ())) $> True
 
 drainSteering :: RunRegistry -> Text -> IO [ChatMessage]
-drainSteering (RunRegistry ref) =
-  drainRun runHandleSteer ref
+drainSteering registry =
+  drainRun runHandleSteer (registryRuns registry)
 
 drainFollowUps :: RunRegistry -> Text -> IO [ChatMessage]
-drainFollowUps (RunRegistry ref) =
-  drainRun runHandleFollowUp ref
+drainFollowUps registry =
+  drainRun runHandleFollowUp (registryRuns registry)
 
 drainRun :: (RunHandle -> IORef [ChatMessage]) -> IORef (Map Text RunHandle) -> Text -> IO [ChatMessage]
 drainRun field ref runId =
   readIORef ref >>= maybe (pure []) drain . Map.lookup runId
  where
   drain handle = atomicModifyIORef' (field handle) (\queued -> ([], reverse queued))
+
+writeCompletion :: RunRegistry -> Text -> Maybe Text -> CompletionOutcome -> Text -> IO ()
+writeCompletion registry runId parent outcome result =
+  getPOSIXTime >>= \now ->
+    noteCompletion registry (RunCompletion runId parent outcome (Text.take 4000 result) (round now))
+
+noteCompletion :: RunRegistry -> RunCompletion -> IO ()
+noteCompletion registry completion =
+  try @SomeException (atomicModifyIORef' (registryCompletions registry) (\table -> (Map.insert (completionRunId completion) completion table, ()))) >>= \case
+    Left exception ->
+      maybe
+        (TextIO.hPutStrLn stderr ("yuki.runs: completion write failed: " <> Text.pack (displayException exception)))
+        throwIO
+        (fromException exception :: Maybe SomeAsyncException)
+    Right () -> pure ()
+
+completionFor :: RunRegistry -> Text -> IO (Maybe RunCompletion)
+completionFor registry runId =
+  Map.lookup runId <$> readIORef (registryCompletions registry)
+
+completionsOf :: RunRegistry -> Text -> IO [RunCompletion]
+completionsOf registry parent =
+  filter ((== Just parent) . completionParent) . Map.elems <$> readIORef (registryCompletions registry)
 
 newtype RunCancelled = RunCancelled Text
   deriving stock (Eq, Show)

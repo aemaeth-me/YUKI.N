@@ -199,10 +199,10 @@ toolResolution = withWorkDir $ \dir -> do
       emptyThreadConfig {configCwd = CwdPath dir, configShell = Just False}
     ]
   expected =
-    [ [artifactReadToolName, "fs_edit", "fs_glob", "fs_grep", "fs_list", "fs_read", "fs_write", "plan", "shell", "shell_bg", "shell_kill", "shell_output", "shell_stdin", "sub_agent"],
-      [artifactReadToolName, "sub_agent"],
-      [artifactReadToolName, "plan", "shell", "shell_bg", "shell_kill", "shell_output", "shell_stdin", "sub_agent"],
-      [artifactReadToolName, "fs_edit", "fs_glob", "fs_grep", "fs_list", "fs_read", "fs_write", "plan", "sub_agent"]
+    [ [artifactReadToolName, "fs_edit", "fs_glob", "fs_grep", "fs_list", "fs_read", "fs_write", "plan", "shell", "shell_bg", "shell_kill", "shell_output", "shell_stdin", "sub_agent", "sub_agent_cancel", "sub_agent_list", "sub_agent_send", "sub_agent_spawn", "sub_agent_status", "sub_agent_wait"],
+      [artifactReadToolName, "sub_agent", "sub_agent_cancel", "sub_agent_list", "sub_agent_send", "sub_agent_spawn", "sub_agent_status", "sub_agent_wait"],
+      [artifactReadToolName, "plan", "shell", "shell_bg", "shell_kill", "shell_output", "shell_stdin", "sub_agent", "sub_agent_cancel", "sub_agent_list", "sub_agent_send", "sub_agent_spawn", "sub_agent_status", "sub_agent_wait"],
+      [artifactReadToolName, "fs_edit", "fs_glob", "fs_grep", "fs_list", "fs_read", "fs_write", "plan", "sub_agent", "sub_agent_cancel", "sub_agent_list", "sub_agent_send", "sub_agent_spawn", "sub_agent_status", "sub_agent_wait"]
     ]
 
 promptAndModel :: Assertion
@@ -331,7 +331,13 @@ configCapabilities = withWorkDir $ \dir -> do
           "fs_read",
           "fs_write",
           "plan",
-          "sub_agent"
+          "sub_agent",
+          "sub_agent_cancel",
+          "sub_agent_list",
+          "sub_agent_send",
+          "sub_agent_spawn",
+          "sub_agent_status",
+          "sub_agent_wait"
         ]
     )
     (eitherDecode (simpleBody response) :: Either String [Text])

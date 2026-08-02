@@ -33,6 +33,7 @@ data Settings = Settings
     settingsMemoryDir :: Maybe String,
     settingsMemoryModel :: Maybe Text,
     settingsSubAgentDepth :: Int,
+    settingsSubAgentMaxParallel :: Int,
     settingsProviderRetries :: Int,
     settingsSpliceChars :: Int,
     settingsSpliceKeep :: Int,
@@ -58,6 +59,7 @@ resolveSettings environment =
     <*> positive "YUKI_MAX_TURNS" (value "YUKI_MAX_TURNS" `orElse` "32")
     <*> parseExecution (value "YUKI_TOOL_EXECUTION" `orElse` "parallel")
     <*> nonNegative "YUKI_SUBAGENT_DEPTH" (value "YUKI_SUBAGENT_DEPTH" `orElse` "1")
+    <*> positive "YUKI_SUBAGENT_MAX_PARALLEL" (value "YUKI_SUBAGENT_MAX_PARALLEL" `orElse` "4")
     <*> nonNegative "YUKI_PROVIDER_RETRIES" (value "YUKI_PROVIDER_RETRIES" `orElse` "3")
     <*> positive "YUKI_SPLICE_CHARS" (value "YUKI_SPLICE_CHARS" `orElse` "200000")
     <*> nonNegative "YUKI_SPLICE_KEEP" (value "YUKI_SPLICE_KEEP" `orElse` "4")
@@ -71,7 +73,7 @@ resolveSettings environment =
     <*> parseFallbacks (Text.pack <$> Map.lookup "YUKI_FALLBACK_PROVIDERS" environment)
  where
   value key = Map.lookup key environment
-  make provider port maxTurns execution subAgentDepth providerRetries spliceChars spliceKeep reserveTokens keepUnits summaryTokens dispatchGenerateTimeout telemetryGit telemetryGitTimeout telemetryDiffBytes fallbacks =
+  make provider port maxTurns execution subAgentDepth subAgentMaxParallel providerRetries spliceChars spliceKeep reserveTokens keepUnits summaryTokens dispatchGenerateTimeout telemetryGit telemetryGitTimeout telemetryDiffBytes fallbacks =
     Settings
       { settingsHost = value "YUKI_HOST" `orElse` "127.0.0.1",
         settingsPort = port,
@@ -87,6 +89,7 @@ resolveSettings environment =
         settingsMemoryDir = value "YUKI_MEMORY_DIR",
         settingsMemoryModel = Text.pack <$> value "YUKI_MEMORY_MODEL",
         settingsSubAgentDepth = subAgentDepth,
+        settingsSubAgentMaxParallel = subAgentMaxParallel,
         settingsProviderRetries = providerRetries,
         settingsSpliceChars = spliceChars,
         settingsSpliceKeep = spliceKeep,

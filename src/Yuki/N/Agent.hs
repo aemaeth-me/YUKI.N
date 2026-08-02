@@ -60,8 +60,10 @@ import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as TextEncoding
+import Data.Text.IO qualified as TextIO
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import Data.Unique (hashUnique, newUnique)
+import System.IO (stderr)
 import Yuki.N.AGUI.Event (Event (..))
 import Yuki.N.AGUI.Types qualified as AGUI
 import Yuki.N.Artifact
@@ -77,7 +79,20 @@ import Yuki.N.Background (BackgroundRegistry)
 import Yuki.N.Context
 import Yuki.N.Journal
 import Yuki.N.Model
-import Yuki.N.Runs (RunCancelled (..), RunDescriptor (..), RunKind (..), RunRegistry, drainFollowUps, drainSteering, withRunRegistrationFor)
+import Yuki.N.Runs
+  ( RunCancelled (..),
+    RunDescriptor (..),
+    RunInfo (..),
+    RunKind (..),
+    RunRegistry,
+    cancelRun,
+    childrenOf,
+    drainFollowUps,
+    drainSteering,
+    withRunRegistrationFor,
+    writeCompletion,
+  )
+import Yuki.N.Runs qualified as Runs
 import Yuki.N.Telemetry (DeliveryKind (DeliveryArtifact), DeliveryRecord (..), Telemetry, telemetryLedger, telemetryRunStarting, telemetryRunStopping)
 import Yuki.N.Telemetry.Ledger (recordDelivery)
 
@@ -102,6 +117,7 @@ data Runtime = Runtime
     runtimeArtifactStore :: Maybe ArtifactStore,
     runtimeBackground :: BackgroundRegistry,
     runtimeDepth :: Int,
+    runtimeSubAgentMaxParallel :: Int,
     runtimeProviderRetries :: Int,
     runtimeFallbacks :: [Model],
     runtimeSplice :: Maybe SpliceConfig,
@@ -260,16 +276,41 @@ runAgent runtime input emit =
    where
     conclude accounted = \case
       Completed messages ->
-        runAfter accounted RunSucceeded messages >>= \case
-          Left persistenceError -> emit' (RunError ("durable run close failed: " <> persistenceError) (Just "PERSISTENCE_ERROR"))
-          Right () -> emit' (RunFinished (AGUI.runThreadId input) runId Nothing)
+        cascadeChildren
+          *> runAfter accounted RunSucceeded messages
+          >>= \case
+            Left persistenceError ->
+              recordCompletion Runs.Completed (finalText messages)
+                *> emit' (RunError ("durable run close failed: " <> persistenceError) (Just "PERSISTENCE_ERROR"))
+            Right () ->
+              recordCompletion Runs.Completed (finalText messages)
+                *> emit' (RunFinished (AGUI.runThreadId input) runId Nothing)
       Failed message code ->
-        bestEffortAfter accounted (RunFailed code message) (readIORef checkpoint)
-          *> emit' (RunError message (Just code))
+        cascadeChildren
+          *> bestEffortAfter accounted (RunFailed code message) (readIORef checkpoint)
+          *> readIORef checkpoint
+          >>= \history ->
+            recordCompletion (failureOutcome code message) (finalText history)
+              *> emit' (RunError message (Just code))
       Cancelled ->
-        bestEffortAfter accounted RunWasCancelled (readIORef checkpoint)
-          *> emit' (Custom "run.cancelled" (object ["runId" .= runId]))
-          *> emit' (RunFinished (AGUI.runThreadId input) runId Nothing)
+        cascadeChildren
+          *> bestEffortAfter accounted RunWasCancelled (readIORef checkpoint)
+          *> readIORef checkpoint
+          >>= \history ->
+            recordCompletion Runs.Cancelled (finalText history)
+              *> emit' (Custom "run.cancelled" (object ["runId" .= runId]))
+              *> emit' (RunFinished (AGUI.runThreadId input) runId Nothing)
+    cascadeChildren =
+      quietlyOrch "cascade" $
+        maybe
+          (pure ())
+          (\registry -> childrenOf registry runId >>= traverse_ (cancelRun registry . runInfoId))
+          (runtimeRuns runtime)
+    recordCompletion outcome result =
+      maybe
+        (pure ())
+        (\registry -> writeCompletion registry runId (AGUI.runParentId input) outcome result)
+        (runtimeRuns runtime)
     runAfter accounted outcome messages =
       trySync
         ( once
@@ -308,6 +349,41 @@ data Terminal
   = Completed [ChatMessage]
   | Failed Text Text
   | Cancelled
+
+failureOutcome :: Text -> Text -> Runs.CompletionOutcome
+failureOutcome code message
+  | Text.null code = Runs.Failed message
+  | otherwise = Runs.Failed (code <> ": " <> message)
+
+finalText :: [ChatMessage] -> Text
+finalText =
+  Text.take 4000
+    . fromMaybe ""
+    . listToMaybe
+    . reverse
+    . mapMaybe assistantText
+ where
+  assistantText (ChatAssistant turn) = nonEmpty =<< turnText turn
+  assistantText _ = Nothing
+
+quietlyOrch :: Text -> IO () -> IO ()
+quietlyOrch label action =
+  try @SomeException action >>= \case
+    Left exception ->
+      maybe
+        (TextIO.hPutStrLn stderr ("yuki.orch: " <> label <> ": " <> Text.pack (displayException exception)))
+        throwIO
+        (fromException exception :: Maybe SomeAsyncException)
+    Right () -> pure ()
+
+workerNotice :: Text -> Maybe (Text, Text, Text)
+workerNotice text =
+  Text.stripPrefix "[worker " text >>= \rest ->
+    let (worker, afterId) = Text.breakOn " " rest
+        (outcome, summary) = Text.breakOn "] " (Text.drop 1 afterId)
+     in if Text.null worker || Text.null outcome || Text.null summary
+          then Nothing
+          else Just (worker, outcome, Text.drop 2 summary)
 
 descriptorOf :: Runtime -> AGUI.RunAgentInput -> RunDescriptor
 descriptorOf runtime input =
@@ -465,7 +541,21 @@ runCore runtime input emit checkpoint =
     appendQueued kind entry step base extra =
       recordMaybe (runtimeJournal runtime) (entry step extra)
         *> emit (Custom kind (object ["step" .= step, "count" .= length extra]))
+        *> traverse_ (emit . workerNoticeEvent) (workerNotices kind)
         $> base <> extra
+     where
+      workerNotices "steering.inject" = mapMaybe workerNotice [text | ChatSystem text <- extra]
+      workerNotices _ = []
+      workerNoticeEvent (worker, outcome, summary) =
+        Custom
+          "worker.notice"
+          ( object
+              [ "runId" .= worker,
+                "parentRunId" .= AGUI.runId input,
+                "outcome" .= outcome,
+                "summary" .= summary
+              ]
+          )
 
 injected :: [ChatMessage] -> [ChatMessage] -> [Event]
 injected before after =

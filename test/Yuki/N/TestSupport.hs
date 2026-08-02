@@ -316,6 +316,7 @@ testRuntime model tools execution =
           runtimeArtifactStore = Nothing,
           runtimeBackground = background,
           runtimeDepth = 1,
+          runtimeSubAgentMaxParallel = 4,
           runtimeProviderRetries = 0,
           runtimeFallbacks = [],
           runtimeSplice = Nothing,

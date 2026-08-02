@@ -357,6 +357,7 @@ runtime background hooks manager journal artifacts settings fallbacks =
         runtimeArtifactStore = artifacts,
         runtimeBackground = background,
         runtimeDepth = settingsSubAgentDepth settings,
+        runtimeSubAgentMaxParallel = settingsSubAgentMaxParallel settings,
         runtimeProviderRetries = settingsProviderRetries settings,
         runtimeFallbacks = fallbacks,
         runtimeSplice = Just (SpliceConfig (settingsSpliceChars settings) (settingsSpliceKeep settings)),

@@ -28,6 +28,7 @@ import Control.Concurrent.MVar
 import Control.Exception (IOException, SomeException, displayException, try)
 import Control.Monad (void)
 import Data.Aeson
+import Data.Aeson.Types (parseMaybe)
 import Data.Bool (bool)
 import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Foldable (traverse_)
@@ -848,13 +849,11 @@ cognitionHooks cognition incarnation =
   rememberRunEpoch input epoch =
     modifyMVar_ (cognitionContextCache cognition) $
       pure . boundedInsert (identity, AGUI.runThreadId input, AGUI.runId input) (contextEpochId epoch)
-  closeRun input outcome messages
-    | not (isRoot input) = pure ()
-    | otherwise =
-        withIncarnationLock
-          cognition
-          identity
-          (closeExperience cognition incarnation input outcome messages)
+  closeRun input outcome messages =
+    withIncarnationLock
+      cognition
+      identity
+      (closeExperience cognition incarnation input outcome messages)
 
 activationText :: Cognition -> Incarnation -> AGUI.RunAgentInput -> [ChatMessage] -> IO (Maybe Text)
 activationText cognition incarnation input messages =
@@ -1889,12 +1888,16 @@ appendRunEvents cognition incarnation input outcome messages =
             (Just run)
             (Just task)
             (Just run)
-            Nothing
+            (delegationIdOf input)
             Nothing
             kind
             payload
             payload
       )
+
+delegationIdOf :: AGUI.RunAgentInput -> Maybe Text
+delegationIdOf input =
+  parseMaybe (withObject "forwardedProps" (.: "delegationId")) (AGUI.runForwardedProps input)
 
 enqueueConsolidation :: Cognition -> Incarnation -> [ExperienceEvent] -> IO ExperienceEvent
 enqueueConsolidation cognition incarnation events =
@@ -1927,7 +1930,7 @@ enqueueConsolidation cognition incarnation events =
       (experienceIntentId =<< terminal)
       (experienceTaskId =<< terminal)
       (experienceRunId =<< terminal)
-      Nothing
+      (experienceDelegationId =<< terminal)
       (experienceEventId <$> terminal)
       "ImpressionConsolidationRequested"
       payload
@@ -1991,7 +1994,7 @@ drainConsolidations cognition incarnation =
                 (experienceIntentId requested)
                 (experienceTaskId requested)
                 (experienceRunId requested)
-                Nothing
+                (experienceDelegationId requested)
                 (Just (experienceEventId requested))
                 kind
                 payloadRef

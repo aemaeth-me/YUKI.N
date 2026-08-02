@@ -229,6 +229,7 @@ replay hooks input settings runId runEntries =
         runtimeArtifactStore = bool Nothing (Just artifacts) (recordsMaterialization runEntries),
         runtimeBackground = background,
         runtimeDepth = runSettingsDepth settings,
+        runtimeSubAgentMaxParallel = 4,
         runtimeProviderRetries = 0,
         runtimeFallbacks = [],
         runtimeSplice = runSettingsSplice settings,
