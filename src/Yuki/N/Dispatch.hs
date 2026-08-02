@@ -421,6 +421,7 @@ newDispatchService dispatches service incarnations newThreadId generate =
  where
   materialize incarnation input =
     generate incarnation input >>= \(title, prompt, generation) ->
-      createDispatch
-        dispatches
-        (NewDispatch DispatchUser (incarnationId incarnation) input title prompt emptyThreadConfig generation)
+      threadConfigRead (serviceConfigs service) (homeThreadId (incarnationId incarnation)) >>= \config ->
+        createDispatch
+          dispatches
+          (NewDispatch DispatchUser (incarnationId incarnation) input title prompt config generation)

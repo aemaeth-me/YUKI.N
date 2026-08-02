@@ -22,8 +22,13 @@ data SessionKind = SessionHome | SessionTask
   - 每个 incarnationId 至多一个；id 确定为 `home-<incarnationId>`（幂等）。
   - `archive / restore / fork / delete / import 覆盖` 对该 id 返回
     `400 {error: "home_session_immutable"}`。
+  - `home-` 前缀为保留 id：`createSession` 与 `importSession` 拒绝此前缀
+    （`reserved thread id`）；Home 只能经 `ensureHomeSession` 产生。
+  - `ensureHomeSession` 幂等且自修复：同名存量行的 kind 会被修正为
+    `SessionHome`（`ensureSession` 永不降级 Home 为 Task）。
   - `renameSession` 允许（标题仅展示用）。
-  - `deleteSessionsFor`（删除 Yuki 时）连带删除 Home。
+  - 归档 Yuki 时 Home 不随归档（防止被 400 锁死）；删除 Yuki 时 Home 随
+    `deleteSessionsFor` 一并删除。
 - `listSessions` 行为不变；任务列表语义由 `GET /threads?kind=` 承担（§2.2）。
 
 ### 1.2 DispatchDraft
@@ -38,7 +43,9 @@ DispatchDraft
 ├── input :: Text                      -- 用户原始需求描述 / 工具的 reason
 ├── title :: Text                      -- 可编辑
 ├── prompt :: Text                     -- 可编辑；confirm 后成为首条任务指令
-├── config :: ThreadConfig             -- 可编辑；能力快照（不含 incarnationId 覆盖）
+├── config :: ThreadConfig             -- 可编辑；能力快照，初始 = Home 会话
+│                                      -- ThreadConfig 的显式字段（播种），
+│                                      -- 用户/Yuki 可改；不得含 incarnationId 覆盖
 ├── generation :: DispatchGeneration
 │     = GeneratedModel { invocationId }-- Invocation 模型起草
 │     | GeneratedFallback              -- 回退：title=描述首行截断，prompt=描述原文
@@ -272,11 +279,14 @@ confirm 语义：
    title=draft.title。
 3. 写 `threads-config/<thread>.json` = `draft.config`（原样；与全局/Home 的
    合并发生在每次 Run 的 resolve，与既有语义一致）。
-4. Transcript 追加首条 `ChatUser`（id=`"<thread>-dispatch"`，
-   content=draft.prompt）。
+4. Transcript 追加首条 `ChatUser`（content=draft.prompt；`ChatUser` 不携带
+   持久 id，渲染 id 由既有 `tr-N` 派生）。
 5. 置 `Dispatched`，记录 `createdThreadId`。
 6. **不启动 Run**：前端进入任务视图后按既有 `POST /agent` 流程发起；
    自动发起条件 = transcript 末条为未应答 user message。
+7. 失败回滚：已创建的任务行以 archive 软删除（Sessions 无硬删除；归档行
+   不进活跃列表，P3 可加物理清理），config 文件与 transcript 物理删除；
+   draft 回填 `error` 并保持 `Draft` 可重试。
 
 ### 2.4 Activity（快照，初始加载与降级）
 

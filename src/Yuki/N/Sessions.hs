@@ -193,7 +193,8 @@ ensure lock path kind threadId title rawOwner =
                   current
                     { sessionIncarnationId = bool (sessionIncarnationId current) owner (Text.null (Text.strip (sessionIncarnationId current))),
                       sessionUpdated = stamp,
-                      sessionTitle = refreshedTitle current
+                      sessionTitle = refreshedTitle current,
+                      sessionKind = bool (sessionKind current) SessionHome (kind == SessionHome)
                     }
               )
               (Map.lookup threadId sessions)
@@ -225,6 +226,7 @@ deleteForIncarnation lock path incarnation =
 create :: MVar (Map Text SessionMeta) -> FilePath -> Text -> Maybe Text -> Text -> Maybe Text -> Maybe Text -> IO (Either Text SessionMeta)
 create lock path threadId title rawOwner parent node
   | not (validThreadId threadId) = pure (Left "invalid thread id")
+  | isHomeThreadId threadId = pure (Left ("reserved thread id: " <> threadId))
   | Text.null owner = pure (Left "incarnation id must not be empty")
   | otherwise =
       getPOSIXTime >>= \now ->
@@ -440,6 +442,9 @@ sessionIsHome = (== SessionHome) . sessionKind
 
 homeThreadId :: Text -> Text
 homeThreadId incarnationId = "home-" <> incarnationId
+
+isHomeThreadId :: Text -> Bool
+isHomeThreadId = ("home-" `Text.isPrefixOf`)
 
 nonBlank :: Text -> Maybe Text
 nonBlank value
