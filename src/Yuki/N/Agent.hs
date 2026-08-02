@@ -78,7 +78,8 @@ import Yuki.N.Context
 import Yuki.N.Journal
 import Yuki.N.Model
 import Yuki.N.Runs (RunCancelled (..), RunDescriptor (..), RunKind (..), RunRegistry, drainFollowUps, drainSteering, withRunRegistrationFor)
-import Yuki.N.Telemetry (Telemetry, telemetryRunStarting, telemetryRunStopping)
+import Yuki.N.Telemetry (DeliveryKind (DeliveryArtifact), DeliveryRecord (..), Telemetry, telemetryLedger, telemetryRunStarting, telemetryRunStopping)
+import Yuki.N.Telemetry.Ledger (recordDelivery)
 
 data RunIdentity = RunIdentity
   { identityKind :: RunKind,
@@ -122,7 +123,8 @@ data ToolContext = ToolContext
     toolContextThreadId :: Text,
     toolContextCallId :: Text,
     toolContextEmit :: Event -> IO (),
-    toolContextJournal :: Maybe Journal
+    toolContextJournal :: Maybe Journal,
+    toolContextIncarnation :: Text
   }
 
 data AgentHooks = AgentHooks
@@ -1025,7 +1027,8 @@ executeTools runtime runContext clientTools calls emit =
         toolContextThreadId = runContextThreadId runContext,
         toolContextCallId = modelToolCallId call,
         toolContextEmit = emit,
-        toolContextJournal = runContextJournal runContext
+        toolContextJournal = runContextJournal runContext,
+        toolContextIncarnation = identityIncarnation (runtimeIdentity runtime)
       }
 
   missing call
@@ -1072,7 +1075,29 @@ executeTools runtime runContext clientTools calls emit =
       retain =
         artifactSave store name content
           >>= \identifier ->
-            content <$ modifyIORef' (runContextSeen runContext) (Map.insert key (identifier, content))
+            recordSpill identifier
+              *> (content <$ modifyIORef' (runContextSeen runContext) (Map.insert key (identifier, content)))
+      recordSpill identifier =
+        maybe (pure ()) (spillThrough identifier) (runtimeTelemetry runtime)
+      spillThrough identifier telemetry =
+        readIORef (telemetryLedger telemetry) >>= \case
+          Nothing -> pure ()
+          Just ledger -> recordDelivery ledger telemetry (delivery identifier)
+      delivery identifier =
+        DeliveryRecord
+          { deliveryId = "",
+            deliveryRunId = runContextRunId runContext,
+            deliveryThreadId = runContextThreadId runContext,
+            deliveryIncarnation = identityIncarnation identity,
+            deliveryRunKind = identityKind identity,
+            deliveryKind = DeliveryArtifact,
+            deliveryTitle = name,
+            deliveryRef = identifier,
+            deliveryBytes = Just (Text.length content),
+            deliveryAt = 0
+          }
+       where
+        identity = runtimeIdentity runtime
 
   conclude resolved =
     traverse emitResult resolved

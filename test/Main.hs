@@ -26,11 +26,12 @@ import Yuki.N.MemoryTest
 import Yuki.N.Provider.OpenAITest
 import Yuki.N.ProvidersTest
 import Yuki.N.RunsTest
-import Yuki.N.TelemetryTest
 import Yuki.N.ServerCognitionTest
 import Yuki.N.ServerTest
 import Yuki.N.SessionTest
 import Yuki.N.SubAgentTest
+import Yuki.N.Telemetry.LedgerTest
+import Yuki.N.TelemetryTest
 import Yuki.N.ThreadConfigTest
 import Yuki.N.ToolsTest
 import Yuki.N.TranscriptTest
@@ -48,6 +49,7 @@ main =
         agentTests,
         terminationTests,
         telemetryTests,
+        ledgerTests,
         steeringTests,
         retryTests,
         fallbackTests,

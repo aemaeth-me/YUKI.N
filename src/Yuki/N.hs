@@ -1,22 +1,26 @@
 module Yuki.N (runFromEnvironment) where
 
-import Control.Applicative (liftA2, liftA3, (<|>))
-import Control.Exception (bracket)
-import Control.Monad (join)
+import Control.Applicative (liftA3, (<|>))
+import Control.Exception (SomeException, bracket, displayException, try)
+import Control.Monad (join, when)
 import Data.Aeson (toJSON)
 import Data.Bool (bool)
 import Data.Foldable (traverse_)
 import Data.Functor ((<&>))
+import Data.IORef (writeIORef)
+import Data.List (find)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (catMaybes, fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe, isNothing, listToMaybe)
 import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Text.IO qualified as TextIO
 import Network.HTTP.Client (Manager)
 import Network.HTTP.Client.TLS (newTlsManager)
 import System.Environment (getEnvironment)
 import System.Exit (die)
 import System.FilePath ((</>))
+import System.IO (stderr)
 import Yuki.N.AGUI.Types (toolName)
 import Yuki.N.AGUI.Types qualified as AGUI
 import Yuki.N.Agent
@@ -33,14 +37,15 @@ import Yuki.N.Inspect
 import Yuki.N.Invocation (invokeModel)
 import Yuki.N.Journal
 import Yuki.N.Memory (ThreadStore (..), newThreadStore)
-import Yuki.N.Model (Model)
+import Yuki.N.Model (AssistantTurn (..), ChatMessage (..), Model)
 import Yuki.N.Provider.OpenAI
 import Yuki.N.Providers (ProviderRegistry, loadAuthJson, loadProviders, providerConfig, providerKeyMap, providerListing)
 import Yuki.N.Runs (RunKind (..), RunRegistry, newRunRegistry)
 import Yuki.N.Server
 import Yuki.N.Sessions (SessionMeta (..), SessionService (..), SessionStore (..), migrateSessionOwners, newSessionStore, sessionIsHome)
 import Yuki.N.SubAgent (registerSubAgent)
-import Yuki.N.Telemetry (newTelemetry, noteEvent)
+import Yuki.N.Telemetry (DeliveryKind (DeliveryAnswer), DeliveryRecord (..), newTelemetry, noteEvent, telemetryLedger)
+import Yuki.N.Telemetry.Ledger (enrichFromGit, newLedger, recordDelivery)
 import Yuki.N.ThreadConfig
 import Yuki.N.Tools (backgroundTools, workTools)
 import Yuki.N.Transcript (TranscriptStore (..), newTranscriptStore, transcriptHooks)
@@ -64,51 +69,53 @@ boot env settings =
 
 serve :: Map.Map String String -> Manager -> Maybe Journal -> Maybe ArtifactStore -> Settings -> RunRegistry -> BackgroundRegistry -> IO ()
 serve env manager journal artifacts settings runs background =
-  newTelemetry >>= \telemetry ->
-    loadAuthJson >>= \auth ->
-      loadProviders env >>= \registry ->
-        let keyMap = providerKeyMap env auth registry
-         in fallbackModels manager settings registry keyMap
-              >>= \fallbacks ->
-                newCognition
-                  (cognitionDir settings)
-                  (cognitionModelsOf manager settings <> fallbacks)
-                  journal
-                  >>= either
-                    (die . Text.unpack)
-                    ( \cognition ->
-                        legacyMemoryOf settings
-                          >>= \memory ->
-                            transcriptOf settings
-                              >>= \(transcriptHooks', transcripts) ->
-                                configStore
-                                  >>= \store ->
-                                    newSessionStore (settingsDataDir settings)
-                                      >>= \sessions ->
-                                        newDispatchStore (settingsDataDir settings)
-                                          >>= \dispatches ->
-                                            let service = SessionService sessions transcripts store (shutdownBackgroundThread background)
-                                                dispatchService =
-                                                  newDispatchService
-                                                    dispatches
-                                                    service
-                                                    (cognitionIncarnations cognition)
-                                                    newId
-                                                    ( generateDraft
-                                                        invokeModel
-                                                        (cognitionModelsOf manager settings <> fallbacks)
-                                                        (settingsDispatchGenerateTimeout settings)
-                                                        journal
-                                                    )
-                                             in migrateSessionOwners sessions store
-                                                  >>= either
-                                                    (die . Text.unpack)
-                                                    ( \() ->
-                                                        migrateLegacy cognition memory transcripts service defaults
-                                                          *> putStrLn (banner settings)
-                                                          *> runServer settings (inspection cognition memory transcripts service) (Just (view store registry keyMap)) (Just runs) (Just dispatchService) (resolve telemetry cognition sessions store registry keyMap transcriptHooks' fallbacks)
-                                                    )
-                    )
+  liftA2 (,) newTelemetry (newLedger (settingsDataDir settings)) >>= \(telemetry, ledger) ->
+    writeIORef (telemetryLedger telemetry) (Just ledger)
+      >> loadAuthJson
+      >>= \auth ->
+        loadProviders env >>= \registry ->
+          let keyMap = providerKeyMap env auth registry
+           in fallbackModels manager settings registry keyMap
+                >>= \fallbacks ->
+                  newCognition
+                    (cognitionDir settings)
+                    (cognitionModelsOf manager settings <> fallbacks)
+                    journal
+                    >>= either
+                      (die . Text.unpack)
+                      ( \cognition ->
+                          legacyMemoryOf settings
+                            >>= \memory ->
+                              transcriptOf settings
+                                >>= \(transcriptHooks', transcripts) ->
+                                  configStore
+                                    >>= \store ->
+                                      newSessionStore (settingsDataDir settings)
+                                        >>= \sessions ->
+                                          newDispatchStore (settingsDataDir settings)
+                                            >>= \dispatches ->
+                                              let service = SessionService sessions transcripts store (shutdownBackgroundThread background)
+                                                  dispatchService =
+                                                    newDispatchService
+                                                      dispatches
+                                                      service
+                                                      (cognitionIncarnations cognition)
+                                                      newId
+                                                      ( generateDraft
+                                                          invokeModel
+                                                          (cognitionModelsOf manager settings <> fallbacks)
+                                                          (settingsDispatchGenerateTimeout settings)
+                                                          journal
+                                                      )
+                                               in migrateSessionOwners sessions store
+                                                    >>= either
+                                                      (die . Text.unpack)
+                                                      ( \() ->
+                                                          migrateLegacy cognition memory transcripts service defaults
+                                                            *> putStrLn (banner settings)
+                                                            *> runServer settings (inspection cognition memory transcripts service) (Just (view store registry keyMap)) (Just runs) (Just dispatchService) (resolve telemetry ledger cognition sessions store registry keyMap transcriptHooks' fallbacks)
+                                                      )
+                      )
  where
   inspection cognition memory transcripts sessions =
     Just
@@ -134,14 +141,14 @@ serve env manager journal artifacts settings runs background =
       (pure (Right [openAIModelName (settingsProvider settings)]))
       (providerListing manager registry keyMap)
   base telemetry fallbacks = runtime background defaultHooks manager journal artifacts settings fallbacks <&> \foundation -> foundation {runtimeRuns = Just runs, runtimeTelemetry = Just telemetry}
-  resolve telemetry cognition sessions store registry keyMap transcriptHooks' fallbacks threadId =
+  resolve telemetry ledger cognition sessions store registry keyMap transcriptHooks' fallbacks threadId =
     liftA3 (,,) (base telemetry fallbacks) (threadConfigRead store threadId) (findSession sessions threadId)
       >>= \(foundation, session, meta) ->
         let config = resolveThreadConfig session defaults
             identity = fromMaybe "yuki" ((nonBlank . sessionIncarnationId =<< meta) <|> (nonBlank =<< configIncarnationId config))
             resolvedConfig = config {configIncarnationId = Just identity}
             runIdentity = RunIdentity (maybe RunTask (bool RunTask RunHome . sessionIsHome) meta) identity
-         in resolveRuntime manager (settingsProvider settings) artifacts foundation resolvedConfig registry keyMap
+         in resolveRuntime manager (settingsProvider settings) artifacts foundation {runtimeIdentity = runIdentity} resolvedConfig registry keyMap
               >>= cognitivize resolvedConfig runIdentity
    where
     cognitivize config runIdentity resolved =
@@ -152,11 +159,47 @@ serve env manager journal artifacts settings runs background =
         registerSubAgent
           cognitive
             { runtimeSystemPrompt = appendAgentsMd section (runtimeSystemPrompt cognitive),
-              runtimeHooks = runtimeHooks cognitive <> transcriptHooks' <> telemetryObserver telemetry,
-              runtimeIdentity = runIdentity
+              runtimeHooks = runtimeHooks cognitive <> transcriptHooks' <> telemetryObserver telemetry <> ledgerObserver config runIdentity
             }
-    telemetryObserver telemetry =
-      defaultHooks {observeEvent = \input event -> noteEvent telemetry (AGUI.runId input) event}
+    telemetryObserver hub =
+      defaultHooks {observeEvent = \input event -> noteEvent hub (AGUI.runId input) event}
+    ledgerObserver config runIdentity =
+      defaultHooks
+        { afterRunOutcome = \input outcome messages ->
+            try @SomeException (ledgerOutcome config runIdentity input outcome messages) >>= either (logErr "ledger") (const (pure ()))
+        }
+    ledgerOutcome config runIdentity input outcome messages =
+      when (isRootRun && outcome == RunSucceeded) (answerDelivery *> gitEnrichment)
+     where
+      isRootRun = isNothing (AGUI.runParentId input) && identityKind runIdentity /= RunWorker
+      answerDelivery =
+        recordDelivery
+          ledger
+          telemetry
+          DeliveryRecord
+            { deliveryId = "",
+              deliveryRunId = AGUI.runId input,
+              deliveryThreadId = AGUI.runThreadId input,
+              deliveryIncarnation = identityIncarnation runIdentity,
+              deliveryRunKind = identityKind runIdentity,
+              deliveryKind = DeliveryAnswer,
+              deliveryTitle = Text.take 200 (answerSummary finalText),
+              deliveryRef = fromMaybe (AGUI.runId input) (finalMessageId messages),
+              deliveryBytes = Nothing,
+              deliveryAt = 0
+            }
+       where
+        finalText = Text.take 4000 (fromMaybe "" (finalAssistantText messages))
+      gitEnrichment =
+        enrichFromGit ledger telemetry (settingsTelemetryGitTimeout settings) (identityIncarnation runIdentity) (AGUI.runId input) (AGUI.runThreadId input) (cwdPath (configCwd config))
+      finalAssistantText msgs =
+        listToMaybe (reverse [text | ChatAssistant turn <- msgs, Just text <- [turnText turn], not (Text.null text)])
+      finalMessageId msgs =
+        listToMaybe (reverse [turnMessageId turn | ChatAssistant turn <- msgs])
+      answerSummary text =
+        fromMaybe "" (find (not . Text.null) (Text.lines text))
+    logErr tag =
+      TextIO.hPutStrLn stderr . (("yuki.telemetry: " <> tag <> ": ") <>) . Text.pack . displayException
     nonBlank value
       | Text.null clean = Nothing
       | otherwise = Just clean

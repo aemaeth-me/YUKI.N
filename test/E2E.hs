@@ -217,6 +217,9 @@ e2eSettings port workDir retries =
       settingsContextKeepUnits = 12,
       settingsContextSummaryTokens = 2048,
       settingsDispatchGenerateTimeout = 20,
+      settingsTelemetryGit = True,
+      settingsTelemetryGitTimeout = 3,
+      settingsTelemetryDiffBytes = 8192,
       settingsProvider = fakeConfig port,
       settingsFallbackProviders = []
     }

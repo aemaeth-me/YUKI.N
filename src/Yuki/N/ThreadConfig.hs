@@ -4,6 +4,7 @@ module Yuki.N.ThreadConfig
     ThreadConfigStore (..),
     cwdPath,
     emptyThreadConfig,
+    fsInterceptor,
     globalThreadConfig,
     newMemoryThreadConfigStore,
     newThreadConfigStore,
@@ -13,31 +14,50 @@ module Yuki.N.ThreadConfig
   )
 where
 
-import Control.Applicative ((<|>))
+import Control.Applicative (liftA3, (<|>))
 import Control.Concurrent.MVar (newMVar, withMVar)
-import Control.Exception (IOException, try)
+import Control.Exception (IOException, evaluate, try)
 import Control.Monad (when)
 import Data.Aeson
 import Data.Aeson.KeyMap qualified as KeyMap
+import Data.Aeson.Types (parseMaybe)
 import Data.Bool (bool)
-import Data.Functor ((<&>))
+import Data.Functor (($>), (<&>))
 import Data.IORef (modifyIORef', newIORef, readIORef)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, isNothing)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Text.Lazy qualified as LazyText
+import Data.Text.Lazy.IO qualified as LazyTextIO
 import Network.HTTP.Client (Manager)
 import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
+import System.Environment (lookupEnv)
+import System.FilePath ((</>))
+import Text.Read (readMaybe)
 import Yuki.N.AGUI.Types (toolName)
 import Yuki.N.Agent
 import Yuki.N.Artifact (ArtifactStore, artifactReadToolName)
 import Yuki.N.AtomicFile (atomicEncodeFile)
 import Yuki.N.Config (Settings (..))
 import Yuki.N.Context (ContextConfig (..))
+import Yuki.N.Domain.Diff (unified)
 import Yuki.N.Memory (sanitizeThreadId)
 import Yuki.N.Provider.OpenAI
 import Yuki.N.Providers (ProviderEntry (..), ProviderRegistry, providerConfig, providerDefaultModel)
+import Yuki.N.Runs (RunKind (..))
 import Yuki.N.SubAgent (registerSubAgent)
+import Yuki.N.Telemetry
+  ( DeliveryKind (DeliveryFileWrite),
+    DeliveryRecord (..),
+    FsChangeOp (..),
+    FsChangeOrigin (OriginTool),
+    FsChangeRecord (..),
+    Ledger,
+    Telemetry,
+    telemetryLedger,
+  )
+import Yuki.N.Telemetry.Ledger (quietly, recordDelivery, recordFsChange)
 import Yuki.N.Tools (backgroundTools, workTools)
 
 data CwdSetting
@@ -195,11 +215,11 @@ newMemoryThreadConfigStore =
 
 resolveRuntime :: Manager -> OpenAIConfig -> Maybe ArtifactStore -> Runtime -> ThreadConfig -> ProviderRegistry -> Map.Map String Text -> IO Runtime
 resolveRuntime manager provider artifacts base config registry keyMap =
-  workToolSet <&> \tools ->
+  liftA3 (,,) workToolSet ledgerPair envDiffBytes <&> \(tools, pair, diffBytes) ->
     registerSubAgent
       base
         { runtimeModel = maybe (fallbackModel base) (openAIModel manager) chosenConfig,
-          runtimeTools = artifactTools <> gated tools,
+          runtimeTools = artifactTools <> gated (maybe tools (wrapFs diffBytes tools) pair),
           runtimeSystemPrompt = fromMaybe (runtimeSystemPrompt base) (configSystemPrompt config),
           runtimeHooks = bool defaultHooks (runtimeHooks base) (configMemory config /= Just False),
           runtimeContext = applyContext <$> runtimeContext base
@@ -227,6 +247,76 @@ resolveRuntime manager provider artifacts base config registry keyMap =
         contextKeepUnits = fromMaybe (contextKeepUnits context) (configContextKeepUnits config),
         contextSummaryTokens = fromMaybe (contextSummaryTokens context) (configContextSummaryTokens config)
       }
+  ledgerPair =
+    maybe
+      (pure Nothing)
+      (\telemetry -> readIORef (telemetryLedger telemetry) <&> fmap ((,) telemetry))
+      (runtimeTelemetry base)
+  wrapFs diffBytes tools (telemetry, ledger) =
+    Map.adjust (fsInterceptor telemetry ledger diffBytes rootDir runKind) "fs_write"
+      . Map.adjust (fsInterceptor telemetry ledger diffBytes rootDir runKind) "fs_edit"
+      $ tools
+  rootDir = fromMaybe "" (cwdPath (configCwd config))
+  runKind = identityKind (runtimeIdentity base)
+  envDiffBytes = fromMaybe 8192 . (>>= readMaybe) <$> lookupEnv "YUKI_TELEMETRY_DIFF_BYTES"
+
+fsInterceptor :: Telemetry -> Ledger -> Int -> FilePath -> RunKind -> BackendTool -> BackendTool
+fsInterceptor telemetry ledger diffBytes root kind tool =
+  tool {runBackendTool = \context arguments -> intercept tool context arguments}
+ where
+  intercept original context arguments =
+    case parseMaybe (withObject "fs-write" (.: "path")) arguments of
+      Nothing -> runBackendTool original context arguments
+      Just path ->
+        let target = root </> path
+         in boundedRead target >>= \old ->
+              runBackendTool original context arguments >>= \outcome ->
+                bool (record original context target path old $> outcome) (pure outcome) (toolOutcomeError outcome)
+  record original context target path old =
+    boundedRead target >>= \new ->
+      quietly
+        ( recordFsChange ledger telemetry (change original context path old new)
+            *> recordDelivery ledger telemetry (delivery context path new)
+        )
+  change original context path old new =
+    FsChangeRecord
+      { fsChangeId = "",
+        fsChangeRunId = toolContextRunId context,
+        fsChangeThreadId = toolContextThreadId context,
+        fsChangeIncarnation = toolContextIncarnation context,
+        fsChangePath = Text.pack path,
+        fsChangeOp = opOf old new,
+        fsChangeOrigin = OriginTool (toolName (backendToolSpec original)) (toolContextCallId context),
+        fsChangeDiff = diffOf path old new,
+        fsChangeStat = Nothing,
+        fsChangeAt = 0
+      }
+  delivery context path new =
+    DeliveryRecord
+      { deliveryId = "",
+        deliveryRunId = toolContextRunId context,
+        deliveryThreadId = toolContextThreadId context,
+        deliveryIncarnation = toolContextIncarnation context,
+        deliveryRunKind = kind,
+        deliveryKind = DeliveryFileWrite,
+        deliveryTitle = Text.pack path,
+        deliveryRef = Text.pack path,
+        deliveryBytes = fmap Text.length new,
+        deliveryAt = 0
+      }
+  opOf old new = case (old, new) of
+    (Nothing, Just _) -> FsCreated
+    (Just _, Nothing) -> FsDeleted
+    _ -> FsModified
+  diffOf path old new
+    | Text.null diff = Nothing
+    | otherwise = Just (Text.take diffBytes diff)
+   where
+    diff = unified path (fromMaybe "" old) (fromMaybe "" new)
+  boundedRead path =
+    try @IOException (LazyTextIO.readFile path >>= evaluate . LazyText.toStrict . LazyText.take 200000) >>= \case
+      Left _ -> pure Nothing
+      Right content -> pure (Just content)
 
 globalThreadConfig :: Settings -> ThreadConfig
 globalThreadConfig settings =

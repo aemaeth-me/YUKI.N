@@ -84,7 +84,7 @@ callToolContext context tools name arguments =
   named = (== name) . toolName
 callAs :: Text -> [BackendTool] -> Text -> Value -> IO ToolOutcome
 callAs threadId =
-  callToolContext (ToolContext "run" threadId "call" (const (pure ())) Nothing)
+  callToolContext (ToolContext "run" threadId "call" (const (pure ())) Nothing "")
 
 workToolTests :: TestTree
 workToolTests =
@@ -385,7 +385,7 @@ shellStreams = withWorkDir exercise
     stderr @?= "err\n"
     toolOutcomeContent outcome @?= "exit 0\none\ntwo\nerr\n"
    where
-    streaming events = ToolContext "run" "thread" "call-1" (\event -> modifyIORef' events (event :)) Nothing
+    streaming events = ToolContext "run" "thread" "call-1" (\event -> modifyIORef' events (event :)) Nothing ""
   parseChunk :: Value -> Parser (Text, Text, Text)
   parseChunk =
     withObject "shell.output" $ \fields ->
@@ -668,7 +668,7 @@ callPlan :: [BackendTool] -> IORef [Event] -> Value -> IO ToolOutcome
 callPlan tools events =
   callToolContext (streaming events) tools "plan"
  where
-  streaming ref = ToolContext "run" "thread" "call" (\event -> modifyIORef' ref (event :)) Nothing
+  streaming ref = ToolContext "run" "thread" "call" (\event -> modifyIORef' ref (event :)) Nothing ""
 planEvent :: [(Text, Text, Text)] -> Event
 planEvent items = Custom "plan" (object ["items" .= fmap item items])
  where

@@ -177,6 +177,8 @@ expectFrame chan =
   timeout 2000000 (readChan chan) >>= \case
     Just (FrameStatus status) -> pure status
     Just (FrameRunEnd {}) -> assertFailure "expected status frame"
+    Just (FrameDelivery {}) -> assertFailure "expected status frame"
+    Just (FrameFsChange {}) -> assertFailure "expected status frame"
     Nothing -> assertFailure "no frame"
 
 expectEnd :: Chan ActivityFrame -> IO (Text, Text)
@@ -184,6 +186,8 @@ expectEnd chan =
   timeout 2000000 (readChan chan) >>= \case
     Just (FrameRunEnd runId outcome) -> pure (runId, outcome)
     Just (FrameStatus {}) -> assertFailure "expected run.end frame"
+    Just (FrameDelivery {}) -> assertFailure "expected run.end frame"
+    Just (FrameFsChange {}) -> assertFailure "expected run.end frame"
     Nothing -> assertFailure "no frame"
 
 drainFrames :: Chan ActivityFrame -> IO [ActivityFrame]

@@ -194,7 +194,7 @@ withWorkDir action = do
 callTool :: [BackendTool] -> Text -> Value -> IO ToolOutcome
 callTool tools name arguments =
   maybe (assertFailure ("missing tool: " <> Text.unpack name)) pure (find (named . backendToolSpec) tools)
-    >>= \backend -> runBackendTool backend (ToolContext "run" "thread" "call" (const (pure ())) Nothing) arguments
+    >>= \backend -> runBackendTool backend (ToolContext "run" "thread" "call" (const (pure ())) Nothing "") arguments
  where
   named = (== name) . toolName
 outcomeValue :: ToolOutcome -> IO Value

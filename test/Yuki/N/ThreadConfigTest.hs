@@ -156,7 +156,7 @@ cwdOverridesGlobal = withWorkDir $ \globalDir -> do
   callRuntimeList runtime =
     maybe (assertFailure "missing fs_list") pure (Map.lookup "fs_list" (runtimeTools runtime))
       >>= \backend ->
-        runBackendTool backend (ToolContext "run" "thread" "call" (const (pure ())) Nothing) (object [])
+        runBackendTool backend (ToolContext "run" "thread" "call" (const (pure ())) Nothing "") (object [])
           <&> toolOutcomeContent
 
 fileStoreRoundTrip :: Assertion

@@ -2,6 +2,12 @@ module Yuki.N.Telemetry
   ( ActivityFrame (..),
     ActiveTool (..),
     ContextSnapshot (..),
+    DeliveryKind (..),
+    DeliveryRecord (..),
+    FsChangeOp (..),
+    FsChangeOrigin (..),
+    FsChangeRecord (..),
+    Ledger (..),
     LiveStatus (..),
     RunPhase (..),
     Telemetry,
@@ -11,13 +17,17 @@ module Yuki.N.Telemetry
     noteCancelling,
     noteEvent,
     publish,
+    seconds,
     subscribe,
+    telemetryClock,
+    telemetryLedger,
     telemetryRunStarting,
     telemetryRunStopping,
   )
 where
 
 import Control.Concurrent (Chan, dupChan, newChan, writeChan)
+import Control.Concurrent.MVar (MVar)
 import Control.Monad (when)
 import Data.Aeson
 import Data.Aeson.Types (parseMaybe)
@@ -27,6 +37,7 @@ import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, isJust)
 import Data.Text (Text)
+import Data.Text qualified as Text
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import Yuki.N.AGUI.Event (Event (..))
 import Yuki.N.Runs
@@ -73,6 +84,154 @@ instance ToJSON ContextSnapshot where
         "budgetTokens" .= contextBudget snapshot,
         "windowTokens" .= contextWindow snapshot
       ]
+
+data DeliveryKind
+  = DeliveryAnswer
+  | DeliveryArtifact
+  | DeliveryFileWrite
+  deriving stock (Eq, Show)
+
+instance ToJSON DeliveryKind where
+  toJSON =
+    String . \case
+      DeliveryAnswer -> "answer"
+      DeliveryArtifact -> "artifact"
+      DeliveryFileWrite -> "file_write"
+
+instance FromJSON DeliveryKind where
+  parseJSON = withText "DeliveryKind" $ \case
+    "answer" -> pure DeliveryAnswer
+    "artifact" -> pure DeliveryArtifact
+    "file_write" -> pure DeliveryFileWrite
+    other -> fail ("unknown delivery kind: " <> Text.unpack other)
+
+data DeliveryRecord = DeliveryRecord
+  { deliveryId :: Text,
+    deliveryRunId :: Text,
+    deliveryThreadId :: Text,
+    deliveryIncarnation :: Text,
+    deliveryRunKind :: RunKind,
+    deliveryKind :: DeliveryKind,
+    deliveryTitle :: Text,
+    deliveryRef :: Text,
+    deliveryBytes :: Maybe Int,
+    deliveryAt :: Integer
+  }
+  deriving stock (Eq, Show)
+
+instance ToJSON DeliveryRecord where
+  toJSON record =
+    object
+      [ "id" .= deliveryId record,
+        "runId" .= deliveryRunId record,
+        "threadId" .= deliveryThreadId record,
+        "incarnationId" .= deliveryIncarnation record,
+        "runKind" .= deliveryRunKind record,
+        "kind" .= deliveryKind record,
+        "title" .= deliveryTitle record,
+        "ref" .= deliveryRef record,
+        "bytes" .= deliveryBytes record,
+        "at" .= deliveryAt record
+      ]
+
+instance FromJSON DeliveryRecord where
+  parseJSON = withObject "DeliveryRecord" $ \fields ->
+    DeliveryRecord
+      <$> fields .: "id"
+      <*> fields .: "runId"
+      <*> fields .: "threadId"
+      <*> fields .: "incarnationId"
+      <*> fields .: "runKind"
+      <*> fields .: "kind"
+      <*> fields .: "title"
+      <*> fields .: "ref"
+      <*> fields .:? "bytes"
+      <*> fields .: "at"
+
+data FsChangeOp
+  = FsCreated
+  | FsModified
+  | FsDeleted
+  deriving stock (Eq, Ord, Show)
+
+instance ToJSON FsChangeOp where
+  toJSON =
+    String . \case
+      FsCreated -> "created"
+      FsModified -> "modified"
+      FsDeleted -> "deleted"
+
+instance FromJSON FsChangeOp where
+  parseJSON = withText "FsChangeOp" $ \case
+    "created" -> pure FsCreated
+    "modified" -> pure FsModified
+    "deleted" -> pure FsDeleted
+    other -> fail ("unknown fs change op: " <> Text.unpack other)
+
+data FsChangeOrigin
+  = OriginTool {toolName :: Text, callId :: Text}
+  | OriginGit
+  deriving stock (Eq, Ord, Show)
+
+instance ToJSON FsChangeOrigin where
+  toJSON (OriginTool name call) = object ["kind" .= ("tool" :: Text), "toolName" .= name, "callId" .= call]
+  toJSON OriginGit = object ["kind" .= ("git" :: Text)]
+
+instance FromJSON FsChangeOrigin where
+  parseJSON = withObject "FsChangeOrigin" $ \fields ->
+    fields .: "kind" >>= \case
+      "tool" -> OriginTool <$> fields .: "toolName" <*> fields .: "callId"
+      "git" -> pure OriginGit
+      other -> fail ("unknown fs change origin: " <> Text.unpack other)
+
+data FsChangeRecord = FsChangeRecord
+  { fsChangeId :: Text,
+    fsChangeRunId :: Text,
+    fsChangeThreadId :: Text,
+    fsChangeIncarnation :: Text,
+    fsChangePath :: Text,
+    fsChangeOp :: FsChangeOp,
+    fsChangeOrigin :: FsChangeOrigin,
+    fsChangeDiff :: Maybe Text,
+    fsChangeStat :: Maybe Text,
+    fsChangeAt :: Integer
+  }
+  deriving stock (Eq, Show)
+
+instance ToJSON FsChangeRecord where
+  toJSON record =
+    object
+      [ "id" .= fsChangeId record,
+        "runId" .= fsChangeRunId record,
+        "threadId" .= fsChangeThreadId record,
+        "incarnationId" .= fsChangeIncarnation record,
+        "path" .= fsChangePath record,
+        "op" .= fsChangeOp record,
+        "origin" .= fsChangeOrigin record,
+        "diff" .= fsChangeDiff record,
+        "stat" .= fsChangeStat record,
+        "at" .= fsChangeAt record
+      ]
+
+instance FromJSON FsChangeRecord where
+  parseJSON = withObject "FsChangeRecord" $ \fields ->
+    FsChangeRecord
+      <$> fields .: "id"
+      <*> fields .: "runId"
+      <*> fields .: "threadId"
+      <*> fields .: "incarnationId"
+      <*> fields .: "path"
+      <*> fields .: "op"
+      <*> fields .: "origin"
+      <*> fields .:? "diff"
+      <*> fields .:? "stat"
+      <*> fields .: "at"
+
+data Ledger = Ledger
+  { ledgerDeliveriesFile :: FilePath,
+    ledgerFsChangesFile :: FilePath,
+    ledgerLock :: MVar ()
+  }
 
 data LiveStatus = LiveStatus
   { liveRunId :: Text,
@@ -131,21 +290,33 @@ kindName = \case
 instance ToJSON RunKind where
   toJSON = String . kindName
 
+instance FromJSON RunKind where
+  parseJSON = withText "RunKind" $ \case
+    "home" -> pure RunHome
+    "task" -> pure RunTask
+    "worker" -> pure RunWorker
+    other -> fail ("unknown run kind: " <> Text.unpack other)
+
 data ActivityFrame
   = FrameStatus LiveStatus
   | FrameRunEnd Text Text
+  | FrameDelivery DeliveryRecord
+  | FrameFsChange FsChangeRecord
   deriving stock (Eq, Show)
 
 instance ToJSON ActivityFrame where
   toJSON (FrameStatus status) = object ["frame" .= ("status" :: Text), "status" .= status]
   toJSON (FrameRunEnd runId outcome) =
     object ["frame" .= ("run.end" :: Text), "runId" .= runId, "outcome" .= outcome]
+  toJSON (FrameDelivery record) = object ["frame" .= ("delivery" :: Text), "delivery" .= record]
+  toJSON (FrameFsChange record) = object ["frame" .= ("fschange" :: Text), "fschange" .= record]
 
 data Telemetry = Telemetry
   { telemetryLive :: IORef (Map Text LiveStatus),
     telemetryHub :: Chan ActivityFrame,
     telemetryPublished :: IORef (Map Text Integer),
-    telemetryClock :: IO Integer
+    telemetryClock :: IO Integer,
+    telemetryLedger :: IORef (Maybe Ledger)
   }
 
 newTelemetry :: IO Telemetry
@@ -153,7 +324,7 @@ newTelemetry = newTelemetryWithClock clockMicros
 
 newTelemetryWithClock :: IO Integer -> IO Telemetry
 newTelemetryWithClock clock =
-  Telemetry <$> newIORef Map.empty <*> newChan <*> newIORef Map.empty <*> pure clock
+  Telemetry <$> newIORef Map.empty <*> newChan <*> newIORef Map.empty <*> pure clock <*> newIORef Nothing
 
 clockMicros :: IO Integer
 clockMicros = round . (* 1000000) <$> getPOSIXTime
