@@ -41,6 +41,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Time.Clock.POSIX (getPOSIXTime)
 import Yuki.N.AGUI.Event (Event (..))
+import Yuki.N.Dispatch.Types (DispatchDraft)
 import Yuki.N.Runs
 
 data RunPhase
@@ -303,6 +304,8 @@ data ActivityFrame
   | FrameRunEnd Text Text
   | FrameDelivery DeliveryRecord
   | FrameFsChange FsChangeRecord
+  | FrameDraft DispatchDraft
+  | FrameDraftResolved Text Text (Maybe Text)
   | FramePing
   deriving stock (Eq, Show)
 
@@ -312,6 +315,9 @@ instance ToJSON ActivityFrame where
     object ["frame" .= ("run.end" :: Text), "runId" .= runId, "outcome" .= outcome]
   toJSON (FrameDelivery record) = object ["frame" .= ("delivery" :: Text), "delivery" .= record]
   toJSON (FrameFsChange record) = object ["frame" .= ("fschange" :: Text), "fschange" .= record]
+  toJSON (FrameDraft draft) = object ["frame" .= ("draft" :: Text), "draft" .= draft]
+  toJSON (FrameDraftResolved identifier status threadId) =
+    object ["frame" .= ("draft.resolved" :: Text), "dispatchId" .= identifier, "status" .= status, "threadId" .= threadId]
   toJSON FramePing = object ["frame" .= ("ping" :: Text)]
 
 data Telemetry = Telemetry

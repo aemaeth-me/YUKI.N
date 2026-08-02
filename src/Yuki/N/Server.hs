@@ -66,6 +66,7 @@ import Yuki.N.Replay (memoryInjected, readJournal, replayEntries, replayWithStor
 import Yuki.N.Runs (RunKind (..), RunRegistry, activeThreads, cancelRun, followUpRun, steerRun)
 import Yuki.N.Sessions
 import Yuki.N.Telemetry (ActivityFrame (..), DeliveryRecord (..), Ledger, LiveStatus (..), Telemetry, liveRuns, noteCancelling, subscribe, telemetryLedger)
+import Yuki.N.Telemetry qualified as Telemetry
 import Yuki.N.Telemetry.Ledger (deliveriesFor, fsChangesFor)
 import Yuki.N.ThreadConfig (ThreadConfig (..), ThreadConfigStore (..), cwdPath, resolveThreadConfig)
 import Yuki.N.Tools (completePaths, listTree)
@@ -430,15 +431,19 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
       patchDispatch (dispatchServiceStore service) identifier (DispatchPatch title prompt config)
         >>= respond . either dispatchFailure ok
   confirmDispatchRoute identifier service =
-    dispatchServiceConfirm service identifier >>= respond . outcome
+    dispatchServiceConfirm service identifier >>= outcome
    where
-    outcome ConfirmMissing = missing "dispatch not found"
-    outcome (ConfirmConflict failure) = conflict failure
-    outcome (ConfirmError failure) = failed failure
-    outcome (ConfirmOk threadId) = jsonResponse cors status201 [] (object ["threadId" .= threadId])
+    outcome ConfirmMissing = respond (missing "dispatch not found")
+    outcome (ConfirmConflict failure) = respond (conflict failure)
+    outcome (ConfirmError failure) = respond (failed failure)
+    outcome (ConfirmOk threadId) =
+      broadcast (FrameDraftResolved identifier "dispatched" (Just threadId))
+        *> respond (jsonResponse cors status201 [] (object ["threadId" .= threadId]))
   cancelDispatchRoute identifier service =
     markDispatchCancelled (dispatchServiceStore service) identifier
-      >>= respond . either dispatchFailure ok
+      >>= either (respond . dispatchFailure) (\draft -> broadcast (FrameDraftResolved identifier "cancelled" Nothing) *> respond (ok draft))
+  broadcast frame =
+    traverse_ (\hub -> Telemetry.publish hub frame) telemetry
   dispatchFailure errorText
     | "unknown dispatch:" `TextValue.isPrefixOf` errorText = missing errorText
     | "is not draft" `TextValue.isInfixOf` errorText = conflict errorText
@@ -1378,6 +1383,8 @@ encodeFrame = \case
   FrameRunEnd runId outcome -> sseFrame "run.end" (object ["runId" .= runId, "outcome" .= outcome])
   FrameDelivery record -> sseFrame "delivery" (toJSON record)
   FrameFsChange record -> sseFrame "fschange" (toJSON record)
+  FrameDraft draft -> sseFrame "draft" (toJSON draft)
+  FrameDraftResolved identifier status threadId -> sseFrame "draft.resolved" (object ["dispatchId" .= identifier, "status" .= status, "threadId" .= threadId])
 
 jsonResponse :: Maybe Text -> Status -> ResponseHeaders -> Value -> Response
 jsonResponse cors status headers value =

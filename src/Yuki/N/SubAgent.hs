@@ -1,5 +1,7 @@
 module Yuki.N.SubAgent
-  ( subAgentTool,
+  ( childRuntime,
+    delegableTools,
+    subAgentTool,
     registerSubAgent,
   )
 where
@@ -370,7 +372,8 @@ workerDeniedTools =
     [ "memory_remember",
       "memory_void",
       "self_update",
-      "sleep"
+      "sleep",
+      "propose_dispatch"
     ]
 
 delegableTools :: Runtime -> Map.Map Text BackendTool

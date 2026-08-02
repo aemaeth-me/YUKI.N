@@ -113,7 +113,7 @@ serve env manager journal artifacts settings runs background =
                                                       ( \() ->
                                                           migrateLegacy cognition memory transcripts service defaults
                                                             *> putStrLn (banner settings)
-                                                            *> runServer settings (inspection cognition memory transcripts service) (Just (view store registry keyMap)) (Just runs) (Just dispatchService) (Just telemetry) (resolve telemetry ledger cognition sessions store registry keyMap transcriptHooks' fallbacks)
+                                                            *> runServer settings (inspection cognition memory transcripts service) (Just (view store registry keyMap)) (Just runs) (Just dispatchService) (Just telemetry) (resolve telemetry ledger cognition sessions store registry keyMap transcriptHooks' fallbacks dispatches)
                                                       )
                       )
  where
@@ -140,9 +140,9 @@ serve env manager journal artifacts settings runs background =
       defaults
       (pure (Right [openAIModelName (settingsProvider settings)]))
       (providerListing manager registry keyMap)
-  base telemetry fallbacks = runtime background defaultHooks manager journal artifacts settings fallbacks <&> \foundation -> foundation {runtimeRuns = Just runs, runtimeTelemetry = Just telemetry}
-  resolve telemetry ledger cognition sessions store registry keyMap transcriptHooks' fallbacks threadId =
-    liftA3 (,,) (base telemetry fallbacks) (threadConfigRead store threadId) (findSession sessions threadId)
+  base dispatches telemetry fallbacks = runtime background defaultHooks manager journal artifacts settings fallbacks <&> \foundation -> foundation {runtimeRuns = Just runs, runtimeTelemetry = Just telemetry, runtimeDispatchStore = Just dispatches, runtimeDispatchConfirmTimeout = settingsDispatchConfirmTimeout settings}
+  resolve telemetry ledger cognition sessions store registry keyMap transcriptHooks' fallbacks dispatches threadId =
+    liftA3 (,,) (base dispatches telemetry fallbacks) (threadConfigRead store threadId) (findSession sessions threadId)
       >>= \(foundation, session, meta) ->
         let config = resolveThreadConfig session defaults
             identity = fromMaybe "yuki" ((nonBlank . sessionIncarnationId =<< meta) <|> (nonBlank =<< configIncarnationId config))
@@ -371,6 +371,8 @@ runtime background hooks manager journal artifacts settings fallbacks =
             ),
         runtimeRuns = Nothing,
         runtimeTelemetry = Nothing,
+        runtimeDispatchStore = Nothing,
+        runtimeDispatchConfirmTimeout = 600,
         runtimeIdentity = defaultIdentity,
         runtimeSteer = const (pure []),
         runtimeFollowUp = const (pure [])

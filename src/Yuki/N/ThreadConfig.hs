@@ -1,16 +1,11 @@
 module Yuki.N.ThreadConfig
-  ( CwdSetting (..),
-    ThreadConfig (..),
-    ThreadConfigStore (..),
-    cwdPath,
-    emptyThreadConfig,
+  ( module Yuki.N.ThreadConfig.Types,
     fsInterceptor,
     globalThreadConfig,
     newMemoryThreadConfigStore,
     newThreadConfigStore,
     renderGlobalConfig,
     resolveRuntime,
-    resolveThreadConfig,
   )
 where
 
@@ -19,7 +14,6 @@ import Control.Concurrent.MVar (newMVar, withMVar)
 import Control.Exception (IOException, evaluate, try)
 import Control.Monad (when)
 import Data.Aeson
-import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson.Types (parseMaybe)
 import Data.Bool (bool)
 import Data.Functor (($>), (<&>))
@@ -39,6 +33,7 @@ import Yuki.N.Artifact (ArtifactStore, artifactReadToolName)
 import Yuki.N.AtomicFile (atomicEncodeFile)
 import Yuki.N.Config (Settings (..))
 import Yuki.N.Context (ContextConfig (..))
+import Yuki.N.DispatchTool (proposeDispatchTool)
 import Yuki.N.Domain.Diff (unified)
 import Yuki.N.Memory (sanitizeThreadId)
 import Yuki.N.Provider.OpenAI
@@ -57,126 +52,8 @@ import Yuki.N.Telemetry
     telemetryLedger,
   )
 import Yuki.N.Telemetry.Ledger (quietly, recordDelivery, recordFsChange)
+import Yuki.N.ThreadConfig.Types
 import Yuki.N.Tools (backgroundTools, workTools)
-
-data CwdSetting
-  = CwdInherit
-  | CwdNone
-  | CwdPath FilePath
-  deriving stock (Eq, Show)
-
-cwdPath :: CwdSetting -> Maybe FilePath
-cwdPath CwdInherit = Nothing
-cwdPath CwdNone = Nothing
-cwdPath (CwdPath path) = Just path
-
-data ThreadConfig = ThreadConfig
-  { configCwd :: CwdSetting,
-    configIncarnationId :: Maybe Text,
-    configSystemPrompt :: Maybe Text,
-    configProvider :: Maybe Text,
-    configModel :: Maybe Text,
-    configReasoningEffort :: Maybe ReasoningEffort,
-    configFs :: Maybe Bool,
-    configShell :: Maybe Bool,
-    configMemory :: Maybe Bool,
-    configContextReserveTokens :: Maybe Int,
-    configContextKeepUnits :: Maybe Int,
-    configContextSummaryTokens :: Maybe Int
-  }
-  deriving stock (Eq, Show)
-
-emptyThreadConfig :: ThreadConfig
-emptyThreadConfig = ThreadConfig CwdInherit Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
-
-instance Semigroup ThreadConfig where
-  session <> fallback =
-    ThreadConfig
-      cwd
-      (pick configIncarnationId)
-      (pick configSystemPrompt)
-      (pick configProvider)
-      (pick configModel)
-      (pick configReasoningEffort)
-      (pick configFs)
-      (pick configShell)
-      (pick configMemory)
-      (pick configContextReserveTokens)
-      (pick configContextKeepUnits)
-      (pick configContextSummaryTokens)
-   where
-    cwd = case configCwd session of
-      CwdInherit -> configCwd fallback
-      explicit -> explicit
-    pick :: (ThreadConfig -> Maybe field) -> Maybe field
-    pick field = field session <|> field fallback
-
-instance Monoid ThreadConfig where
-  mempty = emptyThreadConfig
-
-resolveThreadConfig :: ThreadConfig -> ThreadConfig -> ThreadConfig
-resolveThreadConfig = (<>)
-
-instance ToJSON ThreadConfig where
-  toJSON config =
-    object
-      ( cwdPairs (configCwd config)
-          <> [ "cwdMode" .= cwdMode cwd,
-               "incarnationId" .= configIncarnationId config,
-               "systemPrompt" .= configSystemPrompt config,
-               "provider" .= configProvider config,
-               "model" .= configModel config,
-               "reasoningEffort" .= configReasoningEffort config,
-               "fs" .= configFs config,
-               "shell" .= configShell config,
-               "memory" .= configMemory config,
-               "contextReserveTokens" .= configContextReserveTokens config,
-               "contextKeepUnits" .= configContextKeepUnits config,
-               "contextSummaryTokens" .= configContextSummaryTokens config
-             ]
-      )
-   where
-    cwd = configCwd config
-    cwdPairs CwdInherit = []
-    cwdPairs CwdNone = ["cwd" .= Null]
-    cwdPairs (CwdPath path) = ["cwd" .= path]
-    cwdMode CwdInherit = "inherit" :: Text
-    cwdMode CwdNone = "none"
-    cwdMode CwdPath {} = "path"
-
-instance FromJSON ThreadConfig where
-  parseJSON = withObject "ThreadConfig" $ \fields ->
-    ThreadConfig
-      <$> parseCwd fields
-      <*> fields .:? "incarnationId"
-      <*> fields .:? "systemPrompt"
-      <*> fields .:? "provider"
-      <*> fields .:? "model"
-      <*> fields .:? "reasoningEffort"
-      <*> fields .:? "fs"
-      <*> fields .:? "shell"
-      <*> fields .:? "memory"
-      <*> fields .:? "contextReserveTokens"
-      <*> fields .:? "contextKeepUnits"
-      <*> fields .:? "contextSummaryTokens"
-   where
-    parseCwd fields =
-      fields .:? "cwdMode" >>= maybe (legacy fields) (explicit fields)
-    legacy fields =
-      case KeyMap.lookup "cwd" fields of
-        Nothing -> pure CwdInherit
-        Just Null -> pure CwdNone
-        Just value -> CwdPath <$> parseJSON value
-    explicit _ "inherit" = pure CwdInherit
-    explicit _ "none" = pure CwdNone
-    explicit fields "path" = CwdPath <$> fields .: "cwd"
-    explicit _ mode = fail ("unknown cwdMode: " <> Text.unpack mode)
-
-data ThreadConfigStore = ThreadConfigStore
-  { threadConfigRead :: Text -> IO ThreadConfig,
-    threadConfigWrite :: Text -> ThreadConfig -> IO (),
-    threadConfigDelete :: Text -> IO ()
-  }
 
 newThreadConfigStore :: FilePath -> IO ThreadConfigStore
 newThreadConfigStore dir =
@@ -218,12 +95,17 @@ resolveRuntime manager provider artifacts base config registry keyMap =
     registerSubAgent
       base
         { runtimeModel = maybe (fallbackModel base) (openAIModel manager) chosenConfig,
-          runtimeTools = artifactTools <> gated (maybe tools (wrapFs diffBytes tools) pair),
+          runtimeTools = dispatchTool <> artifactTools <> gated (maybe tools (wrapFs diffBytes tools) pair),
           runtimeSystemPrompt = fromMaybe (runtimeSystemPrompt base) (configSystemPrompt config),
           runtimeHooks = bool defaultHooks (runtimeHooks base) (configMemory config /= Just False),
           runtimeContext = applyContext <$> runtimeContext base
         }
  where
+  dispatchTool =
+    maybe
+      Map.empty
+      (\store -> Map.singleton "propose_dispatch" (proposeDispatchTool (runtimeDispatchConfirmTimeout base) store (runtimeTelemetry base)))
+      (runtimeDispatchStore base)
   chosenConfig =
     configProvider config >>= \name ->
       Map.lookup name registry >>= \entry ->

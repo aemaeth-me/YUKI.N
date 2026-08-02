@@ -77,6 +77,7 @@ import Yuki.N.Artifact
   )
 import Yuki.N.Background (BackgroundRegistry)
 import Yuki.N.Context
+import Yuki.N.Dispatch.Types (DispatchStore)
 import Yuki.N.Journal
 import Yuki.N.Model
 import Yuki.N.Runs
@@ -124,6 +125,8 @@ data Runtime = Runtime
     runtimeContext :: Maybe ContextConfig,
     runtimeRuns :: Maybe RunRegistry,
     runtimeTelemetry :: Maybe Telemetry,
+    runtimeDispatchStore :: Maybe DispatchStore,
+    runtimeDispatchConfirmTimeout :: Int,
     runtimeIdentity :: RunIdentity,
     runtimeSteer :: Int -> IO [ChatMessage],
     runtimeFollowUp :: Int -> IO [ChatMessage]

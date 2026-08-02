@@ -4,6 +4,7 @@ import E2E (e2eTests)
 import Golden (goldenTests)
 import Test.Tasty
 import Yuki.N.AGUITest
+import Yuki.N.ActivityTest
 import Yuki.N.AdversarialTest
 import Yuki.N.AgentTest
 import Yuki.N.AgentsMdTest
@@ -18,6 +19,7 @@ import Yuki.N.ConfigTest
 import Yuki.N.ContextTest
 import Yuki.N.DiffTest
 import Yuki.N.DispatchTest
+import Yuki.N.DispatchToolTest
 import Yuki.N.FactsTest
 import Yuki.N.GrowthTest
 import Yuki.N.InvocationTest
@@ -32,7 +34,6 @@ import Yuki.N.SessionTest
 import Yuki.N.SubAgentTest
 import Yuki.N.Telemetry.LedgerTest
 import Yuki.N.TelemetryTest
-import Yuki.N.ActivityTest
 import Yuki.N.ThreadConfigTest
 import Yuki.N.ToolsTest
 import Yuki.N.TranscriptTest
@@ -85,6 +86,7 @@ main =
         invocationTests,
         diffTests,
         dispatchTests,
+        dispatchToolTests,
         e2eTests,
         goldenTests
       ]

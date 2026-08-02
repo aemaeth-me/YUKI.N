@@ -56,6 +56,8 @@ library
         Yuki.N.ContextEpoch
         Yuki.N.Diff
         Yuki.N.Dispatch
+        Yuki.N.Dispatch.Types
+        Yuki.N.DispatchTool
         Yuki.N.Domain.Context
         Yuki.N.Domain.Diff
         Yuki.N.Domain.Model
@@ -81,6 +83,7 @@ library
         Yuki.N.Sessions
         Yuki.N.SubAgent
         Yuki.N.ThreadConfig
+        Yuki.N.ThreadConfig.Types
         Yuki.N.Tools
         Yuki.N.Transcript
     hs-source-dirs: src
@@ -128,6 +131,7 @@ test-suite yuki-n-test
         Yuki.N.ContextTest,
         Yuki.N.DiffTest,
         Yuki.N.DispatchTest,
+        Yuki.N.DispatchToolTest,
         Yuki.N.FactsTest,
         Yuki.N.GrowthTest,
         Yuki.N.InvocationTest,

@@ -179,6 +179,8 @@ expectFrame chan =
     Just (FrameRunEnd {}) -> assertFailure "expected status frame"
     Just (FrameDelivery {}) -> assertFailure "expected status frame"
     Just (FrameFsChange {}) -> assertFailure "expected status frame"
+    Just (FrameDraft {}) -> assertFailure "expected status frame"
+    Just (FrameDraftResolved {}) -> assertFailure "expected status frame"
     Just FramePing -> assertFailure "expected status frame"
     Nothing -> assertFailure "no frame"
 
@@ -189,6 +191,8 @@ expectEnd chan =
     Just (FrameStatus {}) -> assertFailure "expected run.end frame"
     Just (FrameDelivery {}) -> assertFailure "expected run.end frame"
     Just (FrameFsChange {}) -> assertFailure "expected run.end frame"
+    Just (FrameDraft {}) -> assertFailure "expected run.end frame"
+    Just (FrameDraftResolved {}) -> assertFailure "expected run.end frame"
     Just FramePing -> assertFailure "expected run.end frame"
     Nothing -> assertFailure "no frame"
 
