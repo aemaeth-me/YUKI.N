@@ -1,9 +1,10 @@
-module Yuki.Dispatch.View exposing (draftEditor)
+module Yuki.Dispatch.View exposing (dialog, draftEditor)
 
 import Html exposing (..)
-import Html.Attributes exposing (class, classList, disabled, placeholder, rows, type_, value)
-import Html.Events exposing (onClick, onInput)
+import Html.Attributes exposing (class, classList, disabled, id, placeholder, rows, type_, value)
+import Html.Events exposing (onClick, onInput, onSubmit, stopPropagationOn)
 import Json.Decode as Decode
+import Yuki.Dispatch.State as State
 import Yuki.Dispatch.Types exposing (..)
 import Yuki.Telemetry.Types exposing (DispatchDraft)
 
@@ -121,3 +122,69 @@ clip length text =
 
     else
         text
+
+backdropClose : msg -> Html.Attribute msg
+backdropClose msg =
+    stopPropagationOn "click"
+        (Decode.field "target" (Decode.field "id" Decode.string)
+            |> Decode.andThen
+                (\id ->
+                    if id == "draft-backdrop" then
+                        Decode.succeed ( msg, True )
+
+                    else
+                        Decode.fail "clicked inside dialog"
+                )
+        )
+
+
+dialog : (State.Msg -> msg) -> State.Model -> Html msg
+dialog toMsg model =
+    case model.dialog of
+        Nothing ->
+            text ""
+
+        Just (State.InputDialog input) ->
+            div [ class "draft-dialog-backdrop", id "draft-backdrop", backdropClose (toMsg State.Close) ]
+                [ div [ class "draft-dialog" ]
+                    [ div [ class "draft-dialog-head" ]
+                        [ span [ class "draft-dialog-title" ] [ text "派发任务" ]
+                        , button [ class "draft-dialog-close", onClick (toMsg State.Close) ] [ text "×" ]
+                        ]
+                    , form [ onSubmit (toMsg State.CreateSubmitted) ]
+                        [ div [ class "draft-field" ]
+                            [ label [] [ text "需求描述" ]
+                            , textarea
+                                [ class "draft-textarea"
+                                , rows 6
+                                , placeholder "描述你希望 Yuki 以持久任务方式完成的工作"
+                                , value input.text
+                                , disabled input.submitting
+                                , onInput (toMsg << State.InputChanged)
+                                ]
+                                []
+                            ]
+                        , case input.error of
+                            Just message ->
+                                div [ class "draft-error" ] [ text message ]
+
+                            Nothing ->
+                                text ""
+                        , div [ class "draft-dialog-actions" ]
+                            [ button
+                                [ class "draft-action draft-action-primary"
+                                , disabled (input.submitting || String.isEmpty (String.trim input.text))
+                                ]
+                                [ text (if input.submitting then "起草中…" else "生成草案") ]
+                            , button [ class "draft-action", onClick (toMsg State.Close) ] [ text "关闭" ]
+                            ]
+                        ]
+                    ]
+                ]
+
+        Just (State.EditDialog editor) ->
+            div [ class "draft-dialog-backdrop", id "draft-backdrop", backdropClose (toMsg State.Close) ]
+                [ div [ class "draft-dialog" ]
+                    [ Html.map (toMsg << State.Editor) (draftEditor identity editor)
+                    ]
+                ]

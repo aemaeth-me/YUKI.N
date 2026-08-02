@@ -6,6 +6,7 @@ import Json.Encode as Encode
 import Time exposing (Posix)
 import Yuki.Conversation.State as Conversation
 import Yuki.Conversation.Types as ConversationTypes
+import Yuki.Dispatch.State as Dispatch
 import Yuki.Run.StatusCard as StatusCard
 import Yuki.Telemetry.State exposing (TelemetryState)
 import Yuki.Telemetry.Types exposing (RunId)
@@ -37,7 +38,9 @@ type alias Model =
     , confirmCancel : Dict RunId Bool
     , actionStatus : Dict RunId String
     , now : Posix
+    , yuki : Maybe String
     , conversation : Conversation.Model
+    , dispatch : Dispatch.Model
     }
 
 
@@ -55,7 +58,9 @@ init =
     , confirmCancel = Dict.empty
     , actionStatus = Dict.empty
     , now = Time.millisToPosix 0
+    , yuki = Nothing
     , conversation = Conversation.init
+    , dispatch = Dispatch.init
     }
 
 
@@ -65,6 +70,7 @@ type Msg
     | InspectionResult String Int Decode.Value
     | StatusCard StatusCard.Msg
     | ConversationMsg ConversationTypes.Msg
+    | DispatchMsg Dispatch.Msg
     | AgentEvent Decode.Value
     | TransportEvent Decode.Value
     | Tick Posix
@@ -75,26 +81,30 @@ update : Effects msg -> Msg -> Model -> ( Model, Cmd msg )
 update effects msg model =
     case msg of
         Entered yuki view ->
+            let
+                withYuki =
+                    { model | yuki = Just yuki }
+            in
             case view of
                 ViewNow ->
                     if model.fetchPending || model.activityIncarnation == Just yuki then
-                        ( model, Cmd.none )
+                        ( withYuki, Cmd.none )
 
                     else
-                        fetchActivity effects yuki model
+                        fetchActivity effects yuki withYuki
 
                 ViewTasks ->
-                    fetchTasks effects model
+                    fetchTasks effects withYuki
 
                 ViewChat maybeThread ->
                     let
                         ( conversation, cmd ) =
-                            Conversation.update (conversationEffects effects) (ConversationTypes.Enter yuki maybeThread) model.conversation
+                            Conversation.update (conversationEffects effects) (ConversationTypes.Enter yuki maybeThread) withYuki.conversation
                     in
-                    ( { model | conversation = conversation }, cmd )
+                    ( { withYuki | conversation = conversation }, cmd )
 
                 _ ->
-                    ( model, Cmd.none )
+                    ( withYuki, Cmd.none )
 
         ActivityChanged yuki ->
             if model.fetchPending then
@@ -110,11 +120,28 @@ update effects msg model =
             handleCard effects cardMsg model
 
         ConversationMsg conversationMsg ->
+            case conversationMsg of
+                ConversationTypes.RequestDispatch ->
+                    case model.yuki of
+                        Just yuki ->
+                            dispatchUpdate effects (Dispatch.OpenInput yuki) model
+
+                        Nothing ->
+                            ( model, Cmd.none )
+
+                _ ->
+                    let
+                        ( conversation, cmd ) =
+                            Conversation.update (conversationEffects effects) conversationMsg model.conversation
+                    in
+                    ( { model | conversation = conversation }, cmd )
+
+        DispatchMsg dispatchMsg ->
             let
-                ( conversation, cmd ) =
-                    Conversation.update (conversationEffects effects) conversationMsg model.conversation
+                ( dispatch, cmd ) =
+                    Dispatch.update (dispatchEffects effects) dispatchMsg model.dispatch
             in
-            ( { model | conversation = conversation }, cmd )
+            ( { model | dispatch = dispatch }, cmd )
 
         AgentEvent value ->
             let
@@ -142,8 +169,28 @@ tick effects posix model =
     let
         ( conversation, conversationCmd ) =
             Conversation.update (conversationEffects effects) ConversationTypes.Tick model.conversation
+
+        ( dispatch, dispatchCmd ) =
+            Dispatch.update (dispatchEffects effects) (Dispatch.SyncLock effects.telemetry.draftStatus) model.dispatch
+
+        ( dispatchTicked, dispatchTickCmd ) =
+            Dispatch.update (dispatchEffects effects) Dispatch.Tick dispatch
     in
-    ( { model | now = posix, conversation = conversation }, conversationCmd )
+    ( { model | now = posix, conversation = conversation, dispatch = dispatchTicked }
+    , Cmd.batch
+        [ conversationCmd
+        , dispatchCmd
+        , dispatchTickCmd
+        ]
+    )
+
+
+dispatchEffects : Effects msg -> Dispatch.Effects msg
+dispatchEffects effects =
+    { endpoint = effects.endpoint
+    , inspect = effects.inspect
+    , navigate = effects.navigate
+    }
 
 
 conversationEffects : Effects msg -> Conversation.Effects msg
@@ -198,6 +245,9 @@ handleResult effects kind status body model =
         "chat" :: rest ->
             conversationUpdate effects (ConversationTypes.ChatResult (String.join "/" rest) status body) model
 
+        "dispatch" :: rest ->
+            dispatchUpdate effects (Dispatch.Result (String.join "/" rest) status body) model
+
         "steer" :: rest ->
             finishAction (String.join "/" rest) "已发送" status body model
 
@@ -215,6 +265,15 @@ conversationUpdate effects conversationMsg model =
             Conversation.update (conversationEffects effects) conversationMsg model.conversation
     in
     ( { model | conversation = conversation }, cmd )
+
+
+dispatchUpdate : Effects msg -> Dispatch.Msg -> Model -> ( Model, Cmd msg )
+dispatchUpdate effects dispatchMsg model =
+    let
+        ( dispatch, cmd ) =
+            Dispatch.update (dispatchEffects effects) dispatchMsg model.dispatch
+    in
+    ( { model | dispatch = dispatch }, cmd )
 
 
 finishAction : RunId -> String -> Int -> Decode.Value -> Model -> ( Model, Cmd msg )

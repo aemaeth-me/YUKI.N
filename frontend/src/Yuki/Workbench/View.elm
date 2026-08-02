@@ -3,8 +3,11 @@ module Yuki.Workbench.View exposing (view)
 import Dict
 import Html exposing (..)
 import Html.Attributes exposing (class, classList, href)
+import Html.Events exposing (onClick)
 import Time exposing (Posix)
 import Yuki.Conversation.View as Conversation
+import Yuki.Dispatch.State as DispatchState
+import Yuki.Dispatch.View as DispatchView
 import Yuki.Run.StatusCard as StatusCard
 import Yuki.Telemetry.State exposing (TelemetryState)
 import Yuki.Telemetry.Types exposing (..)
@@ -38,6 +41,7 @@ view telemetry wb yuki viewName =
                 _ ->
                     placeholderView
             ]
+        , DispatchView.dialog State.DispatchMsg wb.dispatch
         ]
 
 
@@ -112,7 +116,10 @@ waitingSection wb =
 
 draftRow : DispatchDraft -> Html State.Msg
 draftRow draft =
-    div [ class "draft-row" ]
+    button
+        [ class "draft-row draft-row-open"
+        , onClick (State.DispatchMsg (DispatchState.OpenDraft draft))
+        ]
         [ span [ class "draft-title" ] [ text draft.title ]
         , span [ class "draft-generation" ] [ text (generationLabel draft.generation) ]
         ]
