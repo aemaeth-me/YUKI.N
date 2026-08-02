@@ -3134,7 +3134,7 @@ textarea::placeholder {
 .conn-live { color: var(--success); }
 .conn-degraded { color: var(--warning); }
 .conn-offline { color: var(--quiet); }
-.app-body { flex: 1; padding: 1rem; }
+.app-body { flex: 1; min-height: 0; overflow-y: auto; padding: 1rem; }
 .fleet-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
 .fleet-title { margin: 0; }
 .fleet-new { color: var(--green); border: 1px solid color-mix(in srgb, var(--green) 45%, transparent); border-radius: 0; padding: 0.28rem 0.95rem; font-size: 0.82rem; }
