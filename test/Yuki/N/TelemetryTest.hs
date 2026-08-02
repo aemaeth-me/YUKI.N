@@ -179,6 +179,7 @@ expectFrame chan =
     Just (FrameRunEnd {}) -> assertFailure "expected status frame"
     Just (FrameDelivery {}) -> assertFailure "expected status frame"
     Just (FrameFsChange {}) -> assertFailure "expected status frame"
+    Just FramePing -> assertFailure "expected status frame"
     Nothing -> assertFailure "no frame"
 
 expectEnd :: Chan ActivityFrame -> IO (Text, Text)
@@ -188,6 +189,7 @@ expectEnd chan =
     Just (FrameStatus {}) -> assertFailure "expected run.end frame"
     Just (FrameDelivery {}) -> assertFailure "expected run.end frame"
     Just (FrameFsChange {}) -> assertFailure "expected run.end frame"
+    Just FramePing -> assertFailure "expected run.end frame"
     Nothing -> assertFailure "no frame"
 
 drainFrames :: Chan ActivityFrame -> IO [ActivityFrame]

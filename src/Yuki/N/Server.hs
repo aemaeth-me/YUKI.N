@@ -6,14 +6,18 @@ module Yuki.N.Server
 where
 
 import Control.Applicative (liftA2, (<|>))
-import Control.Monad (join, (>=>))
+import Control.Concurrent (Chan, forkIO, killThread, readChan, threadDelay, writeChan)
+import Control.Exception (bracket)
+import Control.Monad (forever, join, when, (>=>))
 import Data.Aeson (FromJSON (..), ToJSON, Value (..), eitherDecode, encode, object, toJSON, withObject, (.!=), (.:), (.:?), (.=))
 import Data.Aeson.Types (parseEither)
 import Data.Bool (bool)
 import Data.ByteString qualified as ByteString
 import Data.ByteString.Builder qualified as Builder
 import Data.ByteString.Lazy qualified as LazyByteString
+import Data.Foldable (traverse_)
 import Data.Functor (($>), (<&>))
+import Data.IORef (readIORef)
 import Data.List (sortOn)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, listToMaybe)
@@ -59,8 +63,10 @@ import Yuki.N.Memory.LongTerm
 import Yuki.N.Memory.Working
 import Yuki.N.Model (ChatMessage (ChatUser))
 import Yuki.N.Replay (memoryInjected, readJournal, replayEntries, replayWithStores)
-import Yuki.N.Runs (RunRegistry, activeThreads, cancelRun, followUpRun, steerRun)
+import Yuki.N.Runs (RunKind (..), RunRegistry, activeThreads, cancelRun, followUpRun, steerRun)
 import Yuki.N.Sessions
+import Yuki.N.Telemetry (ActivityFrame (..), DeliveryRecord (..), Ledger, LiveStatus (..), Telemetry, liveRuns, noteCancelling, subscribe, telemetryLedger)
+import Yuki.N.Telemetry.Ledger (deliveriesFor, fsChangesFor)
 import Yuki.N.ThreadConfig (ThreadConfig (..), ThreadConfigStore (..), cwdPath, resolveThreadConfig)
 import Yuki.N.Tools (completePaths, listTree)
 import Yuki.N.Transcript (TranscriptStore (..), renderTranscript, toAguiMessages)
@@ -196,8 +202,8 @@ newtype SleepThreadRequest = SleepThreadRequest (Maybe Text)
 instance FromJSON SleepThreadRequest where
   parseJSON = withObject "SleepThreadRequest" $ \fields -> SleepThreadRequest <$> fields .:? "reason"
 
-application :: Maybe Text -> Maybe Inspection -> Maybe ConfigView -> Maybe RunRegistry -> Maybe DispatchService -> (Text -> IO Runtime) -> Application
-application cors inspection configs runs dispatches runtimeFor request respond =
+application :: Maybe Text -> Maybe Inspection -> Maybe ConfigView -> Maybe RunRegistry -> Maybe DispatchService -> Maybe Telemetry -> (Text -> IO Runtime) -> Application
+application cors inspection configs runs dispatches telemetry runtimeFor request respond =
   route (requestMethod request) (pathInfo request)
  where
   route "POST" ["agent"] = handleAgent
@@ -224,6 +230,11 @@ application cors inspection configs runs dispatches runtimeFor request respond =
   route "GET" ["incarnations", incarnationId] = withCognition (readIncarnation incarnationId)
   route "GET" ["incarnations", incarnationId, "tasks"] = withSessions (incarnationTasks incarnationId)
   route "GET" ["incarnations", incarnationId, "home"] = withSessions (homeThread incarnationId)
+  route "GET" ["fleet"] = withTelemetry fleetHandler
+  route "GET" ["activity", "stream"] = withTelemetry activityStreamHandler
+  route "GET" ["incarnations", incarnationId, "activity"] = withTelemetry (activityHandler incarnationId)
+  route "GET" ["incarnations", incarnationId, "deliveries"] = withTelemetry (deliveriesHandler incarnationId)
+  route "GET" ["incarnations", incarnationId, "fs-changes"] = withTelemetry (fsChangesHandler incarnationId)
   route "POST" ["incarnations", incarnationId, "dispatches"] = withCognition (createDispatchRoute incarnationId)
   route "GET" ["incarnations", incarnationId, "dispatches"] = withDispatch (listDispatchesFor incarnationId)
   route "GET" ["dispatches", dispatchId] = withDispatch (readDispatch dispatchId)
@@ -303,6 +314,94 @@ application cors inspection configs runs dispatches runtimeFor request respond =
       Nothing -> readJournal <$> inspectionJournal insp
   withTranscripts use = maybe notFound (use >=> respond) (inspectionTranscripts =<< inspection)
   withSessions use = maybe notFound use (inspectionSessions =<< inspection)
+  withTelemetry use = maybe notFound use telemetry
+  fleetHandler hub =
+    fleetValue hub >>= respond . ok
+  fleetValue hub =
+    maybe skeleton present (inspectionCognition =<< inspection)
+   where
+    skeleton = (\runs -> object ["incarnations" .= ([] :: [Value]), "runs" .= runs]) <$> liveRuns hub
+    present cognition =
+      incarnationList (cognitionIncarnations cognition) >>= fleetEntries
+    fleetEntries incarnations =
+      liveRuns hub >>= \runs ->
+        (\entries -> object ["incarnations" .= entries, "runs" .= runs]) <$> traverse (fleetEntry hub runs) incarnations
+  fleetEntry hub runs incarnation =
+    liftA2 (,) (draftCountOf identifier) (lastDeliveryOf hub identifier) >>= \(draftCount, lastDelivery) ->
+      pure
+        ( object
+            [ "id" .= identifier,
+              "name" .= incarnationName incarnation,
+              "state" .= stateOf (activeOf runs identifier) draftCount,
+              "activeRuns" .= activeOf runs identifier,
+              "waitingDrafts" .= draftCount,
+              "lastDeliveryAt" .= lastDelivery
+            ]
+        )
+   where
+    identifier = incarnationId incarnation
+  activeOf runs identifier =
+    length (filter ((== identifier) . liveIncarnation) runs)
+  stateOf :: Int -> Int -> Text
+  stateOf active drafts
+    | active > 0 = "active"
+    | drafts > 0 = "waiting"
+    | otherwise = "idle"
+  draftCountOf identifier =
+    maybe (pure 0) count dispatches
+   where
+    count service = length <$> listDispatches (dispatchServiceStore service) identifier (Just Draft)
+  draftsOf identifier =
+    maybe (pure []) list dispatches
+   where
+    list service = listDispatches (dispatchServiceStore service) identifier (Just Draft)
+  lastDeliveryOf hub identifier =
+    readIORef (telemetryLedger hub) >>= maybe (pure Nothing) latest
+   where
+    latest ledger = fmap deliveryAt . listToMaybe <$> deliveriesFor ledger identifier Nothing 1 Nothing
+  activityHandler identifier hub =
+    liveRuns hub >>= \runs ->
+      liftA2 (,) (draftsOf identifier) (recentDeliveriesOf hub identifier) >>= \(drafts, recent) ->
+        respond (ok (activityJson identifier runs drafts recent))
+  recentDeliveriesOf hub identifier =
+    readIORef (telemetryLedger hub) >>= maybe (pure []) recent
+   where
+    recent ledger = deliveriesFor ledger identifier Nothing 20 Nothing
+  activityJson identifier runs drafts recent =
+    object
+      [ "incarnationId" .= identifier,
+        "home" .= object ["threadId" .= homeThreadId identifier, "activeRunId" .= homeRun],
+        "runs" .= own,
+        "waitingDrafts" .= drafts,
+        "recentDeliveries" .= recent
+      ]
+   where
+    own = filter ((== identifier) . liveIncarnation) runs
+    homeRun = listToMaybe [liveRunId run | run <- own, liveKind run == RunHome]
+  deliveriesHandler identifier hub =
+    ledgerEndpoint hub (\ledger -> deliveriesFor ledger identifier (queryText "threadId") (pageLimit + 1) pageBefore)
+  fsChangesHandler identifier hub =
+    ledgerEndpoint hub (\ledger -> fsChangesFor ledger identifier (queryText "threadId") (queryText "runId") (pageLimit + 1) pageBefore)
+  ledgerEndpoint :: (ToJSON a) => Telemetry -> (Ledger -> IO [a]) -> IO ResponseReceived
+  ledgerEndpoint hub query =
+    readIORef (telemetryLedger hub) >>= maybe (respond (missing "ledger unavailable")) page
+   where
+    page ledger =
+      query ledger >>= \found ->
+        respond (ok (object ["items" .= take pageLimit found, "hasMore" .= (length found > pageLimit)]))
+  pageLimit = min 200 (fromMaybe 50 (queryInt "limit" request))
+  pageBefore = toInteger <$> queryInt "before" request
+  queryText name = Text.decodeUtf8 <$> join (lookup name (queryString request))
+  activityStreamHandler hub =
+    respond (responseStream status200 (corsHeaders cors <> streamHeaders) (streamActivity hub))
+  streamActivity hub write flush =
+    subscribe hub >>= \chan ->
+      bracket (forkIO (heartbeat chan)) killThread (const (preamble *> cycleFrames chan))
+   where
+    heartbeat chan = forever (threadDelay 15000000 *> writeChan chan FramePing)
+    preamble = fleetValue hub >>= \snapshot -> write (sseFrame "snapshot" snapshot) *> flush
+    cycleFrames chan =
+      readChan chan >>= \frame -> write (encodeFrame frame) *> flush *> cycleFrames chan
   withConfig use = maybe notFound use configs
   withCognition use = maybe notFound use (inspectionCognition =<< inspection)
   withDispatch use = maybe notFound use dispatches
@@ -980,10 +1079,12 @@ application cors inspection configs runs dispatches runtimeFor request respond =
         >>= either (respond . bad . ("invalid cancel request: " <>) . fromString) decide . cancelWanted
      where
       decide runId =
-        cancelRun registry runId
-          >>= bool
-            (respond (missing "run not found"))
-            (respond (responseLBS status202 (corsHeaders cors) ""))
+        cancelRun registry runId >>= \cancelled ->
+          when cancelled (traverse_ (\hub -> noteCancelling hub runId) telemetry)
+            *> bool
+              (respond (missing "run not found"))
+              (respond (responseLBS status202 (corsHeaders cors) ""))
+              cancelled
   handleSteer = maybe notFound steer runs
    where
     steer registry =
@@ -1231,14 +1332,14 @@ renderContextPolicy runtime =
         "summaryTokens" .= contextSummaryTokens config
       ]
 
-runServer :: Settings -> Maybe Inspection -> Maybe ConfigView -> Maybe RunRegistry -> Maybe DispatchService -> (Text -> IO Runtime) -> IO ()
-runServer settings inspection configs runs dispatches runtimeFor =
+runServer :: Settings -> Maybe Inspection -> Maybe ConfigView -> Maybe RunRegistry -> Maybe DispatchService -> Maybe Telemetry -> (Text -> IO Runtime) -> IO ()
+runServer settings inspection configs runs dispatches telemetry runtimeFor =
   runSettings
     ( setPort (settingsPort settings)
         . setHost (fromString (settingsHost settings))
         $ defaultSettings
     )
-    (application (settingsCorsOrigin settings) inspection configs runs dispatches runtimeFor)
+    (application (settingsCorsOrigin settings) inspection configs runs dispatches telemetry runtimeFor)
 
 replayWanted :: LazyByteString.ByteString -> Either Text (Maybe Text)
 replayWanted body
@@ -1261,6 +1362,22 @@ encodeEvent event =
   Builder.byteString "data: "
     <> Builder.lazyByteString (encode event)
     <> Builder.byteString "\n\n"
+
+sseFrame :: Text -> Value -> Builder.Builder
+sseFrame name value =
+  Builder.byteString "event: "
+    <> Builder.byteString (Text.encodeUtf8 name)
+    <> Builder.byteString "\ndata: "
+    <> Builder.lazyByteString (encode value)
+    <> Builder.byteString "\n\n"
+
+encodeFrame :: ActivityFrame -> Builder.Builder
+encodeFrame = \case
+  FramePing -> Builder.byteString ": ping\n\n"
+  FrameStatus status -> sseFrame "status" (toJSON status)
+  FrameRunEnd runId outcome -> sseFrame "run.end" (object ["runId" .= runId, "outcome" .= outcome])
+  FrameDelivery record -> sseFrame "delivery" (toJSON record)
+  FrameFsChange record -> sseFrame "fschange" (toJSON record)
 
 jsonResponse :: Maybe Text -> Status -> ResponseHeaders -> Value -> Response
 jsonResponse cors status headers value =

@@ -89,7 +89,7 @@ journalInspectionCache = withWorkDir $ \dir -> do
   base <- testRuntime okModel [] Parallel
   let path = journalFilePath dir
       inspection = withLiveJournal journal (newInspection Nothing Nothing (Just path) Nothing)
-      app = application Nothing (Just inspection) Nothing Nothing Nothing (const (pure base))
+      app = application Nothing (Just inspection) Nothing Nothing Nothing Nothing (const (pure base))
   LazyByteString.writeFile path "{broken"
   response <- runSession (request (httpGet ["journal"])) app
   simpleStatus response @?= status200

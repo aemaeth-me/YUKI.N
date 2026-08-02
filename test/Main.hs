@@ -32,6 +32,7 @@ import Yuki.N.SessionTest
 import Yuki.N.SubAgentTest
 import Yuki.N.Telemetry.LedgerTest
 import Yuki.N.TelemetryTest
+import Yuki.N.ActivityTest
 import Yuki.N.ThreadConfigTest
 import Yuki.N.ToolsTest
 import Yuki.N.TranscriptTest
@@ -49,6 +50,7 @@ main =
         agentTests,
         terminationTests,
         telemetryTests,
+        activityTests,
         ledgerTests,
         steeringTests,
         retryTests,

@@ -132,7 +132,7 @@ transcriptOverHttp = do
   store <- newMemoryTranscriptStore
   transcriptSave store "thread" (ChatSystem "injected" : transcriptHistory)
   base <- testRuntime okModel [] Parallel
-  let app = application Nothing (Just (newInspection Nothing Nothing Nothing (Just store))) Nothing Nothing Nothing (const (pure base))
+  let app = application Nothing (Just (newInspection Nothing Nothing Nothing (Just store))) Nothing Nothing Nothing Nothing (const (pure base))
   found <- runSession (request (httpGet ["threads", "thread", "transcript"])) app
   unknown <- runSession (request (httpGet ["threads", "unknown", "transcript"])) app
   simpleStatus found @?= status200

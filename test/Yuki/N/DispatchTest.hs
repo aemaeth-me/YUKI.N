@@ -229,7 +229,7 @@ dispatchRoutes = withWorkDir $ \dir -> do
         withCognition
           cognition
           (withSessionService service (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service))))
-      app = application Nothing (Just inspection) Nothing Nothing (Just dispatchService) (const (pure base))
+      app = application Nothing (Just inspection) Nothing Nothing (Just dispatchService) Nothing (const (pure base))
   created <- runSession (srequest (jsonRequest methodPost ["incarnations", "yuki", "dispatches"] (object ["input" .= ("hello world" :: Text)]))) app
   simpleStatus created @?= status202
   draft <- either assertFailure pure (eitherDecode (simpleBody created))

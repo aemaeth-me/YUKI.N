@@ -555,7 +555,7 @@ backgroundAcrossRuntimeFor = withWorkDir exercise
               (emptyThreadConfig {configCwd = CwdPath dir})
               Map.empty
               Map.empty
-        app = application Nothing Nothing Nothing Nothing Nothing runtimeFor
+        app = application Nothing Nothing Nothing Nothing Nothing Nothing runtimeFor
     responses <- traverse (runBackgroundRound app) (zip [1 ..] ["start", "output", "stdin", "kill"])
     results <- readIORef observed
     resolutions <- readIORef resolved

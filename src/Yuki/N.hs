@@ -113,7 +113,7 @@ serve env manager journal artifacts settings runs background =
                                                       ( \() ->
                                                           migrateLegacy cognition memory transcripts service defaults
                                                             *> putStrLn (banner settings)
-                                                            *> runServer settings (inspection cognition memory transcripts service) (Just (view store registry keyMap)) (Just runs) (Just dispatchService) (resolve telemetry ledger cognition sessions store registry keyMap transcriptHooks' fallbacks)
+                                                            *> runServer settings (inspection cognition memory transcripts service) (Just (view store registry keyMap)) (Just runs) (Just dispatchService) (Just telemetry) (resolve telemetry ledger cognition sessions store registry keyMap transcriptHooks' fallbacks)
                                                       )
                       )
  where

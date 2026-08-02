@@ -257,7 +257,7 @@ cognitionTaskArchiveHttp = withWorkDir $ \dir -> do
       >>= expectTextRight
   case archiveRunEntryIds stored of
     [entryId] -> do
-      let app = application Nothing (Just (withCognition cognition emptyInspection)) Nothing Nothing Nothing (const (pure runtime))
+      let app = application Nothing (Just (withCognition cognition emptyInspection)) Nothing Nothing Nothing Nothing (const (pure runtime))
       catalog <- runSession (request (httpGet ["incarnations", "yuki", "task-records"])) app
       searched <-
         runSession

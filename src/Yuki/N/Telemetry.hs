@@ -303,6 +303,7 @@ data ActivityFrame
   | FrameRunEnd Text Text
   | FrameDelivery DeliveryRecord
   | FrameFsChange FsChangeRecord
+  | FramePing
   deriving stock (Eq, Show)
 
 instance ToJSON ActivityFrame where
@@ -311,6 +312,7 @@ instance ToJSON ActivityFrame where
     object ["frame" .= ("run.end" :: Text), "runId" .= runId, "outcome" .= outcome]
   toJSON (FrameDelivery record) = object ["frame" .= ("delivery" :: Text), "delivery" .= record]
   toJSON (FrameFsChange record) = object ["frame" .= ("fschange" :: Text), "fschange" .= record]
+  toJSON FramePing = object ["frame" .= ("ping" :: Text)]
 
 data Telemetry = Telemetry
   { telemetryLive :: IORef (Map Text LiveStatus),

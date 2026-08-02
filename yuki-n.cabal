@@ -137,6 +137,7 @@ test-suite yuki-n-test
         Yuki.N.ProvidersTest,
         Yuki.N.RunsTest,
         Yuki.N.TelemetryTest,
+        Yuki.N.ActivityTest,
         Yuki.N.Telemetry.LedgerTest,
         Yuki.N.ServerTest,
         Yuki.N.ServerCognitionTest,
