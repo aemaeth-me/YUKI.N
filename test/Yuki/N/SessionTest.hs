@@ -317,7 +317,7 @@ sessionKindFilterOverHttp = withWorkDir $ \dir -> do
   service <- sessionServiceAt dir (const (pure ()))
   base <- testRuntime okModel [] Parallel
   let inspection = withSessionService service (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service)))
-      app = application Nothing (Just inspection) Nothing Nothing (const (pure base))
+      app = application Nothing (Just inspection) Nothing Nothing Nothing (const (pure base))
   _ <- createSession (serviceSessions service) "task-a" (Just "Task A") "yuki" Nothing Nothing >>= expectTextRight
   _ <- ensureHomeSession (serviceSessions service) "yuki" (Just "Yuki")
   allThreads <- runSession (request (httpGet ["threads"])) app
