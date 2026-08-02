@@ -4,6 +4,7 @@ import Dict
 import Html exposing (..)
 import Html.Attributes exposing (class, classList, href)
 import Time exposing (Posix)
+import Yuki.Conversation.View as Conversation
 import Yuki.Run.StatusCard as StatusCard
 import Yuki.Telemetry.State exposing (TelemetryState)
 import Yuki.Telemetry.Types exposing (..)
@@ -24,6 +25,9 @@ view telemetry wb yuki viewName =
             [ case viewName of
                 ViewNow ->
                     nowView telemetry wb yuki
+
+                ViewChat maybeThread ->
+                    chatView telemetry wb yuki maybeThread
 
                 ViewTasks ->
                     tasksView telemetry wb yuki
@@ -49,7 +53,7 @@ yukiName telemetry yuki =
 navItems : List ( String, WorkbenchView, String )
 navItems =
     [ ( "now", ViewNow, "现在" )
-    , ( "chat", ViewChat, "主对话" )
+    , ( "chat", ViewChat Nothing, "主对话" )
     , ( "tasks", ViewTasks, "任务" )
     , ( "deliveries", ViewDeliveries, "交付" )
     , ( "changes", ViewChanges, "变更" )
@@ -72,6 +76,11 @@ placeholderView =
         [ h2 [] [ text "即将上线" ]
         , p [] [ text "该视图正在打磨中，敬请期待。" ]
         ]
+
+
+chatView : TelemetryState -> State.Model -> String -> Maybe String -> Html State.Msg
+chatView telemetry wb yuki _ =
+    Html.map State.ConversationMsg (Conversation.view telemetry wb.conversation yuki)
 
 
 nowView : TelemetryState -> State.Model -> String -> Html State.Msg

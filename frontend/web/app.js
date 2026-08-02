@@ -51,7 +51,6 @@ const app = Elm.Main.init({
     runStamp: Date.now().toString(36),
   },
 });
-
 startActivityStream({
   onFrame: (frame) => app.ports.activityEvent.send(frame),
   onConnection: (state) =>
@@ -62,10 +61,10 @@ const transcriptScroll = createTranscriptScrollController({
   root: document,
   observeRoot: node,
   onFollowingChange: (following) =>
-    app.ports.transcriptFollowChanged.send(following),
+    app.ports.transcriptFollowChanged?.send(following),
 });
 
-app.ports.followTranscript.subscribe(() => transcriptScroll.follow());
+app.ports.followTranscript?.subscribe(() => transcriptScroll.follow());
 
 let active;
 
@@ -206,9 +205,9 @@ const cancel = async (command) => {
 
 app.ports.runAgent.subscribe((command) => void run(command));
 app.ports.cancelAgent.subscribe((command) => void cancel(command));
-app.ports.persistThreadId.subscribe(persistThreadId);
-app.ports.persistIncarnationId.subscribe(persistIncarnationId);
-app.ports.copyText.subscribe((text) => void copyToClipboard(text));
+app.ports.persistThreadId?.subscribe(persistThreadId);
+app.ports.persistIncarnationId?.subscribe(persistIncarnationId);
+app.ports.copyText?.subscribe((text) => void copyToClipboard(text));
 
 app.ports.exportSessionFile?.subscribe(({ threadId: id, bundle }) => {
   const safe = String(id || "task").replace(/[^A-Za-z0-9._-]/g, "-");
@@ -233,11 +232,11 @@ app.ports.chooseSessionImport?.subscribe(() => {
       const file = input.files?.[0];
       if (!file) return;
       try {
-        app.ports.sessionImportData.send({
+        app.ports.sessionImportData?.send({
           bundle: JSON.parse(await file.text()),
         });
       } catch (error) {
-        app.ports.sessionImportData.send({
+        app.ports.sessionImportData?.send({
           bundle: null,
           importError: error.message,
         });

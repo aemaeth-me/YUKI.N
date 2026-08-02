@@ -81,6 +81,7 @@ type alias Model =
     , route : Route
     , telemetry : TelemetryState
     , endpoint : String
+    , runStamp : String
     , workbench : Workbench.Model
     }
 
@@ -89,6 +90,8 @@ type Msg
     = LinkClicked Browser.UrlRequest
     | UrlChanged Url
     | ActivityFrameReceived Decode.Value
+    | AgentEventReceived Decode.Value
+    | TransportEventReceived Decode.Value
     | InspectionResult Decode.Value
     | Tick Time.Posix
     | WorkbenchMsg Workbench.Msg
@@ -118,6 +121,7 @@ init flags url nav =
         , route = route
         , telemetry = TelemetryState.init
         , endpoint = flags.endpoint
+        , runStamp = flags.runStamp
         , workbench = Workbench.init
         }
         route
@@ -142,7 +146,8 @@ viewParser =
     Parser.oneOf
         [ Parser.map ViewNow Parser.top
         , Parser.map ViewNow (Parser.s "now")
-        , Parser.map ViewChat (Parser.s "chat")
+        , Parser.map (ViewChat Nothing) (Parser.s "chat")
+        , Parser.map (ViewChat << Just) (Parser.s "chat" </> Parser.string)
         , Parser.map ViewTasks (Parser.s "tasks")
         , Parser.map ViewDeliveries (Parser.s "deliveries")
         , Parser.map ViewChanges (Parser.s "changes")
@@ -181,6 +186,12 @@ update msg model =
 
                         Err _ ->
                             ( model, Cmd.none )
+
+        AgentEventReceived value ->
+            workbenchUpdate (Workbench.AgentEvent value) model
+
+        TransportEventReceived value ->
+            workbenchUpdate (Workbench.TransportEvent value) model
 
         InspectionResult value ->
             case Decode.decodeValue resultEnvelope value of
@@ -228,15 +239,20 @@ workbenchUpdate : Workbench.Msg -> Model -> ( Model, Cmd Msg )
 workbenchUpdate msg model =
     let
         ( workbench, cmd ) =
-            Workbench.update (effects model) msg model.workbench
+            Workbench.update (workbenchEffects model) msg model.workbench
     in
     ( { model | workbench = workbench }, cmd )
 
 
-effects : Model -> Workbench.Effects Msg
-effects model =
+workbenchEffects : Model -> Workbench.Effects Msg
+workbenchEffects model =
     { endpoint = model.endpoint
+    , runStamp = model.runStamp
     , inspect = inspect
+    , runAgent = runAgent
+    , cancelAgent = cancelAgent
+    , navigate = Nav.pushUrl model.nav
+    , telemetry = model.telemetry
     }
 
 
@@ -279,6 +295,9 @@ subscriptions : Model -> Sub Msg
 subscriptions _ =
     Sub.batch
         [ activityEvent ActivityFrameReceived
+        , agentEvent AgentEventReceived
+        , transportEvent TransportEventReceived
+        , inspectionResult InspectionResult
         , Time.every 1000 Tick
         ]
 

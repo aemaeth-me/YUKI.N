@@ -9,6 +9,7 @@ type alias TelemetryState =
     , fleet : List FleetEntry
     , conn : Connection
     , tick : Dict String Int
+    , draftStatus : Dict String String
     }
 
 
@@ -18,6 +19,7 @@ init =
     , fleet = []
     , conn = ConnOffline
     , tick = Dict.empty
+    , draftStatus = Dict.empty
     }
 
 
@@ -50,8 +52,8 @@ apply frame state =
         FrameDraft draft ->
             { state | tick = bump draft.incarnationId state.tick }
 
-        FrameDraftResolved _ _ _ ->
-            state
+        FrameDraftResolved dispatchId status _ ->
+            { state | draftStatus = Dict.insert dispatchId status state.draftStatus }
 
         FramePing ->
             state

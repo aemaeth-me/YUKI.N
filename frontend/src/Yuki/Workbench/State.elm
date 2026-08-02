@@ -1,10 +1,13 @@
 module Yuki.Workbench.State exposing (Model, Msg(..), Effects, init, update)
 
 import Dict exposing (Dict)
-import Json.Decode as Decode exposing (Decoder)
+import Json.Decode as Decode
 import Json.Encode as Encode
 import Time exposing (Posix)
+import Yuki.Conversation.State as Conversation
+import Yuki.Conversation.Types as ConversationTypes
 import Yuki.Run.StatusCard as StatusCard
+import Yuki.Telemetry.State exposing (TelemetryState)
 import Yuki.Telemetry.Types exposing (RunId)
 import Yuki.Workbench.Decode exposing (ActivitySnapshot, SessionMeta, activitySnapshotDecoder, sessionMetaDecoder)
 import Yuki.Workbench.Types exposing (WorkbenchView(..))
@@ -12,7 +15,12 @@ import Yuki.Workbench.Types exposing (WorkbenchView(..))
 
 type alias Effects msg =
     { endpoint : String
+    , runStamp : String
     , inspect : Encode.Value -> Cmd msg
+    , runAgent : Encode.Value -> Cmd msg
+    , cancelAgent : Encode.Value -> Cmd msg
+    , navigate : String -> Cmd msg
+    , telemetry : TelemetryState
     }
 
 
@@ -29,6 +37,7 @@ type alias Model =
     , confirmCancel : Dict RunId Bool
     , actionStatus : Dict RunId String
     , now : Posix
+    , conversation : Conversation.Model
     }
 
 
@@ -46,6 +55,7 @@ init =
     , confirmCancel = Dict.empty
     , actionStatus = Dict.empty
     , now = Time.millisToPosix 0
+    , conversation = Conversation.init
     }
 
 
@@ -54,6 +64,9 @@ type Msg
     | ActivityChanged String
     | InspectionResult String Int Decode.Value
     | StatusCard StatusCard.Msg
+    | ConversationMsg ConversationTypes.Msg
+    | AgentEvent Decode.Value
+    | TransportEvent Decode.Value
     | Tick Posix
     | NoOp
 
@@ -73,6 +86,13 @@ update effects msg model =
                 ViewTasks ->
                     fetchTasks effects model
 
+                ViewChat maybeThread ->
+                    let
+                        ( conversation, cmd ) =
+                            Conversation.update (conversationEffects effects) (ConversationTypes.Enter yuki maybeThread) model.conversation
+                    in
+                    ( { model | conversation = conversation }, cmd )
+
                 _ ->
                     ( model, Cmd.none )
 
@@ -84,16 +104,58 @@ update effects msg model =
                 fetchActivity effects yuki model
 
         InspectionResult kind status body ->
-            handleResult kind status body model
+            handleResult effects kind status body model
 
         StatusCard cardMsg ->
             handleCard effects cardMsg model
 
+        ConversationMsg conversationMsg ->
+            let
+                ( conversation, cmd ) =
+                    Conversation.update (conversationEffects effects) conversationMsg model.conversation
+            in
+            ( { model | conversation = conversation }, cmd )
+
+        AgentEvent value ->
+            let
+                ( conversation, cmd ) =
+                    Conversation.update (conversationEffects effects) (ConversationTypes.AgentEvent value) model.conversation
+            in
+            ( { model | conversation = conversation }, cmd )
+
+        TransportEvent value ->
+            let
+                ( conversation, cmd ) =
+                    Conversation.update (conversationEffects effects) (ConversationTypes.TransportEvent value) model.conversation
+            in
+            ( { model | conversation = conversation }, cmd )
+
         Tick posix ->
-            ( { model | now = posix }, Cmd.none )
+            tick effects posix model
 
         NoOp ->
             ( model, Cmd.none )
+
+
+tick : Effects msg -> Posix -> Model -> ( Model, Cmd msg )
+tick effects posix model =
+    let
+        ( conversation, conversationCmd ) =
+            Conversation.update (conversationEffects effects) ConversationTypes.Tick model.conversation
+    in
+    ( { model | now = posix, conversation = conversation }, conversationCmd )
+
+
+conversationEffects : Effects msg -> Conversation.Effects msg
+conversationEffects effects =
+    { endpoint = effects.endpoint
+    , runStamp = effects.runStamp
+    , inspect = effects.inspect
+    , runAgent = effects.runAgent
+    , cancelAgent = effects.cancelAgent
+    , navigate = effects.navigate
+    , telemetry = effects.telemetry
+    }
 
 
 fetchActivity : Effects msg -> String -> Model -> ( Model, Cmd msg )
@@ -114,10 +176,10 @@ fetchTasks effects model =
         )
 
 
-handleResult : String -> Int -> Decode.Value -> Model -> ( Model, Cmd msg )
-handleResult kind status body model =
-    case kind of
-        "activity" ->
+handleResult : Effects msg -> String -> Int -> Decode.Value -> Model -> ( Model, Cmd msg )
+handleResult effects kind status body model =
+    case String.split "/" kind of
+        "activity" :: _ ->
             case decodePayload status body activitySnapshotDecoder of
                 Ok snapshot ->
                     ( { model | activity = Just snapshot, fetchPending = False }, Cmd.none )
@@ -125,7 +187,7 @@ handleResult kind status body model =
                 Err message ->
                     ( { model | activityError = Just message, fetchPending = False }, Cmd.none )
 
-        "tasks" ->
+        "tasks" :: _ ->
             case decodePayload status body (Decode.list sessionMetaDecoder) of
                 Ok tasks ->
                     ( { model | tasks = Just tasks, tasksPending = False }, Cmd.none )
@@ -133,16 +195,26 @@ handleResult kind status body model =
                 Err message ->
                     ( { model | tasksError = Just message, tasksPending = False }, Cmd.none )
 
+        "chat" :: rest ->
+            conversationUpdate effects (ConversationTypes.ChatResult (String.join "/" rest) status body) model
+
+        "steer" :: rest ->
+            finishAction (String.join "/" rest) "已发送" status body model
+
+        "cancel" :: rest ->
+            finishAction (String.join "/" rest) "已请求取消" status body model
+
         _ ->
-            case String.split "/" kind of
-                "steer" :: rest ->
-                    finishAction (String.join "/" rest) "已发送" status body model
+            ( model, Cmd.none )
 
-                "cancel" :: rest ->
-                    finishAction (String.join "/" rest) "已请求取消" status body model
 
-                _ ->
-                    ( model, Cmd.none )
+conversationUpdate : Effects msg -> ConversationTypes.Msg -> Model -> ( Model, Cmd msg )
+conversationUpdate effects conversationMsg model =
+    let
+        ( conversation, cmd ) =
+            Conversation.update (conversationEffects effects) conversationMsg model.conversation
+    in
+    ( { model | conversation = conversation }, cmd )
 
 
 finishAction : RunId -> String -> Int -> Decode.Value -> Model -> ( Model, Cmd msg )
@@ -163,7 +235,7 @@ finishAction runId okText status body model =
     )
 
 
-decodePayload : Int -> Decode.Value -> Decoder a -> Result String a
+decodePayload : Int -> Decode.Value -> Decode.Decoder a -> Result String a
 decodePayload status body decoder =
     if status >= 400 then
         Err (failureMessage status body)
