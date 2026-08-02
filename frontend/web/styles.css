@@ -3127,7 +3127,7 @@ textarea::placeholder {
 }
 
 /* workbench skeleton */
-.app-shell { min-height: 100vh; display: flex; flex-direction: column; }
+.app-shell { height: 100vh; display: flex; flex-direction: column; }
 .top-bar { display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 1rem; border-bottom: 1px solid color-mix(in srgb, var(--ink) 16%, transparent); }
 .brand { font-weight: 600; text-decoration: none; color: inherit; }
 .conn-badge { font-size: 0.8rem; opacity: 0.85; }
