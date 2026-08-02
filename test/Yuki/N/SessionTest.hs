@@ -188,7 +188,7 @@ sessionRoutes = withWorkDir $ \dir -> do
   service <- sessionServiceAt dir (const (pure ()))
   base <- testRuntime okModel [] Parallel
   let inspection = withSessionService service (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service)))
-      app = application Nothing (Just inspection) Nothing Nothing (const (pure base))
+      app = application Nothing (Just inspection) Nothing Nothing Nothing (const (pure base))
   created <- runSession (srequest (jsonRequest methodPost ["threads"] (object ["threadId" .= ("route" :: Text), "title" .= ("Route" :: Text)]))) app
   renamed <- runSession (srequest (jsonRequest methodPatch ["threads", "route"] (object ["title" .= ("Named" :: Text)]))) app
   archived <- runSession (srequest (jsonRequest methodPost ["threads", "route", "archive"] (object []))) app
@@ -214,7 +214,7 @@ sessionManualCompact = withWorkDir $ \dir -> do
           service
           (newInspection Nothing (Just artifacts) Nothing (Just (serviceTranscripts service)))
       runtime = base {runtimeArtifactStore = Just artifacts, runtimeContext = Just contextConfig}
-      app = application Nothing (Just inspection) Nothing Nothing (const (pure runtime))
+      app = application Nothing (Just inspection) Nothing Nothing Nothing (const (pure runtime))
   _ <- createSession (serviceSessions service) "compact-me" Nothing "yuki" Nothing Nothing >>= expectTextRight
   transcriptSave (serviceTranscripts service) "compact-me" contextConversation
   response <-
@@ -237,7 +237,7 @@ sessionAgentIndex = withWorkDir $ \dir -> do
   service <- sessionServiceAt dir (const (pure ()))
   base <- testRuntime okModel [] Parallel
   let inspection = withSessionService service (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service)))
-      app = application Nothing (Just inspection) Nothing Nothing (const (pure base))
+      app = application Nothing (Just inspection) Nothing Nothing Nothing (const (pure base))
       input = (sampleInput []) {runThreadId = "auto", runId = "auto-run"}
   first <- runSession (srequest (jsonRequest methodPost ["agent"] input)) app
   created <- findSession (serviceSessions service) "auto"

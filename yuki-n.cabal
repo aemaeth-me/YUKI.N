@@ -55,6 +55,7 @@ library
         Yuki.N.Context
         Yuki.N.ContextEpoch
         Yuki.N.Diff
+        Yuki.N.Dispatch
         Yuki.N.Domain.Context
         Yuki.N.Domain.Diff
         Yuki.N.Domain.Model
@@ -124,6 +125,7 @@ test-suite yuki-n-test
         Yuki.N.ConfigTest,
         Yuki.N.ContextTest,
         Yuki.N.DiffTest,
+        Yuki.N.DispatchTest,
         Yuki.N.FactsTest,
         Yuki.N.GrowthTest,
         Yuki.N.InvocationTest,

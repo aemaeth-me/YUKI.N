@@ -229,7 +229,7 @@ record scenario = withSandbox exercise
               runtimeArtifactStore = Just artifacts,
               runtimeSplice = scenarioSplice scenario
             }
-        app = application Nothing Nothing Nothing (Just runs) (const (pure resolved))
+        app = application Nothing Nothing Nothing (Just runs) Nothing (const (pure resolved))
     drive app gate runs provider
     entries <- readJournal (journalFilePath journalDir) >>= either (assertFailure . Text.unpack) pure
     pure (fmap stripTime entries)

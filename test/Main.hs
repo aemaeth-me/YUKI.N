@@ -17,6 +17,7 @@ import Yuki.N.CognitionTest
 import Yuki.N.ConfigTest
 import Yuki.N.ContextTest
 import Yuki.N.DiffTest
+import Yuki.N.DispatchTest
 import Yuki.N.FactsTest
 import Yuki.N.GrowthTest
 import Yuki.N.InvocationTest
@@ -77,6 +78,7 @@ main =
         transcriptTests,
         invocationTests,
         diffTests,
+        dispatchTests,
         e2eTests,
         goldenTests
       ]

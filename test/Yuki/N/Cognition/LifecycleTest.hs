@@ -344,7 +344,7 @@ cognitionHttp = withWorkDir $ \dir -> do
   cognition <- newCognition dir [] Nothing >>= expectTextRight
   runtime <- testRuntime okModel [] Parallel
   let inspection = withCognition cognition emptyInspection
-      app = application Nothing (Just inspection) Nothing Nothing (const (pure runtime))
+      app = application Nothing (Just inspection) Nothing Nothing Nothing (const (pure runtime))
   roots <- promptList (cognitionIncarnations cognition) Nothing
   case listToMaybe roots of
     Nothing -> assertFailure "missing Root prompt revision"
@@ -406,7 +406,7 @@ cognitionLifecycleHttp = withWorkDir $ \dir -> do
         withCognition
           cognition
           (withSessionService service (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service))))
-      app = application Nothing (Just inspection) (Just view) Nothing (const (pure runtime))
+      app = application Nothing (Just inspection) (Just view) Nothing Nothing (const (pure runtime))
       post path body = runSession (srequest (jsonRequest methodPost path body)) app
   taskCreated <-
     post
@@ -476,7 +476,7 @@ cognitionTaskOwnerHttp = withWorkDir $ \dir -> do
         withCognition
           cognition
           (withSessionService service (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service))))
-      app = application Nothing (Just inspection) (Just view) Nothing (const (pure runtime))
+      app = application Nothing (Just inspection) (Just view) Nothing Nothing (const (pure runtime))
       create =
         jsonRequest
           methodPost
@@ -550,7 +550,7 @@ cognitionArchiveActiveRun = withWorkDir $ \dir -> do
         withCognition
           cognition
           (withSessionService service (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service))))
-      app = application Nothing (Just inspection) (Just view) (Just runs) (const (pure runtime))
+      app = application Nothing (Just inspection) (Just view) (Just runs) Nothing (const (pure runtime))
   blocked <-
     runSession
       ( srequest

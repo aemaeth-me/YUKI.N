@@ -211,7 +211,7 @@ cognitionFixture use =
                     service
                     (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service)))
                 )
-            app = application Nothing (Just inspection) Nothing Nothing (const (pure runtime {runtimeContext = Just contextConfig}))
+            app = application Nothing (Just inspection) Nothing Nothing Nothing (const (pure runtime {runtimeContext = Just contextConfig}))
         use app cognition service
 
 createIncarnation :: Text -> Text -> Text -> Maybe Text -> Value
