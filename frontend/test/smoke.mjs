@@ -206,12 +206,20 @@ const startFakeBackend = async () => {
       let body = "";
       for await (const chunk of request) body += chunk;
       const payload = JSON.parse(body);
-      if (incarnations.has(payload.id)) {
-        json(response, 409, { error: `incarnation already exists: ${payload.id}` });
-        return;
-      }
+      const slug = payload.name
+        .toLowerCase()
+        .split("")
+        .map((c) => (/[a-z0-9]/.test(c) ? c : "-"))
+        .join("")
+        .split("-")
+        .filter(Boolean)
+        .join("-")
+        .slice(0, 80);
+      const base = slug || `yuki-${Math.abs([...payload.name].reduce((h, c) => h * 31 + c.codePointAt(0), 0))}`;
+      let derived = base;
+      for (let n = 2; incarnations.has(derived); n += 1) derived = `${base}-${n}`;
       const created = {
-        id: payload.id,
+        id: derived,
         name: payload.name,
         direction: payload.direction,
         impressionModel: payload.impressionModel ?? null,
@@ -520,24 +528,23 @@ const main = async () => {
     assert.equal(await page.locator(".fleet-head .fleet-new").count(), 1, "fleet header shows create button");
     await page.locator(".fleet-head .fleet-new").click();
     await page.waitForSelector("#yuki-create-backdrop");
-    assert.match(await visibleText(page, "#yuki-create-backdrop"), /小写字母开头，可含数字与连字符/);
+    assert.match(await visibleText(page, "#yuki-create-backdrop"), /地址与内部引用按名称自动生成/);
+    assert.equal(await page.locator("#yuki-create-backdrop .draft-input").count(), 2, "no id field, only name and impression model");
 
     const createInputs = page.locator("#yuki-create-backdrop .draft-input");
-    await createInputs.nth(0).fill("1bad");
-    await createInputs.nth(1).fill("新伙伴");
     await page.locator("#yuki-create-backdrop .draft-textarea").fill("温和的助手人格");
     await page.locator("#yuki-create-backdrop .draft-action-primary").click();
     await waitFor(
-      async () => (await visibleText(page, "#yuki-create-backdrop .draft-error")).includes("id 不合法"),
-      "bad id rejected client-side",
+      async () => (await visibleText(page, "#yuki-create-backdrop .draft-error")).includes("请输入名称"),
+      "empty name rejected client-side",
     );
 
-    await createInputs.nth(0).fill("partner");
+    await createInputs.nth(0).fill("Partner");
     await page.locator("#yuki-create-backdrop .draft-action-primary").click();
     await page.waitForSelector(".wb-header", { timeout: 15000 });
-    assert.match(await page.url(), /\/yuki\/partner\/now$/, "create lands on the new workbench");
+    assert.match(await page.url(), /\/yuki\/partner\/now$/, "create derives id from name and lands on the new workbench");
     await waitFor(
-      async () => (await visibleText(page, ".wb-header")).includes("新伙伴"),
+      async () => (await visibleText(page, ".wb-header")).includes("Partner"),
       "fleet refetch populates the new yuki name in the header",
     );
 
@@ -560,7 +567,7 @@ const main = async () => {
       "stale save shows concurrency notice",
     );
     await waitFor(
-      async () => (await personaName.inputValue()) === "新伙伴",
+      async () => (await personaName.inputValue()) === "Partner",
       "409 refetch restores server state into the form",
     );
     await waitFor(

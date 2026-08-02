@@ -1,6 +1,7 @@
 module Yuki.N.ServerCognitionTest
   ( serverCognitionTests,
     incarnationLifecycleOverHttp,
+    derivedIdOverHttp,
     memoryLifecycleOverHttp,
     workingRoutesOverHttp,
     threadTransferOverHttp,
@@ -35,6 +36,7 @@ serverCognitionTests =
   testGroup
     "incarnation HTTP"
     [ testCase "incarnation create/update/archive/restore/delete lifecycle over HTTP" incarnationLifecycleOverHttp,
+      testCase "incarnation id derives from name with unique suffix" derivedIdOverHttp,
       testCase "long-term memory list/detail/search/void/receipts over HTTP" memoryLifecycleOverHttp,
       testCase "working memory, sleep cycles, experiences, impression and epochs over HTTP" workingRoutesOverHttp,
       testCase "thread sleep/import/fork/export transfer over HTTP" threadTransferOverHttp,
@@ -276,6 +278,20 @@ cognitionFixture use =
                 )
             app = application Nothing (Just inspection) Nothing Nothing Nothing Nothing (const (pure runtime {runtimeContext = Just contextConfig}))
         use app cognition service
+
+derivedIdOverHttp :: Assertion
+derivedIdOverHttp =
+  cognitionFixture $ \app _ _ -> do
+    first <- post app ["incarnations"] (object ["name" .= ("North Wind" :: Text), "direction" .= ("build" :: Text)])
+    simpleStatus first @?= status200
+    decodeText "incarnation.id" (simpleBody first) >>= (@?= "north-wind")
+    second <- post app ["incarnations"] (object ["name" .= ("North Wind" :: Text), "direction" .= ("rebuild" :: Text)])
+    simpleStatus second @?= status200
+    decodeText "incarnation.id" (simpleBody second) >>= (@?= "north-wind-2")
+    third <- post app ["incarnations"] (object ["name" .= ("北风" :: Text), "direction" .= ("建造" :: Text)])
+    simpleStatus third @?= status200
+    derived <- decodeText "incarnation.id" (simpleBody third)
+    assertBool "cjk name falls back to a yuki- prefixed hash" ("yuki-" `Text.isPrefixOf` derived)
 
 createIncarnation :: Text -> Text -> Text -> Maybe Text -> Value
 createIncarnation identifier name direction impressionModel =

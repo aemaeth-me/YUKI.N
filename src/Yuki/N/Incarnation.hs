@@ -6,8 +6,10 @@ module Yuki.N.Incarnation
     PromptRevision (..),
     PromptStatus (..),
     defaultIncarnation,
+    freshIncarnationId,
     newIncarnationStore,
     newMemoryIncarnationStore,
+    slugIncarnation,
   )
 where
 
@@ -437,6 +439,30 @@ validId identifier =
     isAsciiLower character
       || isAsciiUpper character
       || isDigit character
+
+slugIncarnation :: Text -> Text
+slugIncarnation name =
+  bool slug ("yuki-" <> Text.pack (show (abs (hashName name)))) (Text.null slug)
+ where
+  slug =
+    Text.take 80
+      . Text.intercalate "-"
+      . filter (not . Text.null)
+      . Text.split (== '-')
+      . Text.map (\character -> bool '-' character (asciiAlphaNum character))
+      . Text.toLower
+      $ name
+  asciiAlphaNum character = isAsciiLower character || isDigit character
+  hashName = Text.foldl' (\acc character -> acc * 31 + fromEnum character) 0
+
+freshIncarnationId :: IncarnationStore -> Text -> IO Text
+freshIncarnationId store name =
+  firstFree (candidates (slugIncarnation name))
+ where
+  candidates base = base : [base <> "-" <> Text.pack (show n) | n <- [2 .. 99]]
+  firstFree [] = pure (slugIncarnation name <> "-x")
+  firstFree (candidate : rest) =
+    incarnationRead store candidate >>= maybe (pure candidate) (const (firstFree rest))
 
 stale :: Int -> Int -> Text
 stale expected actual =

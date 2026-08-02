@@ -12,8 +12,7 @@ type alias Effects msg =
 
 
 type alias CreateForm =
-    { id : String
-    , name : String
+    { name : String
     , direction : String
     , impressionModel : String
     , submitting : Bool
@@ -33,7 +32,6 @@ init =
 type Msg
     = OpenCreate
     | Close
-    | IdChanged String
     | NameChanged String
     | DirectionChanged String
     | ImpressionChanged String
@@ -45,13 +43,10 @@ update : Effects msg -> Msg -> Model -> ( Model, Cmd msg )
 update effects msg model =
     case msg of
         OpenCreate ->
-            ( { model | dialog = Just (CreateForm "" "" "" "" False Nothing) }, Cmd.none )
+            ( { model | dialog = Just (CreateForm "" "" "" False Nothing) }, Cmd.none )
 
         Close ->
             ( { model | dialog = Nothing }, Cmd.none )
-
-        IdChanged text ->
-            ( mapForm (\form -> { form | id = text, error = Nothing }) model, Cmd.none )
 
         NameChanged text ->
             ( mapForm (\form -> { form | name = text, error = Nothing }) model, Cmd.none )
@@ -84,7 +79,7 @@ update effects msg model =
                     if status >= 200 && status < 300 then
                         ( { model | dialog = Nothing }
                         , Cmd.batch
-                            [ effects.navigate ("/yuki/" ++ String.trim form.id ++ "/now")
+                            [ effects.navigate ("/yuki/" ++ createdId body ++ "/now")
                             , effects.inspect (request "fleet" "GET" "/fleet" Nothing effects.endpoint)
                             ]
                         )
@@ -100,10 +95,7 @@ update effects msg model =
 
 validate : CreateForm -> Result String ()
 validate form =
-    if not (validId (String.trim form.id)) then
-        Err "id 不合法：小写字母开头，可含数字与连字符"
-
-    else if String.isEmpty (String.trim form.name) then
+    if String.isEmpty (String.trim form.name) then
         Err "请输入名称"
 
     else if String.isEmpty (String.trim form.direction) then
@@ -113,36 +105,16 @@ validate form =
         Ok ()
 
 
-validId : String -> Bool
-validId id =
-    case String.uncons id of
-        Just ( first, rest ) ->
-            isLower first && String.length id <= 64 && String.all isAllowed rest
-
-        Nothing ->
-            False
-
-
-isAllowed : Char -> Bool
-isAllowed char =
-    isLower char || isDigit char || char == '-'
-
-
-isLower : Char -> Bool
-isLower char =
-    char >= 'a' && char <= 'z'
-
-
-isDigit : Char -> Bool
-isDigit char =
-    char >= '0' && char <= '9'
+createdId : Decode.Value -> String
+createdId body =
+    Decode.decodeValue (Decode.at [ "incarnation", "id" ] Decode.string) body
+        |> Result.withDefault ""
 
 
 createBody : CreateForm -> Encode.Value
 createBody form =
     Encode.object
-        ([ ( "id", Encode.string (String.trim form.id) )
-         , ( "name", Encode.string (String.trim form.name) )
+        ([ ( "name", Encode.string (String.trim form.name) )
          , ( "direction", Encode.string (String.trim form.direction) )
          ]
             ++ optionalImpression form.impressionModel

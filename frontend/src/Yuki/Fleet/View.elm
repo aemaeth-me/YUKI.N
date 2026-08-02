@@ -151,19 +151,6 @@ dialog model =
                         ]
                     , form [ onSubmit State.Submit ]
                         [ div [ class "draft-field" ]
-                            [ label [] [ text "id" ]
-                            , input
-                                [ class "draft-input"
-                                , type_ "text"
-                                , placeholder "例如 yuki-assistant"
-                                , value createForm.id
-                                , disabled createForm.submitting
-                                , onInput State.IdChanged
-                                ]
-                                []
-                            , span [ class "draft-helper" ] [ text "小写字母开头，可含数字与连字符" ]
-                            ]
-                        , div [ class "draft-field" ]
                             [ label [] [ text "名称" ]
                             , input
                                 [ class "draft-input"
@@ -174,6 +161,7 @@ dialog model =
                                 , onInput State.NameChanged
                                 ]
                                 []
+                            , span [ class "draft-helper" ] [ text "地址与内部引用按名称自动生成" ]
                             ]
                         , div [ class "draft-field" ]
                             [ label [] [ text "方向" ]
@@ -207,7 +195,7 @@ dialog model =
                         , div [ class "draft-dialog-actions" ]
                             [ button
                                 [ class "draft-action draft-action-primary"
-                                , disabled (createForm.submitting || not (fillable createForm))
+                                , disabled createForm.submitting
                                 ]
                                 [ text (if createForm.submitting then "创建中…" else "创建") ]
                             , button [ class "draft-action", type_ "button", onClick State.Close ] [ text "取消" ]
@@ -215,13 +203,6 @@ dialog model =
                         ]
                     ]
                 ]
-
-
-fillable : State.CreateForm -> Bool
-fillable form =
-    not (String.isEmpty (String.trim form.id))
-        && not (String.isEmpty (String.trim form.name))
-        && not (String.isEmpty (String.trim form.direction))
 
 
 backdropClose : msg -> Html.Attribute msg

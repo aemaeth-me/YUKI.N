@@ -113,7 +113,7 @@ data CreateIncarnationRequest = CreateIncarnationRequest Text Text Text (Maybe T
 instance FromJSON CreateIncarnationRequest where
   parseJSON = withObject "CreateIncarnationRequest" $ \fields ->
     CreateIncarnationRequest
-      <$> fields .: "id"
+      <$> fields .:? "id" .!= ""
       <*> fields .: "name"
       <*> fields .: "direction"
       <*> fields .:? "impressionModel"
@@ -500,9 +500,13 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
           )
   createIncarnation cognition =
     withBody "invalid incarnation request: " $ \(CreateIncarnationRequest identifier name direction model) ->
-      incarnationCreate (cognitionIncarnations cognition) identifier name direction model
-        >>= either (respond . cognitionError) (bootstrap cognition)
+      resolveIncarnationId (cognitionIncarnations cognition) identifier name >>= \finalId ->
+        incarnationCreate (cognitionIncarnations cognition) finalId name direction model
+          >>= either (respond . cognitionError) (bootstrap cognition)
    where
+    resolveIncarnationId store identifier name
+      | TextValue.null (TextValue.strip identifier) = freshIncarnationId store name
+      | otherwise = pure (TextValue.strip identifier)
     bootstrap cognition' created =
       cognitionBootstrapIncarnation cognition' created
         >>= either (respond . cognitionError) (generateInitial cognition')
