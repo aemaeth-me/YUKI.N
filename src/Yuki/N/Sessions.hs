@@ -1,6 +1,7 @@
 module Yuki.N.Sessions
   ( ImportRequest (..),
     SessionBundle (..),
+    SessionKind (..),
     SessionMeta (..),
     SessionService (..),
     SessionStore (..),
@@ -12,6 +13,7 @@ module Yuki.N.Sessions
     migrateSessionOwners,
     newSessionStore,
     restoreSession,
+    sessionIsHome,
     validThreadId,
   )
 where
@@ -40,6 +42,9 @@ import Yuki.N.Model
 import Yuki.N.ThreadConfig (ThreadConfig (..), ThreadConfigStore (..))
 import Yuki.N.Transcript (TranscriptStore (..))
 
+data SessionKind = SessionHome | SessionTask
+  deriving stock (Eq, Show)
+
 data SessionMeta = SessionMeta
   { sessionId :: Text,
     sessionTitle :: Text,
@@ -48,7 +53,8 @@ data SessionMeta = SessionMeta
     sessionUpdated :: Integer,
     sessionArchived :: Bool,
     sessionParent :: Maybe Text,
-    sessionForkNode :: Maybe Text
+    sessionForkNode :: Maybe Text,
+    sessionKind :: SessionKind
   }
   deriving stock (Eq, Show)
 
@@ -62,7 +68,8 @@ instance ToJSON SessionMeta where
         "updated" .= sessionUpdated meta,
         "archived" .= sessionArchived meta,
         "parent" .= sessionParent meta,
-        "forkNode" .= sessionForkNode meta
+        "forkNode" .= sessionForkNode meta,
+        "kind" .= sessionKind meta
       ]
 
 instance FromJSON SessionMeta where
@@ -76,6 +83,17 @@ instance FromJSON SessionMeta where
       <*> fields .:? "archived" .!= False
       <*> fields .:? "parent"
       <*> fields .:? "forkNode"
+      <*> fields .:? "kind" .!= SessionTask
+
+instance ToJSON SessionKind where
+  toJSON SessionHome = String "home"
+  toJSON SessionTask = String "task"
+
+instance FromJSON SessionKind where
+  parseJSON = withText "SessionKind" $ \case
+    "home" -> pure SessionHome
+    "task" -> pure SessionTask
+    value -> fail ("unknown session kind: " <> Text.unpack value)
 
 data SessionStore = SessionStore
   { listSessions :: Bool -> IO [SessionMeta],
@@ -167,7 +185,7 @@ ensure lock path threadId title rawOwner =
           owner = cleanOwner rawOwner
           meta =
             maybe
-              (SessionMeta threadId (cleanTitle threadId title) owner stamp stamp False Nothing Nothing)
+              (SessionMeta threadId (cleanTitle threadId title) owner stamp stamp False Nothing Nothing SessionTask)
               ( \current ->
                   current
                     { sessionIncarnationId = bool (sessionIncarnationId current) owner (Text.null (Text.strip (sessionIncarnationId current))),
@@ -206,7 +224,7 @@ create lock path threadId title rawOwner parent node
             Just _ -> pure (sessions, Left ("thread already exists: " <> threadId))
             Nothing ->
               let stamp = round now
-                  meta = SessionMeta threadId (cleanTitle threadId title) owner stamp stamp False parent node
+                  meta = SessionMeta threadId (cleanTitle threadId title) owner stamp stamp False parent node SessionTask
                   updated = Map.insert threadId meta sessions
                in persist path updated $> (updated, Right meta)
  where
@@ -407,6 +425,9 @@ cleanOwner = fromMaybe "yuki" . nonBlank
 
 sessionOwner :: SessionMeta -> Text
 sessionOwner = cleanOwner . sessionIncarnationId
+
+sessionIsHome :: SessionMeta -> Bool
+sessionIsHome = (== SessionHome) . sessionKind
 
 nonBlank :: Text -> Maybe Text
 nonBlank value

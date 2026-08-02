@@ -46,7 +46,10 @@ sessionTests =
       testCase "archive invokes thread cleanup" sessionArchiveCleanup,
       testCase "HTTP routes list, create, rename, archive, restore and serve empty transcripts" sessionRoutes,
       testCase "manual compaction persists a bounded transcript and local snapshot" sessionManualCompact,
-      testCase "agent requests auto-index valid sessions and reject archived ones" sessionAgentIndex
+      testCase "agent requests auto-index valid sessions and reject archived ones" sessionAgentIndex,
+      testCase "session meta roundtrips through JSON including kind" sessionKindRoundtrip,
+      testCase "session meta JSON without kind defaults to task" sessionKindDefaultsToTask,
+      testCase "sessionIsHome distinguishes home from task" sessionIsHomePredicate
     ]
 
 sessionIndexPersists :: Assertion
@@ -68,7 +71,7 @@ sessionIndexPersists = withWorkDir $ \dir -> do
   sessionIncarnationId restored @?= "yuki"
  where
   withoutTimes value = value {sessionCreated = 0, sessionUpdated = 0}
-  meta identifier title owner = SessionMeta identifier title owner 0 0
+  meta identifier title owner archived parent node = SessionMeta identifier title owner 0 0 archived parent node SessionTask
 
 sessionOwnerMigration :: Assertion
 sessionOwnerMigration = withWorkDir $ \dir -> do
@@ -245,3 +248,36 @@ sessionAgentIndex = withWorkDir $ \dir -> do
   fmap sessionTitle created @?= Just "hello"
   sessionTitle unchanged @?= "hello"
   simpleStatus rejected @?= status409
+
+sessionKindRoundtrip :: Assertion
+sessionKindRoundtrip = do
+  let roundtrip meta = eitherDecode (encode meta) @?= Right meta
+  roundtrip task
+  roundtrip home
+  assertBool "home kind serializes" ("\"kind\":\"home\"" `Text.isInfixOf` jsonText home)
+  assertBool "task kind serializes" ("\"kind\":\"task\"" `Text.isInfixOf` jsonText task)
+ where
+  task = SessionMeta "alpha" "Alpha" "yuki" 0 0 False Nothing Nothing SessionTask
+  home = task {sessionKind = SessionHome}
+
+sessionKindDefaultsToTask :: Assertion
+sessionKindDefaultsToTask = fromJSON legacy @?= Success task
+ where
+  task = SessionMeta "alpha" "Alpha" "yuki" 0 0 False Nothing Nothing SessionTask
+  legacy =
+    object
+      [ "id" .= ("alpha" :: Text),
+        "title" .= ("Alpha" :: Text),
+        "incarnationId" .= ("yuki" :: Text),
+        "created" .= (0 :: Int),
+        "updated" .= (0 :: Int),
+        "archived" .= False,
+        "parent" .= (Nothing :: Maybe Text),
+        "forkNode" .= (Nothing :: Maybe Text)
+      ]
+
+sessionIsHomePredicate :: Assertion
+sessionIsHomePredicate = do
+  let meta = SessionMeta "alpha" "Alpha" "yuki" 0 0 False Nothing Nothing
+  sessionIsHome (meta SessionHome) @?= True
+  sessionIsHome (meta SessionTask) @?= False
