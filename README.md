@@ -2,133 +2,87 @@
 
 > 资讯统合思念体对有机生命体接触用人形界面
 
-YUKI 本位的本地单用户 Agent runtime。YUKI.N 容纳一位位持续存在、各自记得、
-各自成形的 YUKI；每位对应一个 Incarnation。task/thread 只是一次工作，transcript
-只是执行投影；短期记忆、长期记忆与印象分别治理。运行边界仍使用 AG-UI：
-`POST /agent` 返回 SSE 事件流。
+YUKI.N 是一个本地单用户的 Agent 集群工作台。你管理若干位持续存在、各自
+记得、各自成形的 Yuki；每位 Yuki 有自己的主对话（主 Agent）、可派发持久
+任务（任务 Agent），任务与对话都能再派出临时 Worker（Subagent）——三层
+编排的实时状态、交付物与文件系统变更，全部在工作台上可见。
 
-## 本机运行
+## 运行
 
 ```console
 export DEEPSEEK_API_KEY=...
 ./yuki
 ```
 
-这一个入口检查 GHC/cabal、Node/npm、provider 配置与端口，完成必要构建，同时
-启动 backend 与 frontend；访问 <http://127.0.0.1:15173>。`Ctrl-C` 会一并停止
-两个服务及受管后台任务。只检查而不启动：`./yuki --check`；强制重建：
-`./yuki --rebuild`。平时仅在源码较新时重建，只有首次缺少前端依赖时才访问
-npm registry。
+启动器检查环境并同时拉起后端（`:18080`）与前端（<http://127.0.0.1:15173>）。
+`Ctrl-C` 一并停止两者。其他选项：`./yuki --check`（只检查）、
+`./yuki --rebuild`（强制重建）。
 
-启动器默认将项目根目录设为 `YUKI_WORK_DIR`；新任务继承它，因此主代理与
-子代理都有明确列出的本机文件、命令能力。能力页会显示当前任务的实际能力。
+打开浏览器后进入**集群总览**：每位 Yuki 一张卡片，显示它此刻在跑什么、
+等待什么、最近交付了什么。点卡片进入该 Yuki 的工作台。
 
-启动与打开配置页不会请求 provider 的模型列表；只有发送消息才会访问所选
-provider。backend 默认使用 `18080`，frontend 默认使用 `15173`。两个服务
-留在启动器的进程组内，启动器退出时随之停止，不在后台遗留监听进程。
+## 工作台速览
 
-默认使用 DeepSeek V4 Flash，并通过 DeepSeek Responses API 调用；也可设置 `YUKI_PROVIDER`、`YUKI_MODEL`、
-`YUKI_BASE_URL`、`YUKI_API_KEY`。本机状态默认写入 `~/.yuki-n`；
-`YUKI_DATA_DIR` 可改其位置。认知状态始终持久化于 `cognition-v2`；
-`YUKI_MEMORY_DIR` 可另定其根目录，`YUKI_MEMORY_MODEL` 可为 Prompt、Sleep 与
-Impression 的内部调用指定模型；未指定时沿用主模型。
+| 视图 | 你会看到 |
+| --- | --- |
+| 现在 | 活跃 Run 树（主对话/任务/Worker 三层状态卡）、待确认事项、最近交付 |
+| 主对话 | 与这位 Yuki 的默认对话；聊天、派发任务、确认 Yuki 的提议 |
+| 任务 | 这位 Yuki 的全部持久任务；点进任意任务的对话 |
+| 交付 | 答案 / 文件 / artifact 的交付流，可展开、可检索 |
+| 变更 | 文件系统变更台账：路径、操作、diff、来源（工具或 git 补记） |
+| Run 监控 | 任一 Run 的钻取视图：状态、Worker 子树、交付与变更、steer/取消 |
 
-### 单次运行的轮次保护
+状态卡显示：阶段（运行/等待工具/压缩/睡眠/取消中）、轮次、模型、token
+用量、上下文占用、进行中的工具与耗时——全部来自后端遥测，实时推送。
 
-`YUKI_MAX_TURNS` 限制一次 run 内的模型调用轮数，默认 `32`。它是 YUKI.N
-的本地防失控保护，不是 provider API 或上下文窗口的限制：模型若反复调用工具、
-工具结果又令模型继续调用，理论上可以永不结束，同时持续消耗时间与 API 配额。
-达到上限时，运行返回 `MAX_TURNS_EXCEEDED`，并保留已经产生的记录。
-
-确属长任务时可在启动前提高，例如 `YUKI_MAX_TURNS=64 ./yuki`；若普通任务触发，
-应先从运行审计中检查重复工具调用或未能收敛的计划。该值改变后须重启服务。
-
-界面会区分本地轮次保护、provider、持久化、未分类运行时异常与浏览器传输错误，
-同时保留错误码和原始详情；历史中的旧式
-`AGENT_ERROR · maximum agent turns exceeded` 也按本地轮次保护解释。
-
-HTTP 入口为 `POST /agent`，最小请求体：
-
-```json
-{"threadId": "t", "runId": "r",
- "messages": [{"id": "u", "role": "user", "content": "你好"}]}
-```
-
-## 审计
-
-通过 `./yuki` 启动时，每次 run 的效应记入
-`$YUKI_DATA_DIR/journal.jsonl`（默认 `~/.yuki-n/journal.jsonl`）；
-`cabal run yuki-n -- replay <file> [RUN_ID]` 回放并对账（前提：hooks 确定）。
-
-界面在每次模型调用前显示上下文估算与预算。达到边界或主动请求时，Yuki 进入
-Sleep：冻结 ContextEpoch，先裁决遗忘项，再生成 WakePacket，于同一任务醒来继续。
-原文仍在本机 Blob / Experience / Journal 中可审计，不再留在活跃短期记忆。
-
-### 睡眠判定与上下文配置
-
-自动 Sleep 不按轮数触发。每次模型调用前计算：
+## 三层编排
 
 ```text
-触发线 = max(256, 模型上下文窗口 - 预留 token - 工具定义 token)
+Yuki（持久主体：人格 + 记忆 + 默认能力）
+├── 主对话 Run（主 Agent：聊天、判断、提议派发）
+├── 任务 Run（任务 Agent：一项持久工作的 Orchestrator）
+└── Worker Run（临时执行者：随父 Run 消亡，不可持久）
 ```
 
-消息 token 估算严格大于触发线时压缩。多 provider 链取已知上下文窗口的最小值；
-模型未声明窗口时，以 `max(1024, YUKI_SPLICE_CHARS / 3)` 回退。工具定义按其
-JSON 字节数除以 3 估算；消息另计每条 4 token，非 ASCII 字符按 1 token、ASCII
-按约 3 字符 1 token 保守估算。
+- **派发任务**：主对话里点「派发任务」→ 编辑自动生成的草案（标题、任务
+  Prompt、能力快照）→ 确认 → 任务开始执行。Yuki 也会主动提议派发，同样
+  必须经你确认。
+- **Worker**：主 Agent 与任务 Agent 都能用 `sub_agent` 族工具派生临时
+  Worker（默认最多并行 4 个、不可再委派、只读记忆）。你能在工作台上直接
+  steer 或取消任何一个 Worker。
 
-能力页的上下文策略可为当前任务覆盖：
+## 配置（常用）
 
-- `预留 token`：直接控制时机；越大越早，默认 `16384`。
-- `保留轮组`：压缩后保留的最近因果轮组上限，默认 `12`；工具调用及其结果不可拆。
-- `摘要上限`：旧上下文摘要的 token 上限，最小 `96`，默认 `2048`。
+| 环境变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `DEEPSEEK_API_KEY` | — | 默认 provider 的密钥 |
+| `YUKI_PROVIDER` / `YUKI_MODEL` / `YUKI_BASE_URL` / `YUKI_API_KEY` | DeepSeek V4 Flash | 主模型链 |
+| `YUKI_DATA_DIR` | `~/.yuki-n` | 全部本地状态的位置 |
+| `YUKI_MAX_TURNS` | 32 | 单次 Run 的轮次保护 |
+| `YUKI_SUBAGENT_DEPTH` | 1 | 委派深度 |
+| `YUKI_SUBAGENT_MAX_PARALLEL` | 4 | 单 Run 活跃 Worker 上限 |
 
-留空即继承全局。全局值仍可分别用 `YUKI_CONTEXT_RESERVE_TOKENS`、
-`YUKI_CONTEXT_KEEP_UNITS`、`YUKI_CONTEXT_SUMMARY_TOKENS` 设置。当前源码固定
-DeepSeek V4 Flash 与 GLM-5.2 为 `1000000`、Kimi K3 为 `1048576`；改模型时同步
-改 `Providers.hs`。provider 明确返回 context overflow 时，系统只再做一次
-半预算的紧急压缩与重试。
+完整配置表见 [docs/06-配置.md](docs/06-配置.md)。
+
+## 文档
+
+- [快速上手](docs/01-快速上手.md)
+- [工作台各视图](docs/02-工作台.md)
+- [派发任务](docs/03-派发任务.md)
+- [Subagent 与编排](docs/04-Subagent与编排.md)
+- [记忆与睡眠](docs/05-记忆与睡眠.md)
+- [配置](docs/06-配置.md)
+- [HTTP 与事件](docs/07-HTTP与事件.md)
+- [数据与审计](docs/08-数据与审计.md)
+- [开发](docs/09-开发.md)
+- [已知限制](docs/10-已知限制.md)
 
 ## 开发
 
 ```console
-cabal build all && cabal test all
+cabal build all && cabal test all   # 后端：构建 + 367 项测试
+cd frontend && npm run build        # 前端：Elm 构建
+cd frontend && npm test             # 前端：JS 测试
 ```
 
-### 测试体系
-
-测试按领域拆分为 `test/Yuki/N/*Test.hs`（+ `test/E2E.hs`、`test/Golden.hs`），
-`test/Main.hs` 只负责注册各组；测试模块之间不互相 import（Golden 与 E2E 为历史例外）。
-
-```console
-cabal test yuki-n-test --test-show-details=direct   # 全量单元/属性/E2E/golden
-```
-
-属性测试使用 tasty-quickcheck（默认 100 次/条，新增属性均控制在 200 次内、整套 <2 秒）。
-
-#### Haskell 架构边界
-
-源码分层、Domain 纯度和 effect 所有权见
-[`docs/haskell-architecture.md`](docs/haskell-architecture.md)。仓库级 `AGENTS.md` 规定 Domain
-禁止 `IO`、`ST`、并发、系统资源、FFI 和 unsafe escape，并要求在代码审查中逐项检查边界。
-
-#### Haskell 开发工具
-
-项目使用显式 `hie.yaml` 将 `src/`、`app/`、`test/` 分别映射到 Cabal 的
-library、executable、test-suite component。编辑器只需启动一个 HLS client。
-
-Haskell 源码统一使用 Fourmolu `0.20.0.0`，配置见 `fourmolu.yaml`：
-
-```console
-fourmolu --mode inplace $(git ls-files '*.hs')
-fourmolu --mode check $(git ls-files '*.hs')
-```
-
-HLint `3.10` 用于语义与惯用法检查，不承担格式化：
-
-```console
-hlint src app test
-```
-
-CI 会拒绝未格式化代码和 HLint error；HLint warning 暂作为代码审查提示，待现有
-warning 基线逐步清理后再提升为强制门禁。
+代码风格与架构规则见仓库根目录 `AGENTS.md`。
