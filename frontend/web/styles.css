@@ -3125,3 +3125,29 @@ textarea::placeholder {
     font-size: 17px;
   }
 }
+
+/* workbench skeleton */
+.app-shell { min-height: 100vh; display: flex; flex-direction: column; }
+.top-bar { display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 1rem; border-bottom: 1px solid var(--line, #2a2a35); }
+.brand { font-weight: 600; text-decoration: none; color: inherit; }
+.conn-badge { font-size: 0.8rem; opacity: 0.85; }
+.conn-live { color: #5fd08a; }
+.conn-degraded { color: #e5c07b; }
+.conn-offline { color: #888; }
+.app-body { flex: 1; padding: 1rem; }
+.fleet-title { margin: 0 0 1rem; }
+.fleet-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 0.75rem; }
+.yuki-card { display: block; border: 1px solid var(--line, #2a2a35); border-radius: 8px; padding: 0.75rem; text-decoration: none; color: inherit; background: var(--paper, #16161d); }
+.yuki-card.is-active { border-color: #5fd08a66; }
+.yuki-card.is-waiting { border-color: #e5c07b66; }
+.yuki-card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; }
+.yuki-name { font-weight: 600; }
+.state-badge, .phase-badge { font-size: 0.72rem; padding: 0.1rem 0.45rem; border-radius: 999px; border: 1px solid var(--line, #2a2a35); opacity: 0.9; }
+.state-active { color: #5fd08a; border-color: #5fd08a55; }
+.state-waiting { color: #e5c07b; border-color: #e5c07b55; }
+.yuki-headline { display: flex; gap: 0.4rem; align-items: center; font-size: 0.85rem; margin-bottom: 0.3rem; }
+.yuki-headline .objective { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.yuki-idle { opacity: 0.5; }
+.yuki-stats { font-size: 0.78rem; opacity: 0.7; }
+.yuki-waiting { margin-top: 0.35rem; font-size: 0.78rem; color: #e5c07b; }
+.fleet-empty { opacity: 0.6; padding: 2rem 0; }

@@ -1,6 +1,7 @@
 import { contextualizeAgentEvent, postAgentControl } from "./control.js";
 import { copyToClipboard } from "./clipboard.js";
 import { createTranscriptScrollController } from "./scroll.js";
+import { startActivityStream } from "./activity.js";
 
 const node = document.getElementById("app");
 const query = new URLSearchParams(window.location.search);
@@ -39,24 +40,22 @@ const storedIncarnationId = () => {
   }
 };
 
-const freshThreadId = () =>
-  typeof crypto.randomUUID === "function"
-    ? `thread-${crypto.randomUUID()}`
-    : `thread-${Date.now().toString(36)}`;
-
-const threadId = storedThreadId() || freshThreadId();
 const incarnationId = storedIncarnationId() || "yuki";
-persistThreadId(threadId);
 persistIncarnationId(incarnationId);
 
 const app = Elm.Main.init({
   node,
   flags: {
     endpoint: query.get("endpoint") || "/agent",
-    threadId,
     incarnationId,
     runStamp: Date.now().toString(36),
   },
+});
+
+startActivityStream({
+  onFrame: (frame) => app.ports.activityEvent.send(frame),
+  onConnection: (state) =>
+    app.ports.activityEvent.send({ kind: "__conn", data: state }),
 });
 
 const transcriptScroll = createTranscriptScrollController({
