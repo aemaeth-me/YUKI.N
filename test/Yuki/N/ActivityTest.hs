@@ -193,7 +193,7 @@ expectJson :: LazyByteString.ByteString -> IO Value
 expectJson = maybe (assertFailure "invalid json") pure . decode
 
 field :: (FromJSON a) => Value -> [Text] -> Maybe a
-field value = dig value
+field = dig
  where
   dig current [] = parseMaybe parseJSON current
   dig current (key : rest) =
