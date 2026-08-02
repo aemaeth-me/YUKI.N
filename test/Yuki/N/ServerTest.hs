@@ -77,7 +77,7 @@ inspectionFixture = do
     recorded <- readEntries
     LazyByteString.writeFile (journalFilePath dir) (renderJournal recorded)
     pure
-      ( application Nothing (Just (inspection threads facts artifacts dir)) Nothing Nothing (const (pure base)),
+      ( application Nothing (Just (inspection threads facts artifacts dir)) Nothing Nothing Nothing (const (pure base)),
         artifactIdFor bigContent,
         length events
       )
@@ -219,16 +219,16 @@ capabilityDegradation = do
   artifacts <- newMemoryArtifactStore
   let partial = newInspection Nothing (Just artifacts) Nothing Nothing
   base <- testRuntime echoModel [echoTool] Parallel
-  listed <- runSession (request (httpGet ["artifacts"])) (application Nothing (Just partial) Nothing Nothing (const (pure base)))
-  facts <- runSession (request (httpGet ["memory", "facts"])) (application Nothing (Just partial) Nothing Nothing (const (pure base)))
+  listed <- runSession (request (httpGet ["artifacts"])) (application Nothing (Just partial) Nothing Nothing Nothing (const (pure base)))
+  facts <- runSession (request (httpGet ["memory", "facts"])) (application Nothing (Just partial) Nothing Nothing Nothing (const (pure base)))
   simpleStatus listed @?= status200
   simpleStatus facts @?= status404
 
 inspectionMissing :: Assertion
 inspectionMissing = do
   base <- testRuntime echoModel [echoTool] Parallel
-  facts <- runSession (request (httpGet ["memory", "facts"])) (application Nothing Nothing Nothing Nothing (const (pure base)))
-  replay <- runSession (srequest (replayRequest "")) (application Nothing Nothing Nothing Nothing (const (pure base)))
+  facts <- runSession (request (httpGet ["memory", "facts"])) (application Nothing Nothing Nothing Nothing Nothing (const (pure base)))
+  replay <- runSession (srequest (replayRequest "")) (application Nothing Nothing Nothing Nothing Nothing (const (pure base)))
   simpleStatus facts @?= status404
   simpleStatus replay @?= status404
 
@@ -240,7 +240,7 @@ serverEvents =
     Parallel
     >>= run
  where
-  run runtime = runSession agentRequest (application Nothing Nothing Nothing Nothing (const (pure runtime))) >>= verify
+  run runtime = runSession agentRequest (application Nothing Nothing Nothing Nothing Nothing (const (pure runtime))) >>= verify
   agentRequest =
     srequest
       SRequest

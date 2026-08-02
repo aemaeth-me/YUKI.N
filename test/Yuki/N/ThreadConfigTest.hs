@@ -296,7 +296,7 @@ configApp = do
           (settingsContextSummaryTokens testSettings)
           (settingsSpliceChars testSettings)
   pure
-    ( application Nothing Nothing (Just (testView store)) Nothing (configResolver store manager base {runtimeContext = Just context}),
+    ( application Nothing Nothing (Just (testView store)) Nothing Nothing (configResolver store manager base {runtimeContext = Just context}),
       store
     )
 configResolver :: ThreadConfigStore -> Manager -> Runtime -> Text -> IO Runtime
@@ -457,7 +457,7 @@ perThreadPrompts = do
   captured <- newIORef []
   manager <- newTlsManager
   base <- testRuntime (capturePrompts captured) [] Parallel
-  let app = application Nothing Nothing (Just (testView store)) Nothing (configResolver store manager base)
+  let app = application Nothing Nothing (Just (testView store)) Nothing Nothing (configResolver store manager base)
   _ <- runSession (srequest (putConfig "thread-a" (encode (emptyThreadConfig {configSystemPrompt = Just "prompt-a"})))) app
   _ <- runSession (srequest (putConfig "thread-b" (encode (emptyThreadConfig {configSystemPrompt = Just "prompt-b"})))) app
   _ <- runSession (srequest (agentPost "thread-a")) app

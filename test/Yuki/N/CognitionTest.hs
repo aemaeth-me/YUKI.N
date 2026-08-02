@@ -213,7 +213,7 @@ cognitionAuthoritativeContext = withWorkDir $ \dir -> do
         withCognition
           cognition
           (withSessionService service (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service))))
-      app = application Nothing (Just inspection) Nothing Nothing (const (pure runtime))
+      app = application Nothing (Just inspection) Nothing Nothing Nothing (const (pure runtime))
   stored <- transcriptLoad (serviceTranscripts service) "authority-task"
   stored @?= Nothing
   response <- runSession (srequest (agentPost "authority-task")) app
@@ -251,7 +251,7 @@ cognitionLegacyParallelTools = withWorkDir $ \dir -> do
         withCognition
           cognition
           (withSessionService service (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service))))
-      app = application Nothing (Just inspection) Nothing Nothing (const (pure runtime))
+      app = application Nothing (Just inspection) Nothing Nothing Nothing (const (pure runtime))
   response <- runSession (srequest (agentPost task)) app
   messages <- readIORef captured
   verifyIncomplete (cognitionContexts cognition)

@@ -208,7 +208,7 @@ concurrentRuns = withWorkDir $ \dir -> do
   doneB <- newEmptyMVar
   base <- testRuntime (gatedModel release) [] Parallel
   let runtime = base {runtimeRuns = Just runs, runtimeHooks = transcriptHooks store <> afterSpy histories}
-      app = application Nothing Nothing Nothing (Just runs) (const (pure runtime))
+      app = application Nothing Nothing Nothing (Just runs) Nothing (const (pure runtime))
   _ <- forkIO (streamInput app inputA chunksA doneA)
   _ <- forkIO (streamInput app inputB chunksB doneB)
   bothStarted <- waitUntil ((&&) <$> streamBegan chunksA <*> streamBegan chunksB)
@@ -251,7 +251,7 @@ duplicateRunIdRace = do
   doneB <- newEmptyMVar
   base <- testRuntime (fakeModel (\_ _ -> takeMVar gate $> Stop)) [] Parallel
   let runtime = base {runtimeRuns = Just runs}
-      app = application Nothing Nothing Nothing (Just runs) (const (pure runtime))
+      app = application Nothing Nothing Nothing (Just runs) Nothing (const (pure runtime))
   _ <- forkIO (streamInput app same chunksA doneA)
   firstStarted <- waitUntil (streamBegan chunksA)
   unless firstStarted (assertFailure "first run never started")

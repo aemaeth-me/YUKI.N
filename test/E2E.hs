@@ -216,6 +216,7 @@ e2eSettings port workDir retries =
       settingsContextReserveTokens = 8192,
       settingsContextKeepUnits = 12,
       settingsContextSummaryTokens = 2048,
+      settingsDispatchGenerateTimeout = 20,
       settingsProvider = fakeConfig port,
       settingsFallbackProviders = []
     }
@@ -289,7 +290,7 @@ drive workDir retries script assertions = do
   run provider port = do
     manager <- newManager defaultManagerSettings
     runtime <- wiredRuntime manager Nothing (e2eSettings port workDir retries)
-    events <- runSession postAgent (application Nothing Nothing Nothing Nothing (const (pure runtime))) >>= decodeEvents
+    events <- runSession postAgent (application Nothing Nothing Nothing Nothing Nothing (const (pure runtime))) >>= decodeEvents
     recorded <- reverse <$> readIORef (providerBodies provider)
     assertions events recorded
 
@@ -507,6 +508,7 @@ fallbackAcrossProviders = withSandbox $ \workDir -> do
  where
   serving runtime backupPort manager =
     application
+      Nothing
       Nothing
       Nothing
       Nothing

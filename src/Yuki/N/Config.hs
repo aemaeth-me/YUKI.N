@@ -39,6 +39,7 @@ data Settings = Settings
     settingsContextReserveTokens :: Int,
     settingsContextKeepUnits :: Int,
     settingsContextSummaryTokens :: Int,
+    settingsDispatchGenerateTimeout :: Int,
     settingsProvider :: OpenAIConfig,
     settingsFallbackProviders :: [Text]
   }
@@ -60,10 +61,11 @@ resolveSettings environment =
     <*> positive "YUKI_CONTEXT_RESERVE_TOKENS" (value "YUKI_CONTEXT_RESERVE_TOKENS" `orElse` "16384")
     <*> positive "YUKI_CONTEXT_KEEP_UNITS" (value "YUKI_CONTEXT_KEEP_UNITS" `orElse` "12")
     <*> atLeast "YUKI_CONTEXT_SUMMARY_TOKENS" 96 (value "YUKI_CONTEXT_SUMMARY_TOKENS" `orElse` "2048")
+    <*> positive "YUKI_DISPATCH_GENERATE_TIMEOUT" (value "YUKI_DISPATCH_GENERATE_TIMEOUT" `orElse` "20")
     <*> parseFallbacks (Text.pack <$> Map.lookup "YUKI_FALLBACK_PROVIDERS" environment)
  where
   value key = Map.lookup key environment
-  make provider port maxTurns execution subAgentDepth providerRetries spliceChars spliceKeep reserveTokens keepUnits summaryTokens fallbacks =
+  make provider port maxTurns execution subAgentDepth providerRetries spliceChars spliceKeep reserveTokens keepUnits summaryTokens dispatchGenerateTimeout fallbacks =
     Settings
       { settingsHost = value "YUKI_HOST" `orElse` "127.0.0.1",
         settingsPort = port,
@@ -85,6 +87,7 @@ resolveSettings environment =
         settingsContextReserveTokens = reserveTokens,
         settingsContextKeepUnits = keepUnits,
         settingsContextSummaryTokens = summaryTokens,
+        settingsDispatchGenerateTimeout = dispatchGenerateTimeout,
         settingsProvider = provider,
         settingsFallbackProviders = fallbacks
       }

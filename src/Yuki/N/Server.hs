@@ -46,6 +46,7 @@ import Yuki.N.ContextEpoch
     ContextEpochStore (..),
     projectedAguiMessages,
   )
+import Yuki.N.Dispatch
 import Yuki.N.Experience (ExperienceStore (..))
 import Yuki.N.Facts (FactStore (..))
 import Yuki.N.Incarnation
@@ -128,6 +129,20 @@ instance FromJSON GeneratePromptRequest where
       <$> fields .: "sourceIntent"
       <*> fields .:? "activate" .!= False
 
+newtype CreateDispatchRequest = CreateDispatchRequest Text
+
+instance FromJSON CreateDispatchRequest where
+  parseJSON = withObject "CreateDispatchRequest" $ \fields -> CreateDispatchRequest <$> fields .: "input"
+
+data PatchDispatchRequest = PatchDispatchRequest (Maybe Text) (Maybe Text) (Maybe ThreadConfig)
+
+instance FromJSON PatchDispatchRequest where
+  parseJSON = withObject "PatchDispatchRequest" $ \fields ->
+    PatchDispatchRequest
+      <$> fields .:? "title"
+      <*> fields .:? "prompt"
+      <*> fields .:? "config"
+
 data EditPromptRequest = EditPromptRequest Text Text (Maybe Text)
 
 instance FromJSON EditPromptRequest where
@@ -181,8 +196,8 @@ newtype SleepThreadRequest = SleepThreadRequest (Maybe Text)
 instance FromJSON SleepThreadRequest where
   parseJSON = withObject "SleepThreadRequest" $ \fields -> SleepThreadRequest <$> fields .:? "reason"
 
-application :: Maybe Text -> Maybe Inspection -> Maybe ConfigView -> Maybe RunRegistry -> (Text -> IO Runtime) -> Application
-application cors inspection configs runs runtimeFor request respond =
+application :: Maybe Text -> Maybe Inspection -> Maybe ConfigView -> Maybe RunRegistry -> Maybe DispatchService -> (Text -> IO Runtime) -> Application
+application cors inspection configs runs dispatches runtimeFor request respond =
   route (requestMethod request) (pathInfo request)
  where
   route "POST" ["agent"] = handleAgent
@@ -209,6 +224,12 @@ application cors inspection configs runs runtimeFor request respond =
   route "GET" ["incarnations", incarnationId] = withCognition (readIncarnation incarnationId)
   route "GET" ["incarnations", incarnationId, "tasks"] = withSessions (incarnationTasks incarnationId)
   route "GET" ["incarnations", incarnationId, "home"] = withSessions (homeThread incarnationId)
+  route "POST" ["incarnations", incarnationId, "dispatches"] = withCognition (createDispatchRoute incarnationId)
+  route "GET" ["incarnations", incarnationId, "dispatches"] = withDispatch (listDispatchesFor incarnationId)
+  route "GET" ["dispatches", dispatchId] = withDispatch (readDispatch dispatchId)
+  route "PATCH" ["dispatches", dispatchId] = withDispatch (patchDispatchRoute dispatchId)
+  route "POST" ["dispatches", dispatchId, "confirm"] = withDispatch (confirmDispatchRoute dispatchId)
+  route "POST" ["dispatches", dispatchId, "cancel"] = withDispatch (cancelDispatchRoute dispatchId)
   route "PATCH" ["incarnations", incarnationId] = withCognition (updateIncarnation incarnationId)
   route "POST" ["incarnations", incarnationId, "archive"] = withCognition (archiveIncarnation incarnationId)
   route "POST" ["incarnations", incarnationId, "restore"] = withCognition (restoreIncarnation incarnationId)
@@ -284,6 +305,48 @@ application cors inspection configs runs runtimeFor request respond =
   withSessions use = maybe notFound use (inspectionSessions =<< inspection)
   withConfig use = maybe notFound use configs
   withCognition use = maybe notFound use (inspectionCognition =<< inspection)
+  withDispatch use = maybe notFound use dispatches
+  createDispatchRoute identifier cognition =
+    maybe notFound go dispatches
+   where
+    go service =
+      withBody "invalid dispatch request: " $ \(CreateDispatchRequest input) ->
+        if TextValue.null (TextValue.strip input)
+          then respond (bad "dispatch input must not be empty")
+          else
+            activeIncarnation cognition identifier
+              >>= either
+                (respond . cognitionError)
+                ( \incarnation ->
+                    dispatchServiceGenerate service incarnation input
+                      >>= respond . jsonResponse cors status202 [] . toJSON
+                )
+  readDispatch identifier service =
+    getDispatch (dispatchServiceStore service) identifier
+      >>= respond . maybe (missing "dispatch not found") ok
+  listDispatchesFor identifier service =
+    either (respond . bad) list (dispatchStatusQuery (queryString request))
+   where
+    list status =
+      listDispatches (dispatchServiceStore service) identifier status >>= respond . ok
+  patchDispatchRoute identifier service =
+    withBody "invalid dispatch patch: " $ \(PatchDispatchRequest title prompt config) ->
+      patchDispatch (dispatchServiceStore service) identifier (DispatchPatch title prompt config)
+        >>= respond . either dispatchFailure ok
+  confirmDispatchRoute identifier service =
+    dispatchServiceConfirm service identifier >>= respond . outcome
+   where
+    outcome ConfirmMissing = missing "dispatch not found"
+    outcome (ConfirmConflict failure) = conflict failure
+    outcome (ConfirmError failure) = failed failure
+    outcome (ConfirmOk threadId) = jsonResponse cors status201 [] (object ["threadId" .= threadId])
+  cancelDispatchRoute identifier service =
+    markDispatchCancelled (dispatchServiceStore service) identifier
+      >>= respond . either dispatchFailure ok
+  dispatchFailure errorText
+    | "unknown dispatch:" `TextValue.isPrefixOf` errorText = missing errorText
+    | "is not draft" `TextValue.isInfixOf` errorText = conflict errorText
+    | otherwise = bad errorText
   incarnationForThread cognition threadId =
     maybe configured (\service -> taskOwnerFor service threadId >>= active) (inspectionSessions =<< inspection)
    where
@@ -1127,6 +1190,15 @@ queryInt name =
     . lookup name
     . queryString
 
+dispatchStatusQuery :: Query -> Either Text (Maybe DispatchStatus)
+dispatchStatusQuery query =
+  case join (lookup "status" query) of
+    Nothing -> Right Nothing
+    Just "draft" -> Right (Just Draft)
+    Just "dispatched" -> Right (Just Dispatched)
+    Just "cancelled" -> Right (Just Cancelled)
+    Just other -> Left ("unknown dispatch status: " <> Text.decodeUtf8 other)
+
 validateCwd :: ThreadConfig -> IO (Either Text ())
 validateCwd = maybe (pure (Right ())) check . cwdPath . configCwd
  where
@@ -1167,14 +1239,14 @@ renderContextPolicy runtime =
         "summaryTokens" .= contextSummaryTokens config
       ]
 
-runServer :: Settings -> Maybe Inspection -> Maybe ConfigView -> Maybe RunRegistry -> (Text -> IO Runtime) -> IO ()
-runServer settings inspection configs runs runtimeFor =
+runServer :: Settings -> Maybe Inspection -> Maybe ConfigView -> Maybe RunRegistry -> Maybe DispatchService -> (Text -> IO Runtime) -> IO ()
+runServer settings inspection configs runs dispatches runtimeFor =
   runSettings
     ( setPort (settingsPort settings)
         . setHost (fromString (settingsHost settings))
         $ defaultSettings
     )
-    (application (settingsCorsOrigin settings) inspection configs runs runtimeFor)
+    (application (settingsCorsOrigin settings) inspection configs runs dispatches runtimeFor)
 
 replayWanted :: LazyByteString.ByteString -> Either Text (Maybe Text)
 replayWanted body

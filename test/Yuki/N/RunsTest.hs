@@ -103,7 +103,7 @@ cancelOverHttp = do
   streamed <- newEmptyMVar
   base <- testRuntime (fakeModel (\_ _ -> takeMVar gate $> Stop)) [] Parallel
   let runtime = base {runtimeRuns = Just runs, runtimeHooks = afterSpy histories}
-      app = application Nothing Nothing Nothing (Just runs) (const (pure runtime))
+      app = application Nothing Nothing Nothing (Just runs) Nothing (const (pure runtime))
   _ <- forkIO (streamAgent app chunks streamed)
   startedOk <- waitUntil (started chunks)
   unless startedOk (assertFailure "run never started")
@@ -132,7 +132,7 @@ browserControlE2E = do
   base <- testRuntime (fakeModel (\_ _ -> takeMVar gate $> Stop)) [] Parallel
   let runId = "browser-control-e2e"
       runtime = base {runtimeRuns = Just runs}
-      app = application Nothing Nothing Nothing (Just runs) (const (pure runtime))
+      app = application Nothing Nothing Nothing (Just runs) Nothing (const (pure runtime))
   testWithApplication (pure app) $ \port -> do
     result <-
       timeout
@@ -271,7 +271,7 @@ steerMidRun = do
   streamed <- newEmptyMVar
   base <- testRuntime (steerModel turns captured) [gateTool gate] Sequential
   let runtime = base {runtimeRuns = Just runs}
-      app = application Nothing Nothing Nothing (Just runs) (const (pure runtime))
+      app = application Nothing Nothing Nothing (Just runs) Nothing (const (pure runtime))
   _ <- forkIO (streamAgent app chunks streamed)
   startedOk <- waitUntil (started chunks)
   unless startedOk (assertFailure "run never started")
@@ -315,7 +315,7 @@ queuedAfterAnswer post kind = do
   chunks <- newIORef []
   streamed <- newEmptyMVar
   base <- testRuntime (answerGateModel entered release turns captured) [] Sequential
-  let app = application Nothing Nothing Nothing (Just runs) (const (pure base {runtimeRuns = Just runs}))
+  let app = application Nothing Nothing Nothing (Just runs) Nothing (const (pure base {runtimeRuns = Just runs}))
   _ <- forkIO (streamAgent app chunks streamed)
   _ <- timeout 5000000 (takeMVar entered) >>= maybe (assertFailure "model answer never opened") pure
   accepted <- runSession (srequest (post "run" "one more thing")) app
@@ -353,7 +353,7 @@ steerEndpoint :: Assertion
 steerEndpoint = do
   runs <- newRunRegistry
   base <- testRuntime okModel [] Parallel
-  let app = application Nothing Nothing Nothing (Just runs) (const (pure base))
+  let app = application Nothing Nothing Nothing (Just runs) Nothing (const (pure base))
   withRunRegistration runs "run" $ do
     accepted <- runSession (srequest (steerPost "run" "hold on")) app
     ghost <- runSession (srequest (steerPost "ghost" "late")) app
@@ -379,7 +379,7 @@ followUpEndpoint :: Assertion
 followUpEndpoint = do
   runs <- newRunRegistry
   base <- testRuntime okModel [] Parallel
-  let app = application Nothing Nothing Nothing (Just runs) (const (pure base))
+  let app = application Nothing Nothing Nothing (Just runs) Nothing (const (pure base))
   withRunRegistration runs "run" $ do
     accepted <- runSession (srequest (followUpPost "run" "later")) app
     ghost <- runSession (srequest (followUpPost "ghost" "late")) app

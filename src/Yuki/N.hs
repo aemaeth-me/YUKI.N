@@ -24,9 +24,11 @@ import Yuki.N.Background (BackgroundRegistry, newBackgroundRegistry, shutdownBac
 import Yuki.N.Cognition
 import Yuki.N.Config
 import Yuki.N.Context (ContextConfig (..))
+import Yuki.N.Dispatch
 import Yuki.N.Facts (Fact (..), FactStore (..), factKindName, newFactStore)
 import Yuki.N.Incarnation (IncarnationStore (..))
 import Yuki.N.Inspect
+import Yuki.N.Invocation (invokeModel)
 import Yuki.N.Journal
 import Yuki.N.Memory (ThreadStore (..), newThreadStore)
 import Yuki.N.Model (Model)
@@ -79,15 +81,29 @@ serve env manager journal artifacts settings runs background =
                                 >>= \store ->
                                   newSessionStore (settingsDataDir settings)
                                     >>= \sessions ->
-                                      let service = SessionService sessions transcripts store (shutdownBackgroundThread background)
-                                       in migrateSessionOwners sessions store
-                                            >>= either
-                                              (die . Text.unpack)
-                                              ( \() ->
-                                                  migrateLegacy cognition memory transcripts service defaults
-                                                    *> putStrLn (banner settings)
-                                                    *> runServer settings (inspection cognition memory transcripts service) (Just (view store registry keyMap)) (Just runs) (resolve cognition sessions store registry keyMap transcriptHooks' fallbacks)
-                                              )
+                                      newDispatchStore (settingsDataDir settings)
+                                        >>= \dispatches ->
+                                          let service = SessionService sessions transcripts store (shutdownBackgroundThread background)
+                                              dispatchService =
+                                                newDispatchService
+                                                  dispatches
+                                                  service
+                                                  (cognitionIncarnations cognition)
+                                                  newId
+                                                  ( generateDraft
+                                                      invokeModel
+                                                      (cognitionModelsOf manager settings <> fallbacks)
+                                                      (settingsDispatchGenerateTimeout settings)
+                                                      journal
+                                                  )
+                                           in migrateSessionOwners sessions store
+                                                >>= either
+                                                  (die . Text.unpack)
+                                                  ( \() ->
+                                                      migrateLegacy cognition memory transcripts service defaults
+                                                        *> putStrLn (banner settings)
+                                                        *> runServer settings (inspection cognition memory transcripts service) (Just (view store registry keyMap)) (Just runs) (Just dispatchService) (resolve cognition sessions store registry keyMap transcriptHooks' fallbacks)
+                                                  )
                   )
  where
   inspection cognition memory transcripts sessions =
