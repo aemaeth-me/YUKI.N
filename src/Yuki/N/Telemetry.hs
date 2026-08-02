@@ -20,6 +20,7 @@ module Yuki.N.Telemetry
     seconds,
     subscribe,
     telemetryClock,
+    telemetryDiffBytes,
     telemetryLedger,
     telemetryRunStarting,
     telemetryRunStopping,
@@ -315,16 +316,17 @@ data Telemetry = Telemetry
   { telemetryLive :: IORef (Map Text LiveStatus),
     telemetryHub :: Chan ActivityFrame,
     telemetryPublished :: IORef (Map Text Integer),
-    telemetryClock :: IO Integer,
-    telemetryLedger :: IORef (Maybe Ledger)
+    telemetryLedger :: IORef (Maybe Ledger),
+    telemetryDiffBytes :: Int,
+    telemetryClock :: IO Integer
   }
 
-newTelemetry :: IO Telemetry
-newTelemetry = newTelemetryWithClock clockMicros
+newTelemetry :: Int -> IO Telemetry
+newTelemetry diffBytes = newTelemetryWithClock diffBytes clockMicros
 
-newTelemetryWithClock :: IO Integer -> IO Telemetry
-newTelemetryWithClock clock =
-  Telemetry <$> newIORef Map.empty <*> newChan <*> newIORef Map.empty <*> pure clock <*> newIORef Nothing
+newTelemetryWithClock :: Int -> IO Integer -> IO Telemetry
+newTelemetryWithClock diffBytes clock =
+  Telemetry <$> newIORef Map.empty <*> newChan <*> newIORef Map.empty <*> newIORef Nothing <*> pure diffBytes <*> pure clock
 
 clockMicros :: IO Integer
 clockMicros = round . (* 1000000) <$> getPOSIXTime

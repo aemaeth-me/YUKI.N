@@ -42,7 +42,7 @@ deliveriesRoundTrip :: Assertion
 deliveriesRoundTrip = withWorkDir $ \dir -> do
   ledger <- newLedger dir
   ticks <- newIORef (0 :: Integer)
-  telemetry <- newTelemetryWithClock (readIORef ticks)
+  telemetry <- newTelemetryWithClock 8192 (readIORef ticks)
   let append delta thread kind =
         writeIORef ticks (delta * 1000000)
           *> recordDelivery
@@ -96,7 +96,7 @@ fsChangesRoundTrip :: Assertion
 fsChangesRoundTrip = withWorkDir $ \dir -> do
   ledger <- newLedger dir
   ticks <- newIORef (0 :: Integer)
-  telemetry <- newTelemetryWithClock (readIORef ticks)
+  telemetry <- newTelemetryWithClock 8192 (readIORef ticks)
   let append delta run thread path =
         writeIORef ticks (delta * 1000000)
           *> recordFsChange
@@ -168,7 +168,7 @@ gitEnrichment = withWorkDir $ \dir -> do
   TextIO.writeFile (dir ++ "/new.txt") "fresh\n"
   TextIO.writeFile (dir ++ "/tracked.txt") "one\ntwo\n"
   ledger <- newLedger dir
-  telemetry <- newTelemetry
+  telemetry <- newTelemetry 8192
   writeIORef (telemetryLedger telemetry) (Just ledger)
   enrichFromGit ledger telemetry 3 "yuki" "run-1" "thread-1" (Just dir)
   changes <- fsChangesFor ledger "yuki" (Just "thread-1") (Just "run-1") 200 Nothing
@@ -193,7 +193,7 @@ gitEnrichmentOutside :: Assertion
 gitEnrichmentOutside = withWorkDir $ \dir -> do
   TextIO.writeFile (dir ++ "/loose.txt") "x\n"
   ledger <- newLedger dir
-  telemetry <- newTelemetry
+  telemetry <- newTelemetry 8192
   enrichFromGit ledger telemetry 3 "yuki" "run-1" "thread-1" (Just dir)
   changes <- fsChangesFor ledger "yuki" Nothing Nothing 200 Nothing
   changes @?= []
@@ -211,7 +211,7 @@ failOpenLedger = withWorkDir $ \dir -> do
 
 wiredRuntime :: FilePath -> IO (Runtime, Telemetry, Ledger)
 wiredRuntime dir = do
-  telemetry <- newTelemetry
+  telemetry <- newTelemetry 8192
   ledger <- newLedger dir
   writeIORef (telemetryLedger telemetry) (Just ledger)
   manager <- newTlsManager

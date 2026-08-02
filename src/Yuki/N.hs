@@ -69,7 +69,7 @@ boot env settings =
 
 serve :: Map.Map String String -> Manager -> Maybe Journal -> Maybe ArtifactStore -> Settings -> RunRegistry -> BackgroundRegistry -> IO ()
 serve env manager journal artifacts settings runs background =
-  liftA2 (,) newTelemetry (newLedger (settingsDataDir settings)) >>= \(telemetry, ledger) ->
+  liftA2 (,) (newTelemetry (settingsTelemetryDiffBytes settings)) (newLedger (settingsDataDir settings)) >>= \(telemetry, ledger) ->
     writeIORef (telemetryLedger telemetry) (Just ledger)
       >> loadAuthJson
       >>= \auth ->
@@ -169,7 +169,7 @@ serve env manager journal artifacts settings runs background =
             try @SomeException (ledgerOutcome config runIdentity input outcome messages) >>= either (logErr "ledger") (const (pure ()))
         }
     ledgerOutcome config runIdentity input outcome messages =
-      when (isRootRun && outcome == RunSucceeded) (answerDelivery *> gitEnrichment)
+      when isRootRun (when (outcome == RunSucceeded) answerDelivery *> gitEnrichment)
      where
       isRootRun = isNothing (AGUI.runParentId input) && identityKind runIdentity /= RunWorker
       answerDelivery =

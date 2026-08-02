@@ -169,7 +169,7 @@ wiredRun = do
 fakeClock :: IO (Telemetry, Integer -> IO ())
 fakeClock = do
   ref <- newIORef (1000000 :: Integer)
-  telemetry <- newTelemetryWithClock (readIORef ref)
+  telemetry <- newTelemetryWithClock 8192 (readIORef ref)
   pure (telemetry, \delta -> modifyIORef' ref (+ delta))
 
 expectFrame :: Chan ActivityFrame -> IO LiveStatus

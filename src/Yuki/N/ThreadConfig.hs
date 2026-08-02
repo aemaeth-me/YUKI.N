@@ -14,7 +14,7 @@ module Yuki.N.ThreadConfig
   )
 where
 
-import Control.Applicative (liftA3, (<|>))
+import Control.Applicative ((<|>))
 import Control.Concurrent.MVar (newMVar, withMVar)
 import Control.Exception (IOException, evaluate, try)
 import Control.Monad (when)
@@ -32,9 +32,7 @@ import Data.Text.Lazy qualified as LazyText
 import Data.Text.Lazy.IO qualified as LazyTextIO
 import Network.HTTP.Client (Manager)
 import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
-import System.Environment (lookupEnv)
 import System.FilePath ((</>))
-import Text.Read (readMaybe)
 import Yuki.N.AGUI.Types (toolName)
 import Yuki.N.Agent
 import Yuki.N.Artifact (ArtifactStore, artifactReadToolName)
@@ -55,6 +53,7 @@ import Yuki.N.Telemetry
     FsChangeRecord (..),
     Ledger,
     Telemetry,
+    telemetryDiffBytes,
     telemetryLedger,
   )
 import Yuki.N.Telemetry.Ledger (quietly, recordDelivery, recordFsChange)
@@ -215,7 +214,7 @@ newMemoryThreadConfigStore =
 
 resolveRuntime :: Manager -> OpenAIConfig -> Maybe ArtifactStore -> Runtime -> ThreadConfig -> ProviderRegistry -> Map.Map String Text -> IO Runtime
 resolveRuntime manager provider artifacts base config registry keyMap =
-  liftA3 (,,) workToolSet ledgerPair envDiffBytes <&> \(tools, pair, diffBytes) ->
+  liftA2 (,) workToolSet ledgerPair <&> \(tools, pair) ->
     registerSubAgent
       base
         { runtimeModel = maybe (fallbackModel base) (openAIModel manager) chosenConfig,
@@ -258,7 +257,7 @@ resolveRuntime manager provider artifacts base config registry keyMap =
       $ tools
   rootDir = fromMaybe "" (cwdPath (configCwd config))
   runKind = identityKind (runtimeIdentity base)
-  envDiffBytes = fromMaybe 8192 . (>>= readMaybe) <$> lookupEnv "YUKI_TELEMETRY_DIFF_BYTES"
+  diffBytes = maybe 8192 telemetryDiffBytes (runtimeTelemetry base)
 
 fsInterceptor :: Telemetry -> Ledger -> Int -> FilePath -> RunKind -> BackendTool -> BackendTool
 fsInterceptor telemetry ledger diffBytes root kind tool =
