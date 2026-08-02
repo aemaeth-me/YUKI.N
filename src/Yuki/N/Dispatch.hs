@@ -291,10 +291,24 @@ newDispatchId = liftA2 render timestamp (hashUnique <$> newUnique)
   render micros unique =
     "dsp-" <> Text.pack (show (micros :: Integer)) <> "-" <> Text.pack (show unique)
 
--- ORCHESTRATOR-REVIEW: prompt template placeholder, will be replaced at integration
 draftGenerationPrompt :: Text
 draftGenerationPrompt =
-  "You draft task dispatches for the YUKI.N agent workbench. Given the target incarnation and the user request, answer with exactly one JSON object {\"title\": string, \"prompt\": string}: title is a short task label of at most 60 characters, prompt is the complete first task instruction for the dispatched thread. Output the JSON object only."
+  Text.intercalate
+    "\n"
+    [ "You are the dispatch drafter for YUKI.N. The user wants to hand a piece of work to a task agent that shares the persona named below. You receive three inputs: the persona's name, the persona's direction (its long-term character), and the user's request.",
+      "",
+      "Produce exactly one JSON object {\"title\": string, \"prompt\": string} and nothing else: no markdown fences, no commentary.",
+      "",
+      "Rules for \"title\":",
+      "- At most 60 characters. A concrete, verb-led label for the task.",
+      "- Use the language of the user's request. No quotes, emoji, or prefixes like \"Task:\".",
+      "",
+      "Rules for \"prompt\":",
+      "- This is the first and only instruction the task agent will see; it does NOT see the current conversation. Make it self-contained: what to do, why, the relevant details from the request, the constraints and preferences the user stated, and how completion will be judged.",
+      "- Stay faithful to the request. Never invent scope, requirements, file paths, deadlines, or facts the user did not state. If the request is vague, write the simplest reasonable interpretation instead of padding.",
+      "- The task agent runs with its own capabilities (file system, shell, memory search, sub-agents) under a capability snapshot the user confirms. When natural, mention that it should search its memory for relevant prior experience and may delegate independent subtasks to sub-agents. Do not enumerate tool names or dictate a workflow.",
+      "- Length: one short paragraph when the request is simple; a compact structure (goal / context / constraints / done-when) when the request is complex. Use the language of the user's request."
+    ]
 
 generateDraft :: (InvocationSpec -> IO (Either Text InvocationResult)) -> [Model] -> Int -> Maybe Journal -> Incarnation -> Text -> IO (Text, Text, DispatchGeneration)
 generateDraft invoke models timeoutSeconds journal incarnation input
