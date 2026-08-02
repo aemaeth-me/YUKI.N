@@ -1,6 +1,11 @@
 # YUKI.N 前端产品模型
 
-> 状态：`design/v1` 的实现基线。本文描述当前后端能够兑现的产品语义；远期领域
+> 状态：**已被取代**。产品方向已转向以 orchestration 为重心的 Agent 集群
+> 与工作台，信息架构以 [`agent-workbench/01-设计.md`](agent-workbench/01-设计.md)
+> 与 [`agent-workbench/04-前端架构.md`](agent-workbench/04-前端架构.md) 为准。
+> 本文保留为 design/v1 的历史基线与既有实现语义参考。
+
+> 原状态：`design/v1` 的实现基线。本文描述当前后端能够兑现的产品语义；远期领域
 > 蓝图只有在接口与持久化完成后才进入正式界面。
 
 ## 可见实体
