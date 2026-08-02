@@ -9,6 +9,7 @@ module Yuki.N.Sessions
     deleteIncarnationSessions,
     exportSession,
     forkSession,
+    homeThreadId,
     importSession,
     migrateSessionOwners,
     newSessionStore,
@@ -99,6 +100,7 @@ data SessionStore = SessionStore
   { listSessions :: Bool -> IO [SessionMeta],
     findSession :: Text -> IO (Maybe SessionMeta),
     ensureSession :: Text -> Maybe Text -> Text -> IO SessionMeta,
+    ensureHomeSession :: Text -> Maybe Text -> IO SessionMeta,
     createSession :: Text -> Maybe Text -> Text -> Maybe Text -> Maybe Text -> IO (Either Text SessionMeta),
     claimSessionOwner :: Text -> Text -> IO (Either Text SessionMeta),
     renameSession :: Text -> Text -> IO (Either Text SessionMeta),
@@ -169,7 +171,8 @@ newSessionStore dir =
             . Map.elems
             <$> readMVar lock,
         findSession = \threadId -> Map.lookup threadId <$> readMVar lock,
-        ensureSession = ensure lock index,
+        ensureSession = ensure lock index SessionTask,
+        ensureHomeSession = ensureHome lock index,
         createSession = create lock index,
         claimSessionOwner = claim lock index,
         renameSession = rename lock index,
@@ -177,15 +180,15 @@ newSessionStore dir =
         deleteSessionsFor = deleteForIncarnation lock index
       }
 
-ensure :: MVar (Map Text SessionMeta) -> FilePath -> Text -> Maybe Text -> Text -> IO SessionMeta
-ensure lock path threadId title rawOwner =
+ensure :: MVar (Map Text SessionMeta) -> FilePath -> SessionKind -> Text -> Maybe Text -> Text -> IO SessionMeta
+ensure lock path kind threadId title rawOwner =
   getPOSIXTime >>= \now ->
     modifyMVar lock $ \sessions ->
       let stamp = round now
           owner = cleanOwner rawOwner
           meta =
             maybe
-              (SessionMeta threadId (cleanTitle threadId title) owner stamp stamp False Nothing Nothing SessionTask)
+              (SessionMeta threadId (cleanTitle threadId title) owner stamp stamp False Nothing Nothing kind)
               ( \current ->
                   current
                     { sessionIncarnationId = bool (sessionIncarnationId current) owner (Text.null (Text.strip (sessionIncarnationId current))),
@@ -200,6 +203,12 @@ ensure lock path threadId title rawOwner =
   refreshedTitle current
     | sessionTitle current == threadId = cleanTitle threadId title
     | otherwise = sessionTitle current
+
+ensureHome :: MVar (Map Text SessionMeta) -> FilePath -> Text -> Maybe Text -> IO SessionMeta
+ensureHome lock path incarnation rawName =
+  ensure lock path SessionHome (homeThreadId incarnation) (Just fallback) incarnation
+ where
+  fallback = fromMaybe incarnation (nonBlank =<< rawName)
 
 deleteForIncarnation :: MVar (Map Text SessionMeta) -> FilePath -> Text -> IO [SessionMeta]
 deleteForIncarnation lock path incarnation =
@@ -428,6 +437,9 @@ sessionOwner = cleanOwner . sessionIncarnationId
 
 sessionIsHome :: SessionMeta -> Bool
 sessionIsHome = (== SessionHome) . sessionKind
+
+homeThreadId :: Text -> Text
+homeThreadId incarnationId = "home-" <> incarnationId
 
 nonBlank :: Text -> Maybe Text
 nonBlank value
