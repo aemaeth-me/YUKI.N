@@ -94,11 +94,13 @@ const serveFile = (request, response) => {
 };
 
 http
-  .createServer((request, response) =>
-    proxyBackendPath(new URL(request.url ?? "/", "http://localhost").pathname)
+  .createServer((request, response) => {
+    const pathname = new URL(request.url ?? "/", "http://localhost").pathname;
+    const documentNav = (request.headers.accept ?? "").includes("text/html");
+    return proxyBackendPath(pathname) && !documentNav
       ? proxyAgent(request, response)
-      : serveFile(request, response),
-  )
+      : serveFile(request, response);
+  })
   .listen(port, host, () => {
     console.log(`YUKI.N AG-UI workbench: http://${host}:${port}`);
     console.log(`Proxying /agent to ${new URL("/agent", backend)}`);
