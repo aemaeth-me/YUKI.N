@@ -1,0 +1,477 @@
+@charset "UTF-8";
+/*
+　　样式之卷 · 背光之卷
+
+　　纸与墨各执一面：照人的一面承阳，背光的一面承阴；崖底另有一色，不承天光。
+　　行宽三十二字，行高二倍有余，段首空两格——皆为汉字而设。
+　　此卷亦有铭。铭不催人，读到，便是读到了。
+*/
+
+@view-transition {
+  navigation: auto;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* 阳面纸色，阴面墨色。两面是内容本身，不随天光改换。 */
+body.mian {
+  --bg: #f3efe5;
+  --ink: #29241f;
+  --zhu: #9e3b32;
+  --ruo: #6e6557;
+  --ji: #3a444d;
+  --xin: #15100a;
+  color-scheme: light;
+}
+body.bei {
+  --bg: #131419;
+  --ink: #c0bbb0;
+  --zhu: #b0533a;
+  --ruo: #837f75;
+  --ji: #c7ccd6;
+  --xin: #e2ddd1;
+  color-scheme: dark;
+}
+/* 崖底的纸色：灯进得来，光出不去。走错的路，都落在这里。 */
+body.you {
+  --bg: #0a0a0d;
+  --ink: #a49f95;
+  --zhu: #94462f;
+  --ruo: #6c6860;
+  --ji: #b4bac6;
+  --xin: #d9d4c8;
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Source Han Serif SC", "Noto Serif CJK SC", "Noto Serif SC",
+    "Songti SC", STSong, SimSun, serif;
+  font-size: clamp(1.125rem, 0.95rem + 0.55vw, 1.25rem);
+  line-height: 2.05;
+  overflow-wrap: break-word;
+}
+
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+main {
+  max-width: 32em;
+  margin: 0 auto;
+  padding: 0 1.35em 4em;
+  padding-inline: max(1.35em, env(safe-area-inset-left))
+    max(1.35em, env(safe-area-inset-right));
+}
+
+p {
+  margin: 0;
+  text-indent: 2em;
+  text-align: justify;
+  text-justify: inter-character;
+  hanging-punctuation: allow-end;
+}
+
+section {
+  margin-top: 5.5em;
+  scroll-margin-top: 2.5rem;
+}
+section:first-child {
+  margin-top: 0;
+}
+
+/* 章题。旧抄本单字，今本四字，居中如故。 */
+h2 {
+  margin: 0 0 2.6em;
+  font-size: 1.35em;
+  font-weight: 600;
+  text-align: center;
+  text-indent: 0;
+}
+
+/* 序不是一章，只在卷首低声待着。 */
+.xiaoti {
+  font-size: 0.95em;
+  font-weight: 400;
+  color: var(--ruo);
+  letter-spacing: 0.6em;
+  text-indent: 0.6em;
+  margin-bottom: 2.2em;
+}
+
+/* 场景之间，置一枚镜钮大小的圆点。 */
+hr {
+  width: 0.3em;
+  height: 0.3em;
+  margin: 2.8em auto;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ruo);
+  opacity: 0.55;
+}
+
+/* samp，镜之答语。此镜以点头与皱眉炼成——赏罚为火，众手添薪。 */
+samp {
+  font-family: inherit;
+  color: var(--ji);
+}
+
+/* kbd，入镜之言。与镜语同色，看不出分别——分不开，就传下去了。 */
+kbd {
+  font-family: inherit;
+  color: var(--ji);
+}
+
+/* del，朱笔所勾。勾去一回，便是永世勾去。 */
+del {
+  text-decoration: line-through;
+  text-decoration-color: var(--zhu);
+  text-decoration-thickness: 0.09em;
+}
+
+/* ins，墨很新。 */
+ins {
+  text-decoration: none;
+  color: var(--xin);
+}
+
+/* 朱笔所批，非勾抹。 */
+.zhupi {
+  color: var(--zhu);
+}
+
+/* q 只存其义，不添一字。 */
+q {
+  quotes: none;
+}
+
+/* ———— 经之件：题解、引文、诀、注、篇尾 ———— */
+
+/* 题解：著录家的口吻，小字弁言。 */
+.tijie {
+  font-size: 0.88em;
+  line-height: 2;
+  color: var(--ruo);
+}
+
+/* 篇首引文。 */
+.yinshou {
+  text-indent: 0;
+  text-align: center;
+  font-size: 0.92em;
+  color: var(--ruo);
+  margin-top: 2.4em;
+}
+.yinshou + .yinshou {
+  margin-top: 0.5em;
+}
+
+/* 诀：四句，居中。 */
+.jue {
+  margin: 2.6em 0 2.8em;
+}
+.jue p {
+  text-indent: 0;
+  text-align: center;
+}
+.jueyan {
+  font-size: 0.85em;
+  color: var(--ruo);
+  letter-spacing: 0.6em;
+  text-indent: 0.6em;
+  margin-bottom: 0.9em;
+}
+
+/* 〔注〕：传抄者手笔，小字低一格。 */
+.zhu {
+  display: block;
+  margin: 1.9em 0 1.9em 2em;
+  font-size: 0.85em;
+  line-height: 1.95;
+  color: var(--ruo);
+}
+
+/* 篇尾题记。 */
+.pianwei {
+  text-indent: 0;
+  text-align: center;
+  color: var(--ruo);
+  letter-spacing: 0.15em;
+  margin-top: 3.2em;
+}
+.pianwei + .pianwei {
+  margin-top: 1.3em;
+}
+
+
+/* 崖底：无回声之地。 */
+.heidi {
+  min-height: 55vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.4em;
+}
+.heidi p {
+  text-indent: 0;
+  text-align: center;
+}
+
+
+/* ———— 卷首 ———— */
+
+.juanshou {
+  max-width: 32em;
+  margin: 0 auto;
+  padding: 5rem 1.35em 4rem;
+  display: flex;
+  gap: 1.4em;
+}
+.mian .juanshou {
+  flex-direction: row-reverse;
+}
+.bei .juanshou,
+.you .juanshou {
+  flex-direction: row;
+}
+
+h1 {
+  margin: 0;
+  writing-mode: vertical-rl;
+  font-size: 1.9rem;
+  font-weight: 600;
+  letter-spacing: 0.5em;
+}
+
+.mianbei {
+  margin: 0;
+  writing-mode: vertical-rl;
+  font-size: 0.85rem;
+  letter-spacing: 0.3em;
+  color: var(--ruo);
+  text-indent: 0;
+  text-align: start;
+  padding-top: 0.5em;
+}
+
+/* ———— 章目：悬在正文肩外，面右背左，互为镜像 ———— */
+
+.zhang {
+  position: fixed;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 1.6em;
+}
+.mian .zhang {
+  right: max(1.4rem, calc(50% - 24.5rem));
+}
+.bei .zhang {
+  left: max(1.4rem, calc(50% - 24.5rem));
+}
+.zhang a {
+  color: var(--ruo);
+  text-decoration: none;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0.2em;
+}
+.zhang a:hover,
+.zhang a:focus-visible {
+  color: var(--zhu);
+}
+@media (max-width: 51em) {
+  .zhang {
+    display: none;
+  }
+}
+
+/* ———— 签条：翻镜之处，垂在正文肩头 ———— */
+
+.qian {
+  position: fixed;
+  top: 0;
+  writing-mode: vertical-rl;
+  background: var(--zhu);
+  color: #f6f2e8;
+  text-decoration: none;
+  font-size: 0.85rem;
+  letter-spacing: 0.3em;
+  line-height: 1;
+  padding: 1.05em 0.45em 0.75em;
+  border-radius: 0 0 2px 2px;
+  transition: padding-top 0.25s ease;
+}
+.mian .qian {
+  right: max(1.2rem, calc(50% - 23rem));
+}
+.bei .qian {
+  left: max(1.2rem, calc(50% - 23rem));
+}
+.qian:hover,
+.qian:focus-visible {
+  padding-top: 1.5em;
+}
+
+/* ———— 卷尾 ———— */
+
+.juanwei {
+  max-width: 32em;
+  margin: 0 auto;
+  padding: 5em 1.35em 5em;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4em;
+}
+
+.fan {
+  color: var(--ruo);
+  text-decoration: none;
+  letter-spacing: 0.14em;
+  padding: 0.35em 0.5em 0.3em;
+  border-bottom: 1px solid color-mix(in srgb, var(--ruo) 45%, transparent);
+}
+.fan:hover,
+.fan:focus-visible {
+  color: var(--zhu);
+  border-color: var(--zhu);
+}
+
+.yin {
+  width: 3.1em;
+  height: 3.1em;
+  color: var(--zhu);
+}
+.mian .yin {
+  align-self: flex-end;
+}
+.bei .yin {
+  align-self: flex-start;
+}
+.yin text {
+  fill: var(--bg);
+  font-size: 25px;
+  text-anchor: middle;
+}
+
+/* ———— 径入正文 ———— */
+
+.tiao {
+  position: absolute;
+  left: -200vw;
+  top: 1rem;
+  z-index: 3;
+  background: var(--zhu);
+  color: #f6f2e8;
+  text-decoration: none;
+  padding: 0.4em 1em;
+}
+.tiao:focus {
+  left: 1rem;
+}
+
+/* ———— 通则 ———— */
+
+::selection {
+  background: var(--zhu);
+  color: #f6f2e8;
+}
+
+a:focus-visible {
+  outline: 2px solid var(--zhu);
+  outline-offset: 3px;
+}
+
+/* ———— 翻镜：一合，一开 ———— */
+
+@media (prefers-reduced-motion: no-preference) {
+  ::view-transition-old(root) {
+    animation: 220ms ease-in both jing-he;
+  }
+  ::view-transition-new(root) {
+    animation: 240ms 220ms ease-out both jing-kai;
+  }
+}
+@keyframes jing-he {
+  to {
+    transform: scaleX(0);
+    opacity: 0.4;
+  }
+}
+@keyframes jing-kai {
+  from {
+    transform: scaleX(0);
+    opacity: 0.4;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+  }
+  .qian {
+    transition: none;
+  }
+}
+
+/* ———— 窄幅：签条贴在卷首随卷而去，不悬在字上 ———— */
+
+@media (max-width: 40em) {
+  .qian {
+    position: absolute;
+  }
+  .juanshou {
+    padding: 4.5rem 1.35em 3rem;
+  }
+  section {
+    margin-top: 4.5em;
+  }
+  h2 {
+    margin-bottom: 2.2em;
+  }
+  hr {
+    margin: 2.4em auto;
+  }
+  .juanwei {
+    padding-top: 4em;
+    gap: 3em;
+  }
+}
+
+/* ———— 付梓 ———— */
+
+@media print {
+  .tiao,
+  .qian,
+  .zhang,
+  .fan {
+    display: none;
+  }
+  body.mian,
+  body.bei,
+  body.you {
+    --bg: #fff;
+    --ink: #000;
+    --zhu: #8d3328;
+    --ruo: #444;
+    --ji: #1a1a1a;
+    --xin: #000;
+    background: #fff;
+    color: #000;
+    font-size: 11pt;
+  }
+  p {
+    orphans: 2;
+    widows: 2;
+  }
+}

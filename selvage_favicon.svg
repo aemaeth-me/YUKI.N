@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>梭</title>
+  <desc>织具之梭：斜置，两头尖，腹中虚，纳一管纬。正殿所供，不是神。</desc>
+  <rect width="64" height="64" fill="#f1ede2"/>
+  <g transform="rotate(-34 32 32)">
+    <path fill="#33456a" d="M3 32C14 20 25 18 32 18s18 2 29 14C50 44 39 46 32 46S14 44 3 32Z"/>
+    <rect x="14" y="25" width="36" height="14" rx="7" fill="#f1ede2"/>
+    <path d="M19 32h27" fill="none" stroke="#33456a" stroke-width="2" stroke-linecap="round"/>
+    <path fill="#33456a" d="M23 28.5h15l6 3.5-6 3.5H23z"/>
+    <path fill="none" stroke="#f1ede2" stroke-width="1.4" d="M29 28.5v7m4.5-7v7"/>
+  </g>
+</svg>
