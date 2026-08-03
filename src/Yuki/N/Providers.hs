@@ -91,24 +91,27 @@ loadProviders env =
  where
   resolvePath =
     maybe homeFile (pure . Just) (Map.lookup "YUKI_PROVIDERS_FILE" env)
-  homeFile = do
-    home <- getHomeDirectory
-    let path = home </> ".yuki-n" </> "providers.json"
-    bool Nothing (Just path) <$> doesFileExist path
+  homeFile =
+    getHomeDirectory
+      >>= existingProvidersFile . (</> ".yuki-n" </> "providers.json")
+   where
+    existingProvidersFile path = bool Nothing (Just path) <$> doesFileExist path
   loadFile path =
-    try (LazyByteString.readFile path) >>= \case
-      Left (_ :: IOException) -> pure defaultProviders
-      Right bytes -> pure (fromRight defaultProviders (eitherDecode bytes))
+    try (LazyByteString.readFile path) >>= loadResult
+   where
+    loadResult (Left (_ :: IOException)) = pure defaultProviders
+    loadResult (Right bytes) = pure (fromRight defaultProviders (eitherDecode bytes))
 
 loadAuthJson :: IO (Maybe Value)
-loadAuthJson =
-  authPath >>= \path -> doesFileExist path >>= bool (pure Nothing) (readAuth path)
+loadAuthJson = authPath >>= readIfExists
  where
   authPath = (</> ".pi/agent/auth.json") <$> getHomeDirectory
+  readIfExists path = doesFileExist path >>= bool (pure Nothing) (readAuth path)
   readAuth path =
-    try (LazyByteString.readFile path) >>= \case
-      Left (_ :: IOException) -> pure Nothing
-      Right bytes -> pure (either (const Nothing) Just (eitherDecode bytes))
+    try (LazyByteString.readFile path) >>= readResult
+   where
+    readResult (Left (_ :: IOException)) = pure Nothing
+    readResult (Right bytes) = pure (either (const Nothing) Just (eitherDecode bytes))
 
 resolveApiKey :: Map String String -> Maybe Value -> ProviderEntry -> Maybe Text
 resolveApiKey env auth entry =
@@ -143,7 +146,7 @@ providerKeyMap :: Map String String -> Maybe Value -> ProviderRegistry -> Map St
 providerKeyMap env auth =
   Map.fromList . mapMaybe keep . Map.toList
  where
-  keep (name, entry) = resolveApiKey env auth entry <&> \key -> (Text.unpack name, key)
+  keep (name, entry) = resolveApiKey env auth entry <&> (Text.unpack name,)
 
 providerListing :: Manager -> ProviderRegistry -> Map String Text -> IO [Value]
 providerListing manager registry keyMap =

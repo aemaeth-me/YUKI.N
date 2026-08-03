@@ -314,17 +314,15 @@ newImpressionStore :: FilePath -> IO (Either Text ImpressionStore)
 newImpressionStore dir =
   createDirectoryIfMissing True dir
     *> loadStore (storePath dir)
-    >>= traverse
-      ( \loaded ->
-          getPOSIXTime >>= \now ->
-            let migrated = migrateKnownFalseImpressions (round now) loaded
-             in bool
-                  (pure ())
-                  (atomicEncodeFile (storePath dir) migrated)
-                  (migrated /= loaded)
-                  *> newMVar migrated
-                  <&> mkStore (atomicEncodeFile (storePath dir))
-      )
+    >>= traverse (bootstrapStore (storePath dir))
+ where
+  bootstrapStore path loaded =
+    getPOSIXTime >>= buildStore path loaded
+  buildStore path loaded now =
+    let migrated = migrateKnownFalseImpressions (round now) loaded
+     in bool (pure ()) (atomicEncodeFile path migrated) (migrated /= loaded)
+          *> newMVar migrated
+          <&> mkStore (atomicEncodeFile path)
 
 newMemoryImpressionStore :: IO ImpressionStore
 newMemoryImpressionStore = newMVar emptyStoreState <&> mkStore (const (pure ()))
@@ -398,28 +396,29 @@ activateImpression ::
   Text ->
   IO (Either Text ImpressionActivation)
 activateImpression models journal store incarnation scope intent allowedArchiveRefs catalog =
-  impressionRead store incarnation >>= \state ->
-    getPOSIXTime >>= \now ->
-      let invocationId' = invocationIdentifier "activate" incarnation intentId (impressionRevision state)
-          spec =
-            InvocationSpec
-              invocationId'
-              "impression.activate"
-              activationPromptRevision
-              models
-              (activationPrompt state intent catalog)
-              2
-              12000
-              45000
-              journal
-       in invokeModel spec
-            >>= either
-              (failed state (round now) invocationId' Nothing)
-              (finish state (round now) invocationId')
+  liftA2 (,) (impressionRead store incarnation) getPOSIXTime
+    >>= invokeActivation
  where
   taskId = impressionScopeTaskId scope
   runId = impressionScopeRunId scope
   intentId = impressionScopeIntentId scope
+  invokeActivation (state, now) =
+    let invocationId' = invocationIdentifier "activate" incarnation intentId (impressionRevision state)
+        spec =
+          InvocationSpec
+            invocationId'
+            "impression.activate"
+            activationPromptRevision
+            models
+            (activationPrompt state intent catalog)
+            2
+            12000
+            45000
+            journal
+     in invokeModel spec
+          >>= either
+            (failed state (round now) invocationId' Nothing)
+            (finish state (round now) invocationId')
   finish state now invocationId' result =
     case parseActivation (Set.fromList allowedArchiveRefs) (invocationResultText result) of
       Left failure -> failed state now invocationId' (Just result) failure
@@ -479,22 +478,23 @@ consolidateImpression ::
   Text ->
   IO (Either Text ImpressionRevision)
 consolidateImpression models journal store incarnation experienceRef allowedArchiveRefs allowedExperienceRefs experience =
-  impressionRead store incarnation >>= \before ->
-    getPOSIXTime >>= \now ->
-      let invocationId' = invocationIdentifier "consolidate" incarnation experienceRef (impressionRevision before)
-          spec =
-            InvocationSpec
-              invocationId'
-              "impression.consolidate"
-              consolidationPromptRevision
-              models
-              (consolidationPrompt before allowedArchiveRefs allowedExperienceRefs experience)
-              2
-              24000
-              60000
-              journal
-       in invokeModel spec >>= either (pure . Left) (finish before (round now) invocationId')
+  liftA2 (,) (impressionRead store incarnation) getPOSIXTime
+    >>= invokeConsolidation
  where
+  invokeConsolidation (before, now) =
+    let invocationId' = invocationIdentifier "consolidate" incarnation experienceRef (impressionRevision before)
+        spec =
+          InvocationSpec
+            invocationId'
+            "impression.consolidate"
+            consolidationPromptRevision
+            models
+            (consolidationPrompt before allowedArchiveRefs allowedExperienceRefs experience)
+            2
+            24000
+            60000
+            journal
+     in invokeModel spec >>= either (pure . Left) (finish before (round now) invocationId')
   finish before now invocationId' result =
     case parseConsolidation
       (Set.fromList allowedArchiveRefs)
@@ -593,8 +593,9 @@ instance FromJSON ActivationDecision where
 
 parseActivation :: Set Text -> Text -> Either Text [ImpressionCue]
 parseActivation allowed raw =
-  decodeStructured raw >>= \(ActivationDecision cues) ->
-    traverse (validateCue allowed) (take 5 cues)
+  decodeStructured raw >>= takeCues
+ where
+  takeCues (ActivationDecision cues) = traverse (validateCue allowed) (take 5 cues)
 
 validateCue :: Set Text -> ImpressionCue -> Either Text ImpressionCue
 validateCue allowed cue
@@ -752,11 +753,14 @@ decodeStructured =
 
 stripFence :: Text -> Text
 stripFence raw =
-  fromMaybe trimmed $ do
-    inner <- Text.stripPrefix "```json" trimmed <|> Text.stripPrefix "```" trimmed
-    Text.stripSuffix "```" (Text.strip inner)
+  fromMaybe
+    trimmed
+    ( (Text.stripPrefix "```json" trimmed <|> Text.stripPrefix "```" trimmed)
+        >>= stripClosing
+    )
  where
   trimmed = Text.strip raw
+  stripClosing inner = Text.stripSuffix "```" (Text.strip inner)
 
 renderImpressionCues :: [ImpressionCue] -> Text
 renderImpressionCues [] = ""
@@ -798,13 +802,15 @@ takeEnd count values = drop (length values - count) values
 
 loadStore :: FilePath -> IO (Either Text ImpressionStoreState)
 loadStore path =
-  (try (eitherDecodeFileStrict path) :: IO (Either IOException (Either String ImpressionStoreState)))
-    <&> \case
-      Left failure
-        | isDoesNotExistError failure -> Right emptyStoreState
-        | otherwise -> Left ("cannot read impression store: " <> Text.pack (displayException failure))
-      Right (Left failure) -> Left ("invalid impression store: " <> Text.pack failure)
-      Right (Right state) -> Right state
+  interpretStoreError
+    <$> (try (eitherDecodeFileStrict path) :: IO (Either IOException (Either String ImpressionStoreState)))
+ where
+  interpretStoreError = \case
+    Left failure
+      | isDoesNotExistError failure -> Right emptyStoreState
+      | otherwise -> Left ("cannot read impression store: " <> Text.pack (displayException failure))
+    Right (Left failure) -> Left ("invalid impression store: " <> Text.pack failure)
+    Right (Right state) -> Right state
 
 storePath :: FilePath -> FilePath
 storePath dir = dir </> "impressions.json"

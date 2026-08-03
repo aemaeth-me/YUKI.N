@@ -25,7 +25,6 @@ module Yuki.N.Runs
   )
 where
 
-import Control.Applicative (liftA2)
 import Control.Concurrent (ThreadId, myThreadId, throwTo)
 import Control.Exception (Exception, SomeAsyncException, SomeException, bracket_, displayException, fromException, throwIO, try)
 import Data.Functor (($>))
@@ -103,18 +102,16 @@ withRunRegistrationFor registry runId descriptor =
   bracket_ acquire release
  where
   acquire =
-    myThreadId >>= \thread ->
-      newIORef [] >>= \steer ->
-        newIORef [] >>= \followUp ->
-          getPOSIXTime >>= \now ->
-            mutate (Map.insert runId (RunHandle thread descriptor (round now) steer followUp))
+    RunHandle <$> myThreadId <*> pure descriptor <*> (round <$> getPOSIXTime) <*> newIORef [] <*> newIORef []
+      >>= mutate . Map.insert runId
   release =
     mutate (Map.delete runId)
       *> case descriptorParent descriptor of
-        Nothing -> readIORef (registryCompletions registry) >>= \table -> dropIds (completionSubtree table runId)
+        Nothing -> readIORef (registryCompletions registry) >>= dropSubtreeOf runId
         Just _ -> pure ()
   mutate f = atomicModifyIORef' (registryRuns registry) (\runs -> (f runs, ()))
   dropIds ids = atomicModifyIORef' (registryCompletions registry) (\table -> (foldr Map.delete table ids, ()))
+  dropSubtreeOf identifier table = dropIds (completionSubtree table identifier)
 
 completionSubtree :: Map Text RunCompletion -> Text -> [Text]
 completionSubtree completions root =
@@ -149,8 +146,11 @@ activeThreads registry =
 cancelRun :: RunRegistry -> Text -> IO Bool
 cancelRun registry runId =
   readIORef (registryRuns registry)
-    >>= maybe (pure False) (\handle -> throwTo (runHandleThread handle) (RunCancelled runId) $> True)
+    >>= maybe (pure False) (throwCancelled runId)
       . Map.lookup runId
+ where
+  throwCancelled identifier handle =
+    throwTo (runHandleThread handle) (RunCancelled identifier) $> True
 
 steerRun :: RunRegistry -> Text -> ChatMessage -> IO Bool
 steerRun registry =
@@ -182,18 +182,19 @@ drainRun field ref runId =
 
 writeCompletion :: RunRegistry -> Text -> Maybe Text -> CompletionOutcome -> Text -> IO ()
 writeCompletion registry runId parent outcome result =
-  getPOSIXTime >>= \now ->
-    noteCompletion registry (RunCompletion runId parent outcome (Text.take 4000 result) (round now))
+  getPOSIXTime >>= noteCompletion registry . RunCompletion runId parent outcome (Text.take 4000 result) . round
 
 noteCompletion :: RunRegistry -> RunCompletion -> IO ()
 noteCompletion registry completion =
-  try @SomeException (atomicModifyIORef' (registryCompletions registry) (\table -> (Map.insert (completionRunId completion) completion table, ()))) >>= \case
-    Left exception ->
-      maybe
-        (TextIO.hPutStrLn stderr ("yuki.runs: completion write failed: " <> Text.pack (displayException exception)))
-        throwIO
-        (fromException exception :: Maybe SomeAsyncException)
-    Right () -> pure ()
+  try @SomeException (atomicModifyIORef' (registryCompletions registry) (\table -> (Map.insert (completionRunId completion) completion table, ())))
+    >>= handleCompletionWrite
+ where
+  handleCompletionWrite (Left exception) =
+    maybe
+      (TextIO.hPutStrLn stderr ("yuki.runs: completion write failed: " <> Text.pack (displayException exception)))
+      throwIO
+      (fromException exception :: Maybe SomeAsyncException)
+  handleCompletionWrite (Right ()) = pure ()
 
 completionFor :: RunRegistry -> Text -> IO (Maybe RunCompletion)
 completionFor registry runId =

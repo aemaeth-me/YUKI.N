@@ -69,7 +69,9 @@ import Yuki.N.Diff (unified)
 
 workTools :: Maybe ArtifactStore -> FilePath -> IO [BackendTool]
 workTools store root =
-  (,) <$> newIORef Map.empty <*> newIORef [] <&> \(ledger, plan) ->
+  (,) <$> newIORef Map.empty <*> newIORef [] <&> uncurry tools
+ where
+  tools ledger plan =
     [ textTool
         ( spec
             "fs_read"
@@ -303,8 +305,9 @@ data PlanCall
   | PlanClear
 
 instance FromJSON PlanCall where
-  parseJSON = withObject "PlanCall" $ \fields ->
-    fields .: "action" >>= \case
+  parseJSON = withObject "PlanCall" $ \fields -> fields .: "action" >>= planCall fields
+   where
+    planCall fields action = case action of
       "set" -> PlanSet <$> fields .: "items"
       "update" -> PlanUpdate <$> fields .: "id" <*> fields .: "status"
       "clear" -> pure PlanClear
@@ -335,11 +338,12 @@ runRead store ledger root (FsRead path offset limit) =
   resolvePath root path >>=? readTarget
  where
   readTarget target =
-    (try (TextIO.readFile target) :: IO (Either IOException Text)) >>= \case
-      Left err -> pure (Left (describe err))
-      Right content ->
-        remember ledger target
-          *> either (pure . Left) (fmap Right . presentRead store (Text.take 200)) (selected content)
+    (try (TextIO.readFile target) :: IO (Either IOException Text)) >>= readResult
+   where
+    readResult (Left err) = pure (Left (describe err))
+    readResult (Right content) =
+      remember ledger target
+        *> either (pure . Left) (fmap Right . presentRead store (Text.take 200)) (selected content)
   selected content
     | isJust offset || isJust limit = paginate path offset limit content
     | otherwise = Right content
@@ -362,8 +366,9 @@ runWrite :: Maybe ArtifactStore -> Ledger -> FilePath -> FsWrite -> IO (Either T
 runWrite store ledger root (FsWrite path content) =
   resolvePath root path >>=? write
  where
-  write target =
-    readMaybe target >>= \old ->
+  write target = readMaybe target >>= commit
+   where
+    commit old =
       createDirectoryIfMissing True (takeDirectory target)
         *> TextIO.writeFile target content
         *> stash store "fs_write" content
@@ -376,14 +381,13 @@ runEdit store ledger root (FsEdit path old new)
   | otherwise = resolvePath root path >>=? edit
  where
   edit target =
-    readIORef ledger >>= \known ->
-      stamp target >>= \current ->
-        case Map.lookup target known of
-          Nothing -> pure (Left "read the file before editing")
-          Just recorded
-            | current /= Just recorded -> pure (Left "file changed since last read; re-read it")
-            | otherwise -> replace
+    (,) <$> readIORef ledger <*> stamp target >>= uncurry verify
    where
+    verify known current = case Map.lookup target known of
+      Nothing -> pure (Left "read the file before editing")
+      Just recorded
+        | current /= Just recorded -> pure (Left "file changed since last read; re-read it")
+        | otherwise -> replace
     replace =
       readMaybe target >>= maybe (pure (Left ("cannot read " <> Text.pack path))) cut
      where
@@ -433,13 +437,11 @@ listing target = Text.intercalate "\n" <$> listTree target 2
 
 listTree :: FilePath -> Int -> IO [Text]
 listTree target depth =
-  listDirectory target
-    >>= ( \entries ->
-            (<> note (length entries)) . concat
-              <$> traverse (entry target depth) (take listingLimit entries)
-        )
-      . sort
+  listDirectory target >>= tree . sort
  where
+  tree entries =
+    (<> note (length entries)) . concat
+      <$> traverse (entry target depth) (take listingLimit entries)
   note total = ["... " <> int (total - listingLimit) <> " more entries" | total > listingLimit]
 
 completePaths :: FilePath -> Text -> IO [Text]
@@ -460,21 +462,15 @@ completePaths root raw
   renderedPrefix
     | directory == "." || null directory = ""
     | otherwise = addTrailingPathSeparator directory
-  suggestions =
-    resolvePath root directory >>= \case
-      Left _ -> pure []
-      Right base ->
-        doesDirectoryExist base >>= bool (pure []) (entries base)
+  suggestions = resolvePath root directory >>= either (const (pure [])) entries
   entries base =
     (try (sort <$> listDirectory base) :: IO (Either IOException [FilePath]))
       >>= either (const (pure [])) (fmap (take 40 . concat) . traverse (candidate base) . filter (prefixName `isPrefixOf`))
   candidate base name =
     pathIsSymbolicLink (base </> name) >>= bool plain (pure [])
    where
-    plain =
-      doesDirectoryExist (base </> name)
-        <&> \isDirectory ->
-          [Text.pack (renderedPrefix <> name <> [pathSeparator | isDirectory])]
+    plain = doesDirectoryExist (base </> name) <&> directoryText
+    directoryText isDirectory = [Text.pack (renderedPrefix <> name <> [pathSeparator | isDirectory])]
     pathSeparator = '/'
 
 listingLimit :: Int
@@ -664,9 +660,12 @@ statusName Done = "done"
 
 startBackground :: BackgroundRegistry -> Text -> FilePath -> ShellBg -> IO (Either Text Value)
 startBackground registry threadId root (ShellBg command) =
-  newId >>= \taskId ->
+  newId >>= start
+ where
+  start taskId =
     spawnBackground registry threadId taskId root (Text.unpack command)
-      <&> maybe (Left "failed to start background task") (\pid -> Right (object ["taskId" .= taskId, "pid" .= pid]))
+      <&> maybe (Left "failed to start background task") (Right . pidValue taskId)
+  pidValue taskId pid = object ["taskId" .= taskId, "pid" .= pid]
 
 pollBackgroundTask :: BackgroundRegistry -> Text -> ShellOutput -> IO (Either Text Value)
 pollBackgroundTask registry threadId (ShellOutput taskId waitSeconds) =
@@ -686,32 +685,37 @@ pollBackgroundTask registry threadId (ShellOutput taskId waitSeconds) =
 feedTask :: BackgroundRegistry -> Text -> ShellStdin -> IO (Either Text Value)
 feedTask registry threadId (ShellStdin taskId text eof) =
   feedBackground registry threadId taskId text eof
-    <&> fmap (\open -> object ["taskId" .= taskId, "stdinOpen" .= open])
+    <&> fmap stdinValue
+ where
+  stdinValue open = object ["taskId" .= taskId, "stdinOpen" .= open]
 
 killTask :: BackgroundRegistry -> Text -> ShellKill -> IO (Either Text Value)
 killTask registry threadId (ShellKill taskId) =
   killBackground registry threadId taskId
-    <&> fmap (\confirmed -> object ["taskId" .= taskId, "killed" .= confirmed])
+    <&> fmap killValue
+ where
+  killValue confirmed = object ["taskId" .= taskId, "killed" .= confirmed]
 
 clamp :: Maybe Int -> Int
 clamp = maybe 30 (max 1 . min 120)
 
 runShellCommand :: (Text -> Text -> IO ()) -> FilePath -> Int -> String -> IO Text
 runShellCommand announce root seconds command =
-  createProcess sh >>= \case
-    setup@(Nothing, Just out, Just err, process) ->
-      newIORef "" >>= \outAcc ->
-        newIORef "" >>= \errAcc ->
-          withAsync (pump (announce "stdout") out outAcc) $ \outAsync ->
-            withAsync (pump (announce "stderr") err errAcc) $ \errAsync ->
-              raceTimeout (seconds * 1000000) (waitForProcess process)
-                >>= \code ->
-                  interruptProcessGroupOf process
-                    *> (waitCatch outAsync *> waitCatch errAsync)
-                    *> cleanupProcess setup
-                    *> (renderShell <$> ((<>) <$> readIORef outAcc <*> readIORef errAcc) <*> pure code)
-    setup -> cleanupProcess setup $> renderShell "" (Just 127)
+  createProcess sh >>= runProc
  where
+  runProc setup@(Nothing, Just out, Just err, process) =
+    (,) <$> newIORef "" <*> newIORef "" >>= runPipes setup out err process
+  runProc setup = cleanupProcess setup $> renderShell "" (Just 127)
+  runPipes setup out err process (outAcc, errAcc) =
+    withAsync (pump (announce "stdout") out outAcc) $ \outAsync ->
+      withAsync (pump (announce "stderr") err errAcc) $ \errAsync ->
+        raceTimeout (seconds * 1000000) (waitForProcess process)
+          >>= finish setup process outAcc errAcc outAsync errAsync
+  finish setup process outAcc errAcc outAsync errAsync code =
+    interruptProcessGroupOf process
+      *> (waitCatch outAsync *> waitCatch errAsync)
+      *> cleanupProcess setup
+      *> (renderShell <$> ((<>) <$> readIORef outAcc <*> readIORef errAcc) <*> pure code)
   sh =
     (shell command)
       { cwd = Just root,
@@ -723,16 +727,17 @@ runShellCommand announce root seconds command =
 pump :: (Text -> IO ()) -> Handle -> IORef Text -> IO ()
 pump announce handle sink = loop
  where
-  loop =
-    TextIO.hGetChunk handle >>= \chunk ->
-      bool (announce chunk *> modifyIORef' sink (<> chunk) *> loop) (pure ()) (Text.null chunk)
+  loop = TextIO.hGetChunk handle >>= pumpChunk
+  pumpChunk chunk =
+    bool (announce chunk *> modifyIORef' sink (<> chunk) *> loop) (pure ()) (Text.null chunk)
 
 raceTimeout :: Int -> IO ExitCode -> IO (Maybe Int)
 raceTimeout micros action =
-  timeout micros action <&> \case
-    Nothing -> Nothing
-    Just (ExitFailure code) -> Just code
-    Just ExitSuccess -> Just 0
+  timeout micros action <&> statusCode
+ where
+  statusCode Nothing = Nothing
+  statusCode (Just (ExitFailure code)) = Just code
+  statusCode (Just ExitSuccess) = Just 0
 
 renderShell :: Text -> Maybe Int -> Text
 renderShell output Nothing =
@@ -745,9 +750,10 @@ renderShell output (Just code) = "exit " <> int code <> "\n" <> output
 
 resolvePath :: FilePath -> FilePath -> IO (Either Text FilePath)
 resolvePath root path =
-  canonicalizeLenient root >>= \canonicalRoot ->
-    inside canonicalRoot . squeezeDotDot <$> canonicalizeLenient (canonicalRoot </> path)
+  canonicalizeLenient root >>= resolve
  where
+  resolve canonicalRoot =
+    inside canonicalRoot . squeezeDotDot <$> canonicalizeLenient (canonicalRoot </> path)
   inside canonicalRoot canonical
     | canonical == canonicalRoot || prefix canonicalRoot `isPrefixOf` canonical = Right canonical
     | otherwise = Left "path escapes the work directory"
@@ -768,12 +774,12 @@ squeezeDotDot = joinPath . foldl step [] . splitDirectories
 
 canonicalizeLenient :: FilePath -> IO FilePath
 canonicalizeLenient path =
-  (try (canonicalizePath path) :: IO (Either IOException FilePath)) >>= \case
-    Right canonical -> pure canonical
-    Left _
-      | parent == path -> pure path
-      | otherwise -> (</> takeFileName path) <$> canonicalizeLenient parent
+  (try (canonicalizePath path) :: IO (Either IOException FilePath)) >>= fallback
  where
+  fallback (Right canonical) = pure canonical
+  fallback (Left _)
+    | parent == path = pure path
+    | otherwise = (</> takeFileName path) <$> canonicalizeLenient parent
   parent = takeDirectory path
 
 readMaybe :: FilePath -> IO (Maybe Text)

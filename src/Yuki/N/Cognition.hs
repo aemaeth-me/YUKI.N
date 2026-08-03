@@ -22,7 +22,7 @@ module Yuki.N.Cognition
   )
 where
 
-import Control.Applicative (liftA3, (<|>))
+import Control.Applicative ((<|>))
 import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar
 import Control.Exception (IOException, SomeException, displayException, try)
@@ -192,77 +192,63 @@ rootConstitution =
 
 newCognition :: FilePath -> [Model] -> Maybe Journal -> IO (Either Text Cognition)
 newCognition dir models journal =
-  newBlobStore dir
-    >>= bindEither
-      ( \blobs ->
-          newExperienceStore dir
-            >>= bindEither
-              ( \experiences ->
-                  newIncarnationStore dir
-                    >>= bindEither
-                      ( \incarnations ->
-                          newContextEpochStore dir blobs
-                            >>= bindEither
-                              ( \contexts ->
-                                  newTaskArchiveStore dir blobs
-                                    >>= bindEither
-                                      ( \archive ->
-                                          newWorkingStore dir
-                                            >>= bindEither
-                                              ( \working ->
-                                                  newLongTermStore dir
-                                                    >>= bindEither
-                                                      ( \longTerm ->
-                                                          newImpressionStore dir
-                                                            >>= bindEither
-                                                              ( \impressions ->
-                                                                  liftA3
-                                                                    (,,)
-                                                                    (newMVar Set.empty)
-                                                                    (newMVar Map.empty)
-                                                                    (newMVar Map.empty)
-                                                                    >>= \(sleepRequests, activationCache, contextCache) ->
-                                                                      newMVar Map.empty >>= \runLocks ->
-                                                                        let cognition =
-                                                                              Cognition
-                                                                                blobs
-                                                                                experiences
-                                                                                incarnations
-                                                                                contexts
-                                                                                archive
-                                                                                working
-                                                                                longTerm
-                                                                                impressions
-                                                                                models
-                                                                                journal
-                                                                                sleepRequests
-                                                                                activationCache
-                                                                                contextCache
-                                                                                runLocks
-                                                                         in seedPrompts cognition
-                                                                              *> cognitionRecover cognition
-                                                                              >>= either
-                                                                                (pure . Left)
-                                                                                (const (resumeConsolidations cognition $> Right cognition))
-                                                              )
-                                                      )
-                                              )
-                                      )
-                              )
-                      )
-              )
-      )
+  newBlobStore dir >>= bindEither openExperience
  where
   bindEither = either (pure . Left)
+  openExperience blobs =
+    newExperienceStore dir >>= bindEither (openIncarnation blobs)
+  openIncarnation blobs experiences =
+    newIncarnationStore dir >>= bindEither (openContexts blobs experiences)
+  openContexts blobs experiences incarnations =
+    newContextEpochStore dir blobs >>= bindEither (openArchive blobs experiences incarnations)
+  openArchive blobs experiences incarnations contexts =
+    newTaskArchiveStore dir blobs >>= bindEither (openWorking blobs experiences incarnations contexts)
+  openWorking blobs experiences incarnations contexts archive =
+    newWorkingStore dir >>= bindEither (openLongTerm blobs experiences incarnations contexts archive)
+  openLongTerm blobs experiences incarnations contexts archive working =
+    newLongTermStore dir >>= bindEither (openImpressions blobs experiences incarnations contexts archive working)
+  openImpressions blobs experiences incarnations contexts archive working longTerm =
+    newImpressionStore dir >>= bindEither (assemble blobs experiences incarnations contexts archive working longTerm)
+  assemble blobs experiences incarnations contexts archive working longTerm impressions =
+    (,,,)
+      <$> newMVar Set.empty
+      <*> newMVar Map.empty
+      <*> newMVar Map.empty
+      <*> newMVar Map.empty
+      >>= buildCognition blobs experiences incarnations contexts archive working longTerm impressions
+   where
+    buildCognition blobs' experiences' incarnations' contexts' archive' working' longTerm' impressions' (sleepRequests, activationCache, contextCache, runLocks) =
+      let cognition =
+            Cognition
+              blobs'
+              experiences'
+              incarnations'
+              contexts'
+              archive'
+              working'
+              longTerm'
+              impressions'
+              models
+              journal
+              sleepRequests
+              activationCache
+              contextCache
+              runLocks
+       in seedPrompts cognition
+            *> cognitionRecover cognition
+            >>= either
+              (pure . Left)
+              (const (resumeConsolidations cognition $> Right cognition))
 
 seedPrompts :: Cognition -> IO ()
 seedPrompts cognition =
-  promptList incarnations Nothing >>= \roots ->
+  promptList incarnations Nothing >>= seedRoots
+ where
+  incarnations = cognitionIncarnations cognition
+  seedRoots roots =
     seedRoot roots
       *> incarnationList incarnations
       >>= traverse_ seedCharter
- where
-  incarnations = cognitionIncarnations cognition
   seedRoot roots =
     case (latestActive RootConstitution roots, latestVersioned roots) of
       (Just active, Just current)
@@ -276,8 +262,7 @@ seedPrompts cognition =
           "kernel capability migration: immutable Task Archive memory"
           (Just (promptRevisionId active))
           PromptDraft
-          >>= \current ->
-            bool (pure ()) (activateRoot active current) (automaticRoot active)
+          >>= activateIfAutomatic active
   latestVersioned =
     listToMaybe
       . sortOn (Down . promptOrdinal)
@@ -286,6 +271,8 @@ seedPrompts cognition =
   automaticRoot prompt =
     promptSourceIntent prompt == "kernel bootstrap"
       && "root-constitution/" `Text.isPrefixOf` promptGeneratorRevision prompt
+  activateIfAutomatic active current =
+    bool (pure ()) (activateRoot active current) (automaticRoot active)
   appendRoot source =
     promptAppend
       incarnations
@@ -315,8 +302,7 @@ seedPrompts cognition =
           Nothing
           Nothing
           PromptActive
-          >>= \prompt ->
-            void (promptActivate incarnations (incarnationId incarnation) (incarnationRevision incarnation) (promptRevisionId prompt))
+          >>= void . promptActivate incarnations (incarnationId incarnation) (incarnationRevision incarnation) . promptRevisionId
 
 cognitionRecover :: Cognition -> IO (Either Text ())
 cognitionRecover cognition =
@@ -325,23 +311,25 @@ cognitionRecover cognition =
   working = cognitionWorking cognition
   experiences = cognitionExperiences cognition
   recover head' =
-    incarnationRead (cognitionIncarnations cognition) identity >>= \case
-      Nothing -> pure (Left ("working memory has no incarnation: " <> identity))
-      Just incarnation ->
-        case workingMemoryStatus head' of
-          WorkingAwake -> pure (Right ())
-          WorkingQuiescing -> withCycle head' (recoverQuiescing incarnation head')
-          WorkingAsleep -> withCycle head' (recoverAsleep incarnation head')
-          WorkingWaking -> withCycle head' (recoverWaking incarnation head')
-          WorkingDegraded -> fallback identity $> Right ()
+    incarnationRead (cognitionIncarnations cognition) identity
+      >>= maybe
+        (pure (Left ("working memory has no incarnation: " <> identity)))
+        (recoverWith head')
    where
     identity = workingMemoryIncarnationId head'
+    recoverWith head'' incarnation =
+      case workingMemoryStatus head'' of
+        WorkingAwake -> pure (Right ())
+        WorkingQuiescing -> withCycle head'' (recoverQuiescing incarnation head'')
+        WorkingAsleep -> withCycle head'' (recoverAsleep incarnation head'')
+        WorkingWaking -> withCycle head'' (recoverWaking incarnation head'')
+        WorkingDegraded -> fallback identity $> Right ()
   withCycle head' use =
-    workingSleepCycles working (workingMemoryIncarnationId head') >>= \cycles ->
-      maybe
-        (fallback (workingMemoryIncarnationId head') $> Right ())
-        use
-        (listToMaybe (reverse (sortOn sleepCycleUpdated (filter (cycleMatches head') cycles))))
+    workingSleepCycles working (workingMemoryIncarnationId head')
+      >>= maybe (fallback (workingMemoryIncarnationId head') $> Right ()) use . latestCycle (cycleMatches head')
+   where
+    latestCycle matches cycles =
+      listToMaybe (reverse (sortOn sleepCycleUpdated (filter matches cycles)))
   recoverQuiescing incarnation head' cycle' =
     case sleepCycleStatus cycle' of
       CycleQuiescing ->
@@ -361,63 +349,84 @@ cognitionRecover cognition =
           >>= either (const (fallback (incarnationId incarnation) $> Right ())) (uncurry (recoverAsleep incarnation))
       _ -> fallback (incarnationId incarnation) $> Right ()
   recoverAsleep incarnation head' cycle' =
-    ensureRecoveryWake incarnation cycle' >>= \case
-      Left _ -> fallback (incarnationId incarnation) $> Right ()
-      Right _ ->
-        workingBeginWake
-          working
-          (incarnationId incarnation)
-          (workingMemoryRevision head')
-          (sleepCycleId cycle')
-          >>= either (const (fallback (incarnationId incarnation) $> Right ())) (uncurry (recoverWaking incarnation))
+    ensureRecoveryWake incarnation cycle'
+      >>= either
+        (const (fallback (incarnationId incarnation) $> Right ()))
+        (const (beginWake incarnation head' cycle'))
+   where
+    beginWake incarnation' head'' cycle'' =
+      workingBeginWake
+        working
+        (incarnationId incarnation')
+        (workingMemoryRevision head'')
+        (sleepCycleId cycle'')
+        >>= either (const (fallback (incarnationId incarnation') $> Right ())) (uncurry (recoverWaking incarnation'))
   recoverWaking incarnation head' cycle' =
-    ensureRecoveryWake incarnation cycle' >>= \case
-      Left _ -> fallback (incarnationId incarnation) $> Right ()
-      Right (packet, wakeEpoch) ->
-        experienceHead experiences (incarnationId incarnation) >>= \cursor ->
-          getPOSIXTime >>= \now ->
-            workingReadFocus working (incarnationId incarnation) (sleepCycleTaskId cycle') >>= \focus ->
-              maybe
-                ( workingCommitWake
-                    working
-                    (incarnationId incarnation)
-                    (workingMemoryRevision head')
-                    (sleepCycleId cycle')
-                    cursor
-                )
-                ( \frame ->
-                    workingCommitWakeFocus
-                      working
-                      (incarnationId incarnation)
-                      (workingMemoryRevision head')
-                      (sleepCycleId cycle')
-                      cursor
-                      (wakeFocusFrame packet wakeEpoch cursor (round now) frame)
-                )
-                focus
-                <&> void
+    ensureRecoveryWake incarnation cycle'
+      >>= either
+        (const (fallback (incarnationId incarnation) $> Right ()))
+        (uncurry (resumeWake incarnation head' cycle'))
+   where
+    resumeWake incarnation' head'' cycle'' packet wakeEpoch =
+      liftA2
+        (,)
+        (experienceHead experiences (incarnationId incarnation'))
+        getPOSIXTime
+        >>= commitFrame incarnation' head'' cycle''
+     where
+      commitFrame incarnation'' head''' cycle''' (cursor, now) =
+        workingReadFocus working (incarnationId incarnation'') (sleepCycleTaskId cycle''')
+          >>= commitFocus incarnation'' head''' cycle''' cursor now
+       where
+        commitFocus incarnation''' head'''' cycle'''' cursor'' now'' focus =
+          maybe
+            ( workingCommitWake
+                working
+                (incarnationId incarnation''')
+                (workingMemoryRevision head'''')
+                (sleepCycleId cycle'''')
+                cursor''
+            )
+            ( \frame ->
+                workingCommitWakeFocus
+                  working
+                  (incarnationId incarnation''')
+                  (workingMemoryRevision head'''')
+                  (sleepCycleId cycle'''')
+                  cursor''
+                  (wakeFocusFrame packet wakeEpoch cursor'' (round now'') frame)
+            )
+            focus
+            <&> void
   ensureRecoveryWake incarnation cycle' =
-    workingPacket cycle' >>= \case
-      Nothing -> pure (Left "sleep recovery is missing its Wake Packet")
-      Just packet ->
-        contextEpochList (cognitionContexts cognition) (incarnationId incarnation) (sleepCycleTaskId cycle')
-          >>= \epochs ->
-            case find ((== Just (wakePacketId packet)) . contextEpochWakePacketId) epochs of
-              Just epoch -> pure (Right (packet, epoch))
-              Nothing ->
-                contextEpochRead (cognitionContexts cognition) (sleepCycleBaseEpochId cycle') >>= \case
-                  Nothing -> pure (Left "sleep recovery is missing its base context epoch")
-                  Just base ->
-                    commitWakeEpoch cognition incarnation (sleepCycleTaskId cycle') base packet
-                      <&> fmap (packet,)
+    workingPacket cycle'
+      >>= maybe
+        (pure (Left "sleep recovery is missing its Wake Packet"))
+        (recoverWithPacket incarnation cycle')
+   where
+    recoverWithPacket incarnation' cycle'' packet =
+      contextEpochList (cognitionContexts cognition) (incarnationId incarnation') (sleepCycleTaskId cycle'')
+        >>= foundEpoch packet
+     where
+      foundEpoch packet' epochs =
+        case find ((== Just (wakePacketId packet')) . contextEpochWakePacketId) epochs of
+          Just epoch -> pure (Right (packet', epoch))
+          Nothing ->
+            contextEpochRead (cognitionContexts cognition) (sleepCycleBaseEpochId cycle')
+              >>= maybe
+                (pure (Left "sleep recovery is missing its base context epoch"))
+                (commitBase packet')
+      commitBase packet'' base =
+        commitWakeEpoch cognition incarnation (sleepCycleTaskId cycle') base packet''
+          <&> fmap (packet'',)
   workingPacket cycle' =
     maybe (pure Nothing) (workingReadWakePacket working) (sleepCycleWakePacketId cycle')
   fallback identity =
-    workingRead working identity >>= \case
-      Nothing -> pure ()
-      Just _ ->
-        experienceHead experiences identity >>= \cursor ->
-          void (workingRecover working identity cursor)
+    workingRead working identity
+      >>= maybe (pure ()) (const (recoverCursor identity))
+   where
+    recoverCursor identity' =
+      experienceHead experiences identity' >>= void . workingRecover working identity'
 
 cycleMatches :: WorkingMemoryHead -> SleepCycle -> Bool
 cycleMatches head' cycle' =
@@ -460,12 +469,11 @@ cognitionBootstrapIncarnation cognition incarnation =
         Nothing
         Nothing
         PromptActive
-        >>= \prompt ->
-          promptActivate
-            store
-            (incarnationId incarnation)
-            (incarnationRevision incarnation)
-            (promptRevisionId prompt)
+        >>= promptActivate
+          store
+          (incarnationId incarnation)
+          (incarnationRevision incarnation)
+          . promptRevisionId
  where
   store = cognitionIncarnations cognition
 
@@ -491,12 +499,14 @@ latestActive layer =
 ensureIncarnation :: Cognition -> Text -> IO Incarnation
 ensureIncarnation cognition identifier =
   incarnationRead (cognitionIncarnations cognition) identifier
-    >>= \case
-      Nothing -> ioError (userError ("unknown incarnation: " <> Text.unpack identifier))
-      Just incarnation
-        | incarnationStatus incarnation == IncarnationArchived ->
-            ioError (userError ("incarnation is archived: " <> Text.unpack identifier))
-        | otherwise -> pure incarnation
+    >>= maybe
+      (ioError (userError ("unknown incarnation: " <> Text.unpack identifier)))
+      checkArchived
+ where
+  checkArchived incarnation
+    | incarnationStatus incarnation == IncarnationArchived =
+        ioError (userError ("incarnation is archived: " <> Text.unpack identifier))
+    | otherwise = pure incarnation
 
 compileIncarnationPrompt :: Cognition -> Incarnation -> IO Text
 compileIncarnationPrompt cognition incarnation =
@@ -533,39 +543,37 @@ cognitionGeneratePrompt cognition incarnation source
   | null (cognitionModels cognition) = pure (Left "no model is available for prompt generation")
   | Text.null (Text.strip source) = pure (Left "prompt generation source intent must not be empty")
   | otherwise =
-      promptList (cognitionIncarnations cognition) Nothing >>= \roots ->
-        maybe
-          (pure (Left "no active Root Constitution is available"))
-          generate
-          (latestActive RootConstitution roots)
+      promptList (cognitionIncarnations cognition) Nothing
+        >>= maybe (pure (Left "no active Root Constitution is available")) generate . latestActive RootConstitution
  where
   generate root =
-    newId >>= \invocationId' ->
-      let generator = "incarnation-charter-generator/v2@" <> promptRevisionId root
-          specification =
-            InvocationSpec
-              invocationId'
-              "prompt.generate"
-              generator
-              (cognitionModels cognition)
-              [ ChatSystem (promptGenerator root),
-                ChatUser
-                  ( Text.intercalate
-                      "\n"
-                      [ "Incarnation id: " <> incarnationId incarnation,
-                        "Name: " <> incarnationName incarnation,
-                        "Direction: " <> incarnationDirection incarnation,
-                        "Revision intent: " <> Text.strip source,
-                        "Root revision: " <> promptRevisionId root,
-                        "Root effective hash: " <> promptEffectiveHash root
-                      ]
-                  )
-              ]
-              2
-              20000
-              60000
-              (cognitionJournal cognition)
-       in invokeModel specification >>= either (pure . Left) (store generator invocationId')
+    newId >>= invokeGenerator root
+  invokeGenerator root invocationId' =
+    let generator = "incarnation-charter-generator/v2@" <> promptRevisionId root
+        specification =
+          InvocationSpec
+            invocationId'
+            "prompt.generate"
+            generator
+            (cognitionModels cognition)
+            [ ChatSystem (promptGenerator root),
+              ChatUser
+                ( Text.intercalate
+                    "\n"
+                    [ "Incarnation id: " <> incarnationId incarnation,
+                      "Name: " <> incarnationName incarnation,
+                      "Direction: " <> incarnationDirection incarnation,
+                      "Revision intent: " <> Text.strip source,
+                      "Root revision: " <> promptRevisionId root,
+                      "Root effective hash: " <> promptEffectiveHash root
+                    ]
+                )
+            ]
+            2
+            20000
+            60000
+            (cognitionJournal cognition)
+     in invokeModel specification >>= either (pure . Left) (store generator invocationId')
   promptGenerator root =
     Text.intercalate
       "\n\n"
@@ -612,44 +620,44 @@ cognitionMigrateLegacyTask cognition incarnation task messages briefCandidate =
       task
       (archiveEntries operation messages)
       >>= require
-      >>= const
-        ( ensureEvent
-            "LegacyTranscriptImported"
-            ( object
-                [ "schema" .= ("legacy-transcript/v1" :: Text),
-                  "taskId" .= task,
-                  "messages" .= messages
-                ]
-            )
-            >>= \transcriptEvent ->
-              traverse
-                ( ensureEvent
-                    "LegacyWorkingMemoryCandidate"
-                    . \candidate ->
-                      object
-                        [ "schema" .= ("legacy-working-memory-candidate/v1" :: Text),
-                          "taskId" .= task,
-                          "missingFinalOutcome" .= True,
-                          "candidate" .= candidate
-                        ]
-                )
-                briefCandidate
-                >>= \briefEvent ->
-                  ensureEpoch
-                    >>= \epoch ->
-                      ensureEvent
-                        "LegacyTaskMigrationCompleted"
-                        ( object
-                            [ "schema" .= ("legacy-task-migration/v1" :: Text),
-                              "taskId" .= task,
-                              "epochId" .= contextEpochId epoch,
-                              "transcriptEventId" .= experienceEventId transcriptEvent,
-                              "briefEventId" .= (experienceEventId <$> briefEvent)
-                            ]
-                        )
-                        >>= \completed ->
-                          syncWorking epoch (catMaybes [Just transcriptEvent, briefEvent, Just completed])
-        )
+      >>= const importEvents
+  importEvents =
+    ensureEvent
+      "LegacyTranscriptImported"
+      ( object
+          [ "schema" .= ("legacy-transcript/v1" :: Text),
+            "taskId" .= task,
+            "messages" .= messages
+          ]
+      )
+      >>= withBrief
+  withBrief transcriptEvent =
+    traverse (ensureEvent "LegacyWorkingMemoryCandidate" . candidatePayload) briefCandidate
+      >>= withEpoch transcriptEvent
+  candidatePayload candidate =
+    object
+      [ "schema" .= ("legacy-working-memory-candidate/v1" :: Text),
+        "taskId" .= task,
+        "missingFinalOutcome" .= True,
+        "candidate" .= candidate
+      ]
+  withEpoch transcriptEvent briefEvent =
+    ensureEpoch
+      >>= withCompleted transcriptEvent briefEvent
+  withCompleted transcriptEvent briefEvent epoch =
+    ensureEvent
+      "LegacyTaskMigrationCompleted"
+      ( object
+          [ "schema" .= ("legacy-task-migration/v1" :: Text),
+            "taskId" .= task,
+            "epochId" .= contextEpochId epoch,
+            "transcriptEventId" .= experienceEventId transcriptEvent,
+            "briefEventId" .= (experienceEventId <$> briefEvent)
+          ]
+      )
+      >>= syncWorking epoch . syncEvents transcriptEvent briefEvent
+  syncEvents transcriptEvent briefEvent completed =
+    catMaybes [Just transcriptEvent, briefEvent, Just completed]
   ensureEvent kind payload =
     appendExperienceIdempotent
       cognition
@@ -674,22 +682,19 @@ cognitionMigrateLegacyTask cognition incarnation task messages briefCandidate =
             payloadRef
       )
   ensureEpoch =
-    contextEpochHead contexts identity task >>= \case
-      Just epoch -> pure epoch
-      Nothing ->
-        contextEpochCommit
-          contexts
-          identity
-          task
-          Nothing
-          (chatSegments operation messages)
-          Nothing
-          >>= require
+    contextEpochHead contexts identity task
+      >>= maybe
+        (contextEpochCommit contexts identity task Nothing (chatSegments operation messages) Nothing >>= require)
+        pure
   syncWorking epoch migrationEvents =
-    workingReady cognition incarnation task epoch >>= require >>= \(head', frame) ->
-      experienceHead experiences identity >>= \cursor ->
-        advance head' cursor >>= updateFrame frame cursor
+    workingReady cognition incarnation task epoch
+      >>= require
+      >>= uncurry (syncHead migrationEvents)
    where
+    syncHead migrationEvents' head' frame =
+      experienceHead experiences identity >>= syncCursor migrationEvents' head' frame
+    syncCursor _ head'' frame' cursor =
+      advance head'' cursor >>= updateFrame frame' cursor
     advance head' cursor
       | cursorSeq cursor <= cursorSeq (workingMemoryCursor head') = pure head'
       | otherwise =
@@ -751,7 +756,9 @@ legacyObjective =
 
 attachCognition :: Cognition -> Incarnation -> Runtime -> IO Runtime
 attachCognition cognition incarnation runtime =
-  compileIncarnationPrompt cognition incarnation <&> \compiled ->
+  compileIncarnationPrompt cognition incarnation <&> attach
+ where
+  attach compiled =
     runtime
       { runtimeSystemPrompt =
           Text.intercalate
@@ -863,15 +870,8 @@ cognitionHooks cognition incarnation =
 
 activationText :: Cognition -> Incarnation -> AGUI.RunAgentInput -> [ChatMessage] -> IO (Maybe Text)
 activationText cognition incarnation input messages =
-  currentIntent input messages >>= \case
-    Nothing -> pure Nothing
-    Just (intentId, text) ->
-      cachedActivation intentId >>= \case
-        Just cached -> pure (nonEmpty cached)
-        Nothing -> do
-          injected <- activate intentId text
-          rememberActivation intentId injected
-          pure injected
+  currentIntent input messages
+    >>= maybe (pure Nothing) (uncurry activateIntent)
  where
   identity = incarnationId incarnation
   task = AGUI.runThreadId input
@@ -889,21 +889,32 @@ activationText cognition incarnation input messages =
       . sortOn (Down . fst)
       . Map.toList
       $ cache
+  activateIntent intentId intent =
+    cachedActivation intentId
+      >>= maybe
+        (injectAndRemember intentId intent)
+        (pure . nonEmpty)
+  injectAndRemember intentId intent =
+    activate intentId intent >>= rememberAndReturn intentId
+  rememberAndReturn intentId injected =
+    rememberActivation intentId injected $> injected
   activate intentId intent =
     taskArchiveTasks (cognitionArchive cognition) identity 64
-      >>= \catalog ->
-        let identifiers = fmap archiveTaskId catalog
-            rendered = encodeText catalog
-         in activateImpression
-              (impressionModels cognition incarnation)
-              (cognitionJournal cognition)
-              (cognitionImpressions cognition)
-              identity
-              (ImpressionScope task run intentId)
-              intent
-              identifiers
-              rendered
-              <&> either (const Nothing) (nonEmpty . impressionActivationInjectedText)
+      >>= invokeImpression intentId intent
+   where
+    invokeImpression intentId' intent' catalog =
+      let identifiers = fmap archiveTaskId catalog
+          rendered = encodeText catalog
+       in activateImpression
+            (impressionModels cognition incarnation)
+            (cognitionJournal cognition)
+            (cognitionImpressions cognition)
+            identity
+            (ImpressionScope task run intentId')
+            intent'
+            identifiers
+            rendered
+            <&> either (const Nothing) (nonEmpty . impressionActivationInjectedText)
 
 impressionModels :: Cognition -> Incarnation -> [Model]
 impressionModels cognition incarnation =
@@ -920,16 +931,15 @@ impressionModels cognition incarnation =
 
 currentIntent :: AGUI.RunAgentInput -> [ChatMessage] -> IO (Maybe (Text, Text))
 currentIntent input messages =
-  pure
-    ( latestChat >>= \intent ->
-        let identifier =
-              maybe
-                ("intent-" <> Text.take 24 (sha256 (TextEncoding.encodeUtf8 (Text.intercalate "\NUL" [AGUI.runThreadId input, AGUI.runId input, intent]))))
-                fst
-                (listToMaybe (reverse (filter ((== intent) . snd) aguiIntents)))
-         in Just (identifier, intent)
-    )
+  pure (computeIntent <$> latestChat)
  where
+  computeIntent intent =
+    let identifier =
+          maybe
+            ("intent-" <> Text.take 24 (sha256 (TextEncoding.encodeUtf8 (Text.intercalate "\NUL" [AGUI.runThreadId input, AGUI.runId input, intent]))))
+            fst
+            (listToMaybe (reverse (filter ((== intent) . snd) aguiIntents)))
+     in (identifier, intent)
   latestChat =
     listToMaybe
       ( reverse
@@ -991,30 +1001,33 @@ cognitionTools cognition incarnation =
       )
   inspectSelf _ NoArguments =
     liftA2
-      ( \prompt (working, impression) ->
-          object
-            [ "incarnation" .= incarnation,
-              "activePrompt" .= prompt,
-              "workingMemory" .= working,
-              "impression" .= impression
-            ]
-      )
+      inspectObject
       (maybe (pure Nothing) (promptRead (cognitionIncarnations cognition)) (incarnationPromptRevision incarnation))
       (liftA2 (,) (workingRead (cognitionWorking cognition) identity) (impressionRead (cognitionImpressions cognition) identity))
       <&> Right
-  updateSelf _ call =
-    incarnationRead (cognitionIncarnations cognition) identity >>= \case
-      Nothing -> pure (Left ("unknown incarnation: " <> identity))
-      Just current ->
-        incarnationUpdate
-          (cognitionIncarnations cognition)
-          identity
-          (selfCallExpectedRevision call)
-          (fromMaybe (incarnationName current) (selfCallName call))
-          (fromMaybe (incarnationDirection current) (selfCallDirection call))
-          (selfCallImpressionModel call <|> incarnationImpressionModel current)
-          >>= either (pure . Left) generate
    where
+    inspectObject prompt (working, impression) =
+      object
+        [ "incarnation" .= incarnation,
+          "activePrompt" .= prompt,
+          "workingMemory" .= working,
+          "impression" .= impression
+        ]
+  updateSelf _ call =
+    incarnationRead (cognitionIncarnations cognition) identity
+      >>= maybe
+        (pure (Left ("unknown incarnation: " <> identity)))
+        updateCurrent
+   where
+    updateCurrent current =
+      incarnationUpdate
+        (cognitionIncarnations cognition)
+        identity
+        (selfCallExpectedRevision call)
+        (fromMaybe (incarnationName current) (selfCallName call))
+        (fromMaybe (incarnationDirection current) (selfCallDirection call))
+        (selfCallImpressionModel call <|> incarnationImpressionModel current)
+        >>= either (pure . Left) generate
     generate changed =
       cognitionGeneratePrompt cognition changed (selfCallReason call)
         >>= either (pure . Left) (finish changed)
@@ -1025,8 +1038,10 @@ cognitionTools cognition incarnation =
             identity
             (incarnationRevision changed)
             (promptRevisionId prompt)
-            <&> fmap (\activated -> object ["incarnation" .= activated, "prompt" .= prompt])
+            <&> fmap (activateResult prompt)
       | otherwise = pure (Right (object ["incarnation" .= changed, "prompt" .= prompt]))
+    activateResult prompt activated =
+      object ["incarnation" .= activated, "prompt" .= prompt]
   sleepTool =
     BackendTool sleepSpec $ \context arguments ->
       case fromJSON arguments of
@@ -1236,21 +1251,23 @@ sleepCompaction cognition incarnation task run trigger epoch compaction =
   invokeDream head' frame segments
     | null (cognitionModels cognition) = pure (Left "no model is available for sleep")
     | otherwise =
-        newId >>= \invocationId' ->
-          let allowed = Set.fromList (contextSegmentId . fst <$> segments)
-              specification =
-                InvocationSpec
-                  invocationId'
-                  "working.sleep"
-                  sleepDreamRevision
-                  (cognitionModels cognition)
-                  (dreamPrompt (sleepInputChars (cognitionModels cognition)) incarnation task trigger frame segments (compactionPayload compaction))
-                  2
-                  16000
-                  60000
-                  (cognitionJournal cognition)
-           in invokeModel specification
-                >>= either (pure . Left) (parseAndCommit head' frame segments allowed invocationId')
+        newId >>= invokeWith head' frame segments
+   where
+    invokeWith head'' frame' segments' invocationId' =
+      let allowed = Set.fromList (contextSegmentId . fst <$> segments')
+          specification =
+            InvocationSpec
+              invocationId'
+              "working.sleep"
+              sleepDreamRevision
+              (cognitionModels cognition)
+              (dreamPrompt (sleepInputChars (cognitionModels cognition)) incarnation task trigger frame' segments' (compactionPayload compaction))
+              2
+              16000
+              60000
+              (cognitionJournal cognition)
+       in invokeModel specification
+            >>= either (pure . Left) (parseAndCommit head'' frame' segments' allowed invocationId')
   parseAndCommit head' frame projected allowed invocationId' result =
     either
       (pure . Left)
@@ -1414,26 +1431,35 @@ commitSleep cognition incarnation task run trigger baseEpoch initialHead initial
   working = cognitionWorking cognition
   retained = Set.fromList (dreamRetainedSegmentIds decision)
   persist retainedMessages =
-    getPOSIXTime >>= \now ->
-      newId >>= \cycleId ->
-        newId >>= \packetId ->
-          newId >>= \checkpointId ->
-            persistPayload cognition identity "wake-packet" packetId (toJSON decision) >>= \packetPayload ->
-              workingRequestSleep
-                working
-                identity
-                (workingMemoryRevision initialHead)
-                cycleId
-                task
-                run
-                (contextEpochId baseEpoch)
-                trigger
-                >>= either (pure . Left) (prepare retainedMessages now cycleId packetId checkpointId packetPayload)
+    (,,,)
+      <$> getPOSIXTime
+      <*> newId
+      <*> newId
+      <*> newId
+      >>= persistWith retainedMessages
+   where
+    persistWith retainedMessages' (now, cycleId, packetId, checkpointId) =
+      persistPayload cognition identity "wake-packet" packetId (toJSON decision)
+        >>= requestSleep retainedMessages' now cycleId packetId checkpointId
+    requestSleep retainedMessages' now cycleId packetId checkpointId packetPayload =
+      workingRequestSleep
+        working
+        identity
+        (workingMemoryRevision initialHead)
+        cycleId
+        task
+        run
+        (contextEpochId baseEpoch)
+        trigger
+        >>= either (pure . Left) (prepare retainedMessages' now cycleId packetId checkpointId packetPayload)
   prepare retainedMessages now cycleId packetId checkpointId packetPayload (quiescing, _) =
-    persistPayload cognition identity "working-checkpoint" checkpointId (toJSON quiescing) >>= \statePayload ->
+    persistPayload cognition identity "working-checkpoint" checkpointId (toJSON quiescing)
+      >>= prepareCheckpoint retainedMessages now cycleId packetId packetPayload quiescing
+   where
+    prepareCheckpoint retainedMessages'' now' cycleId' packetId' packetPayload' quiescing' statePayload =
       let packet =
             WakePacket
-              packetId
+              packetId'
               identity
               task
               run
@@ -1444,35 +1470,35 @@ commitSleep cognition incarnation task run trigger baseEpoch initialHead initial
               (dreamOpenLoops decision)
               (dreamForgotten decision)
               (dreamRetainedSegmentIds decision)
-              packetPayload
+              packetPayload'
               sleepDreamRevision
               invocationId'
-              (round now)
+              (round now')
           checkpoint =
             WorkingMemoryCheckpoint
               checkpointId
               identity
-              (workingMemoryRevision quiescing)
-              (workingMemoryCursor quiescing)
-              (workingMemoryFocusFrames quiescing)
-              (workingMemoryActiveTaskId quiescing)
+              (workingMemoryRevision quiescing')
+              (workingMemoryCursor quiescing')
+              (workingMemoryFocusFrames quiescing')
+              (workingMemoryActiveTaskId quiescing')
               statePayload
               ( sourceClosure
                   baseEpoch
-                  (workingMemoryCursor quiescing)
-                  (workingMemoryFocusFrames quiescing)
+                  (workingMemoryCursor quiescing')
+                  (workingMemoryFocusFrames quiescing')
               )
-              packetId
+              packetId'
               sleepDreamRevision
-              (round now)
+              (round now')
        in workingPrepareCheckpoint
             working
             identity
-            (workingMemoryRevision quiescing)
-            cycleId
+            (workingMemoryRevision quiescing')
+            cycleId'
             checkpoint
             packet
-            >>= either (pure . Left) (const (commit retainedMessages packet cycleId quiescing))
+            >>= either (pure . Left) (const (commit retainedMessages'' packet cycleId' quiescing'))
   commit retainedMessages packet cycleId quiescing =
     workingCommitSleep working identity (workingMemoryRevision quiescing) cycleId
       >>= either (pure . Left) (wake retainedMessages packet cycleId)
@@ -1483,21 +1509,29 @@ commitSleep cognition incarnation task run trigger baseEpoch initialHead initial
     workingBeginWake working identity (workingMemoryRevision asleep) cycleId
       >>= either (pure . Left) (finish retainedMessages packet cycleId wakeEpoch)
   finish retainedMessages packet cycleId wakeEpoch (waking, _) =
-    experienceHead (cognitionExperiences cognition) identity >>= \replayed ->
-      getPOSIXTime >>= \now ->
-        let frame = wakeFocusFrame packet wakeEpoch replayed (round now) initialFrame
-         in workingCommitWakeFocus working identity (workingMemoryRevision waking) cycleId replayed frame
-              >>= either
-                (degradeWaking waking cycleId)
-                ( \(awake, cycle') ->
-                    let changed = wakeCompaction packet retainedMessages compaction
-                     in pure (Right (SleepResult changed awake cycle' packet wakeEpoch))
-                )
+    liftA2
+      (,)
+      (experienceHead (cognitionExperiences cognition) identity)
+      getPOSIXTime
+      >>= commitFocus retainedMessages packet cycleId wakeEpoch initialFrame waking
+   where
+    commitFocus retainedMessages' packet' cycleId' wakeEpoch' initialFrame' waking' (replayed, now) =
+      let frame = wakeFocusFrame packet' wakeEpoch' replayed (round now) initialFrame'
+       in workingCommitWakeFocus working identity (workingMemoryRevision waking') cycleId' replayed frame
+            >>= either
+              (degradeWaking waking' cycleId')
+              (result packet' retainedMessages' wakeEpoch')
+    result packet' retainedMessages' wakeEpoch' (awake, cycle') =
+      let changed = wakeCompaction packet' retainedMessages' compaction
+       in pure (Right (SleepResult changed awake cycle' packet' wakeEpoch'))
   degradeAsleep head' cycleId failure =
-    workingBeginWake working identity (workingMemoryRevision head') cycleId >>= \case
-      Left _ -> pure (Left failure)
-      Right (waking, _) ->
-        degradeWaking waking cycleId failure
+    workingBeginWake working identity (workingMemoryRevision head') cycleId
+      >>= either
+        (const (pure (Left failure)))
+        (uncurry (degradeWhenAwake cycleId failure))
+   where
+    degradeWhenAwake cycleId' failure' waking _ =
+      degradeWaking waking cycleId' failure'
   degradeWaking waking cycleId failure =
     workingDegradeWake working identity (workingMemoryRevision waking) cycleId failure
       $> Left failure
@@ -1643,15 +1677,19 @@ persistPayload cognition identity purpose source value =
     (cognitionBlobs cognition)
     "application/json"
     (encode value)
-    >>= \meta ->
-      blobAttach
-        (cognitionBlobs cognition)
-        ("ref-" <> Text.take 32 (sha256 (TextEncoding.encodeUtf8 (Text.intercalate "\NUL" [identity, purpose, source, blobId meta]))))
-        (blobId meta)
-        identity
-        purpose
-        source
-        >>= either (ioError . userError . Text.unpack) (const (pure (blobId meta)))
+    >>= attach
+ where
+  attach meta =
+    blobAttach
+      (cognitionBlobs cognition)
+      (refOf meta)
+      (blobId meta)
+      identity
+      purpose
+      source
+      >>= either (ioError . userError . Text.unpack) (const (pure (blobId meta)))
+  refOf meta =
+    "ref-" <> Text.take 32 (sha256 (TextEncoding.encodeUtf8 (Text.intercalate "\NUL" [identity, purpose, source, blobId meta])))
 
 ensureAguiContext :: Cognition -> Incarnation -> AGUI.RunAgentInput -> IO (Either Text ContextEpoch)
 ensureAguiContext cognition incarnation input =
@@ -1670,17 +1708,15 @@ ensureAguiContext cognition incarnation input =
       Left failure -> pure (cache, Left failure)
       Right segments ->
         commitContext cognition identity task segments
-          >>= \result ->
-            let changed =
-                  either
-                    (const cache)
-                    (\epoch -> boundedInsert key (contextEpochId epoch) cache)
-                    result
-             in result
-                  <$ traverse_
-                    (\epoch -> void (workingReady cognition incarnation task epoch))
-                    result
-                  <&> (changed,)
+          >>= commitResult
+   where
+    commitResult result =
+      let changed = either (const cache) (cacheEpoch key) result
+       in result
+            <$ traverse_ (void . workingReady cognition incarnation task) result
+            <&> (changed,)
+    cacheEpoch cacheKey epoch =
+      boundedInsert cacheKey (contextEpochId epoch) cache
 
 commitContext :: Cognition -> Text -> Text -> [ContextSegmentInput] -> IO (Either Text ContextEpoch)
 commitContext cognition identity task segments =
@@ -1689,11 +1725,11 @@ commitContext cognition identity task segments =
   contexts = cognitionContexts cognition
   attempt current =
     contextEpochCommit contexts identity task (contextEpochId <$> current) segments Nothing
-      >>= \case
-        Right epoch -> pure (Right epoch)
-        Left _ ->
-          contextEpochHead contexts identity task >>= \latest ->
-            contextEpochCommit contexts identity task (contextEpochId <$> latest) segments Nothing
+      >>= either (const retryLatest) (pure . Right)
+  retryLatest =
+    contextEpochHead contexts identity task >>= retryCommit
+  retryCommit latest =
+    contextEpochCommit contexts identity task (contextEpochId <$> latest) segments Nothing
 
 workingReady ::
   Cognition ->
@@ -1702,15 +1738,16 @@ workingReady ::
   ContextEpoch ->
   IO (Either Text (WorkingMemoryHead, FocusFrame))
 workingReady cognition incarnation task epoch =
-  experienceHead experiences identity >>= \cursor ->
-    workingRead working identity >>= \case
-      Nothing ->
-        workingCreate working identity cursor >>= either (pure . Left) (sync cursor)
-      Just head' -> sync cursor head'
+  experienceHead experiences identity >>= readyCursor
  where
   identity = incarnationId incarnation
   experiences = cognitionExperiences cognition
   working = cognitionWorking cognition
+  readyCursor cursor =
+    workingRead working identity
+      >>= maybe
+        (workingCreate working identity cursor >>= either (pure . Left) (sync cursor))
+        (sync cursor)
   sync cursor head'
     | workingMemoryStatus head' /= WorkingAwake =
         pure (Left ("working memory is not awake: " <> statusText (workingMemoryStatus head')))
@@ -1719,30 +1756,35 @@ workingReady cognition incarnation task epoch =
           >>= either (pure . Left) putFrame
     | otherwise = putFrame head'
   putFrame head' =
-    getPOSIXTime >>= \now ->
-      workingReadFocus working identity task >>= \current ->
-        let objective = maybe ("Continue task " <> task) focusFrameObjective current
-            frame =
-              FocusFrame
-                ("focus/" <> identity <> "/" <> task)
-                identity
-                task
-                (maybe 1 ((+ 1) . focusFrameRevision) current)
-                FocusActive
-                (contextEpochId epoch)
-                objective
-                (maybe [] focusFrameActiveItems current)
-                (maybe [] focusFrameOpenLoops current)
-                (maybe [] focusFrameProvisionalClaims current)
-                (maybe [] focusFrameRecentOutcomeRefs current)
-                (maybe [] focusFrameArtifactRefs current)
-                (workingMemoryCursor head')
-                (round now)
-         in if maybe False (sameFrame frame) current
-              then pure (Right (head', fromMaybe frame current))
-              else
-                workingPutFocus working identity (workingMemoryRevision head') frame
-                  <&> fmap (,frame)
+    liftA2
+      (,)
+      getPOSIXTime
+      (workingReadFocus working identity task)
+      >>= putFrameWith head'
+   where
+    putFrameWith head'' (now, current) =
+      let objective = maybe ("Continue task " <> task) focusFrameObjective current
+          frame =
+            FocusFrame
+              ("focus/" <> identity <> "/" <> task)
+              identity
+              task
+              (maybe 1 ((+ 1) . focusFrameRevision) current)
+              FocusActive
+              (contextEpochId epoch)
+              objective
+              (maybe [] focusFrameActiveItems current)
+              (maybe [] focusFrameOpenLoops current)
+              (maybe [] focusFrameProvisionalClaims current)
+              (maybe [] focusFrameRecentOutcomeRefs current)
+              (maybe [] focusFrameArtifactRefs current)
+              (workingMemoryCursor head'')
+              (round now)
+       in if maybe False (sameFrame frame) current
+            then pure (Right (head'', fromMaybe frame current))
+            else
+              workingPutFocus working identity (workingMemoryRevision head'') frame
+                <&> fmap (,frame)
   sameFrame next current =
     focusFrameEpochId current == focusFrameEpochId next
       && focusFrameStatus current == FocusActive
@@ -1752,27 +1794,34 @@ statusText = Text.toLower . Text.drop 7 . Text.pack . show
 
 closeExperience :: Cognition -> Incarnation -> AGUI.RunAgentInput -> RunOutcome -> [ChatMessage] -> IO ()
 closeExperience cognition incarnation input outcome messages =
-  archiveTaskRun cognition incarnation input outcome messages >>= \case
-    Left failure -> ioError (userError (Text.unpack failure))
-    Right _ ->
-      appendRunEvents cognition incarnation input outcome messages >>= \events ->
-        case reverse events of
-          [] -> pure ()
-          finalEvent : _
-            | isJust (AGUI.runParentId input) -> pure ()
-            | otherwise ->
-                commitFinalContext >>= \epoch ->
-                  enqueueConsolidation cognition incarnation events >>= \requestEvent ->
-                    projectClosure epoch requestEvent (experienceEventId finalEvent)
+  archiveTaskRun cognition incarnation input outcome messages
+    >>= either
+      (ioError . userError . Text.unpack)
+      (const (appendRunEvents cognition incarnation input outcome messages >>= closeEvents))
  where
   identity = incarnationId incarnation
   task = AGUI.runThreadId input
+  closeEvents events =
+    case reverse events of
+      [] -> pure ()
+      finalEvent : _
+        | isJust (AGUI.runParentId input) -> pure ()
+        | otherwise -> closeFinal events finalEvent
+  closeFinal events finalEvent =
+    commitFinalContext >>= enqueue finalEvent events
+  enqueue finalEvent events epoch =
+    enqueueConsolidation cognition incarnation events >>= project finalEvent epoch
+  project finalEvent epoch requestEvent =
+    projectClosure epoch requestEvent (experienceEventId finalEvent)
   projectClosure epoch cursorEvent outcomeRef =
-    workingReady cognition incarnation task epoch >>= \case
-      Left failure -> ioError (userError (Text.unpack failure))
-      Right (head', frame) ->
-        let cursor = ExperienceCursor (experienceStreamId cursorEvent) (experienceSeq cursorEvent)
-         in advanceWorking head' cursor >>= either (ioError . userError . Text.unpack) (updateFocus frame cursor outcomeRef)
+    workingReady cognition incarnation task epoch
+      >>= either
+        (ioError . userError . Text.unpack)
+        (uncurry (projectFrame cursorEvent outcomeRef))
+   where
+    projectFrame cursorEvent' outcomeRef' head' frame =
+      let cursor = ExperienceCursor (experienceStreamId cursorEvent') (experienceSeq cursorEvent')
+       in advanceWorking head' cursor >>= either (ioError . userError . Text.unpack) (updateFocus frame cursor outcomeRef')
   advanceWorking head' cursor
     | cursorSeq cursor <= cursorSeq (workingMemoryCursor head') = pure (Right head')
     | otherwise =
@@ -1782,18 +1831,20 @@ closeExperience cognition incarnation input outcome messages =
           (workingMemoryRevision head')
           cursor
   updateFocus frame cursor outcomeRef head' =
-    getPOSIXTime >>= \now ->
+    getPOSIXTime >>= putFocus frame cursor outcomeRef head'
+   where
+    putFocus frame' cursor' outcomeRef' head'' now =
       let changed =
-            frame
-              { focusFrameRevision = focusFrameRevision frame + 1,
-                focusFrameCursor = cursor,
-                focusFrameRecentOutcomeRefs = takeEnd 12 (focusFrameRecentOutcomeRefs frame <> [outcomeRef]),
+            frame'
+              { focusFrameRevision = focusFrameRevision frame' + 1,
+                focusFrameCursor = cursor',
+                focusFrameRecentOutcomeRefs = takeEnd 12 (focusFrameRecentOutcomeRefs frame' <> [outcomeRef']),
                 focusFrameUpdated = round now
               }
        in workingPutFocus
             (cognitionWorking cognition)
             identity
-            (workingMemoryRevision head')
+            (workingMemoryRevision head'')
             changed
             >>= either (ioError . userError . Text.unpack) (const (pure ()))
   commitFinalContext =
@@ -1843,20 +1894,7 @@ archiveTaskSnapshot cognition incarnation input status failure messages =
 appendRunEvents :: Cognition -> Incarnation -> AGUI.RunAgentInput -> RunOutcome -> [ChatMessage] -> IO [ExperienceEvent]
 appendRunEvents cognition incarnation input outcome messages =
   appendMaybe "UserInputAccepted" (String <$> latestUser)
-    >>= \userEvent ->
-      appendMaybe "AssistantOutcomeRecorded" (toJSON <$> latestAssistant)
-        >>= \assistantEvent ->
-          appendValue
-            "RunTerminated"
-            ( object
-                [ "status" .= outcomeStatus outcome,
-                  "code" .= outcomeCode outcome,
-                  "message" .= outcomeMessage outcome,
-                  "messageCount" .= length messages,
-                  "assistantOutcomeRef" .= (experienceEventId <$> assistantEvent)
-                ]
-            )
-            <&> \terminal -> catMaybes [userEvent, assistantEvent, Just terminal]
+    >>= runAssistant
  where
   identity = incarnationId incarnation
   run = AGUI.runId input
@@ -1888,20 +1926,37 @@ appendRunEvents cognition incarnation input outcome messages =
       "experience"
       (run <> "/" <> kind)
       value
-      ( \payload ->
-          ExperienceDraft
-            identity
-            run
-            identity
-            (Just run)
-            (Just task)
-            (Just run)
-            (delegationIdOf input)
-            Nothing
-            kind
-            payload
-            payload
+      (draft kind)
+  runAssistant userEvent =
+    appendMaybe "AssistantOutcomeRecorded" (toJSON <$> latestAssistant)
+      >>= terminate userEvent
+  terminate userEvent assistantEvent =
+    appendValue
+      "RunTerminated"
+      ( object
+          [ "status" .= outcomeStatus outcome,
+            "code" .= outcomeCode outcome,
+            "message" .= outcomeMessage outcome,
+            "messageCount" .= length messages,
+            "assistantOutcomeRef" .= (experienceEventId <$> assistantEvent)
+          ]
       )
+      <&> collect userEvent assistantEvent
+  collect userEvent assistantEvent terminal =
+    catMaybes [userEvent, assistantEvent, Just terminal]
+  draft kind payload =
+    ExperienceDraft
+      identity
+      run
+      identity
+      (Just run)
+      (Just task)
+      (Just run)
+      (delegationIdOf input)
+      Nothing
+      kind
+      payload
+      payload
 
 delegationIdOf :: AGUI.RunAgentInput -> Maybe Text
 delegationIdOf input =
@@ -1918,12 +1973,7 @@ enqueueConsolidation cognition incarnation events =
     operation
     (toJSON request)
     draft
-    >>= \event ->
-      event
-        <$ void
-          ( forkIO
-              (withIncarnationLock cognition identity (drainConsolidations cognition incarnation))
-          )
+    >>= spawn
  where
   identity = incarnationId incarnation
   reference = maybe ("empty/" <> identity) experienceEventId (listToMaybe (reverse events))
@@ -1943,6 +1993,12 @@ enqueueConsolidation cognition incarnation events =
       "ImpressionConsolidationRequested"
       payload
       payload
+  spawn event =
+    event
+      <$ void
+        ( forkIO
+            (withIncarnationLock cognition identity (drainConsolidations cognition incarnation))
+        )
 
 drainConsolidations :: Cognition -> Incarnation -> IO ()
 drainConsolidations cognition incarnation =
@@ -1951,39 +2007,50 @@ drainConsolidations cognition incarnation =
   identity = incarnationId incarnation
   experiences = cognitionExperiences cognition
   nextPending =
-    experienceEvents experiences identity <&> \events ->
-      let completed =
-            Set.fromList
-              [ experienceOperationId event
-              | event <- events,
-                experienceKind event `elem` ["ImpressionConsolidationSucceeded", "ImpressionConsolidationFailed"]
-              ]
-       in listToMaybe
-            [ event
-            | event <- sortOn experienceSeq events,
-              experienceKind event == "ImpressionConsolidationRequested",
-              experienceOperationId event `Set.notMember` completed
+    experienceEvents experiences identity <&> nextPendingEvent
+  nextPendingEvent events =
+    let completed =
+          Set.fromList
+            [ experienceOperationId event
+            | event <- events,
+              experienceKind event `elem` ["ImpressionConsolidationSucceeded", "ImpressionConsolidationFailed"]
             ]
+     in listToMaybe
+          [ event
+          | event <- sortOn experienceSeq events,
+            experienceKind event == "ImpressionConsolidationRequested",
+            experienceOperationId event `Set.notMember` completed
+          ]
   process requested =
-    loadConsolidationRequest cognition requested >>= \case
-      Left failure -> finish requested "ImpressionConsolidationFailed" (object ["error" .= failure])
-      Right request ->
-        experienceClosure cognition identity (consolidationEventIds request) >>= \case
-          Left failure -> finish requested "ImpressionConsolidationFailed" (object ["error" .= failure])
-          Right closure ->
-            taskArchiveTasks (cognitionArchive cognition) identity 64 >>= \catalog ->
-              consolidateImpression
-                (impressionModels cognition incarnation)
-                (cognitionJournal cognition)
-                (cognitionImpressions cognition)
-                identity
-                (consolidationExperienceRef request)
-                (fmap archiveTaskId catalog)
-                (consolidationExperienceRef request : consolidationEventIds request)
-                closure
-                >>= either
-                  (\failure -> finish requested "ImpressionConsolidationFailed" (object ["error" .= failure]))
-                  (\revision -> finish requested "ImpressionConsolidationSucceeded" (object ["revision" .= revision]))
+    loadConsolidationRequest cognition requested
+      >>= either
+        (failWith requested)
+        (consolidateRequest requested)
+  consolidateRequest requested request =
+    experienceClosure cognition identity (consolidationEventIds request)
+      >>= either
+        (failWith requested)
+        (consolidateCatalog requested request)
+  consolidateCatalog requested request closure =
+    taskArchiveTasks (cognitionArchive cognition) identity 64
+      >>= consolidate requested request closure
+  consolidate requested request closure catalog =
+    consolidateImpression
+      (impressionModels cognition incarnation)
+      (cognitionJournal cognition)
+      (cognitionImpressions cognition)
+      identity
+      (consolidationExperienceRef request)
+      (fmap archiveTaskId catalog)
+      (consolidationExperienceRef request : consolidationEventIds request)
+      closure
+      >>= either
+        (failWith requested)
+        (succeedWith requested)
+  failWith requested failure =
+    finish requested "ImpressionConsolidationFailed" (object ["error" .= failure])
+  succeedWith requested revision =
+    finish requested "ImpressionConsolidationSucceeded" (object ["revision" .= revision])
   finish requested kind payload =
     void
       ( appendExperienceIdempotent
@@ -2012,37 +2079,35 @@ drainConsolidations cognition incarnation =
 
 loadConsolidationRequest :: Cognition -> ExperienceEvent -> IO (Either Text ConsolidationRequest)
 loadConsolidationRequest cognition event =
-  blobFetch (cognitionBlobs cognition) (experiencePayloadRef event) <&> \case
-    Left failure -> Left failure
-    Right bytes -> either (Left . Text.pack) Right (eitherDecode bytes)
+  blobFetch (cognitionBlobs cognition) (experiencePayloadRef event)
+    <&> either Left (either (Left . Text.pack) Right . eitherDecode)
 
 experienceClosure :: Cognition -> Text -> [Text] -> IO (Either Text Text)
 experienceClosure cognition identity identifiers =
-  experienceEvents (cognitionExperiences cognition) identity >>= \events ->
+  experienceEvents (cognitionExperiences cognition) identity >>= closureEvents
+ where
+  closureEvents events =
     let index = Map.fromList [(experienceEventId event, event) | event <- events]
      in case traverse (`Map.lookup` index) identifiers of
           Nothing -> pure (Left "impression consolidation references a missing experience event")
           Just selected ->
             traverse render selected
-              <&> \rendered ->
-                sequence rendered
-                  <&> \items ->
-                    Text.take 50000 (encodeText (object ["events" .= items]))
- where
+              <&> fmap encodeEvents . sequence
+  encodeEvents items =
+    Text.take 50000 (encodeText (object ["events" .= items]))
   render event =
     blobFetch (cognitionBlobs cognition) (experiencePayloadRef event)
-      <&> fmap
-        ( \payload ->
-            object
-              [ "eventId" .= experienceEventId event,
-                "kind" .= experienceKind event,
-                "taskId" .= experienceTaskId event,
-                "runId" .= experienceRunId event,
-                "authority" .= experienceActorId event,
-                "sourceRef" .= experiencePayloadRef event,
-                "payload" .= Text.take 14000 (TextEncoding.decodeUtf8 (LazyByteString.toStrict payload))
-              ]
-        )
+      <&> fmap (payloadView event)
+  payloadView event payload =
+    object
+      [ "eventId" .= experienceEventId event,
+        "kind" .= experienceKind event,
+        "taskId" .= experienceTaskId event,
+        "runId" .= experienceRunId event,
+        "authority" .= experienceActorId event,
+        "sourceRef" .= experiencePayloadRef event,
+        "payload" .= Text.take 14000 (TextEncoding.decodeUtf8 (LazyByteString.toStrict payload))
+      ]
 
 appendExperienceIdempotent ::
   Cognition ->
@@ -2069,38 +2134,35 @@ appendExperienceIdempotent cognition identity operation kind purpose source payl
     persistPayload cognition identity purpose source payload >>= retry 16
   retry :: Int -> Text -> IO ExperienceEvent
   retry remaining payloadRef =
-    experienceHead experiences identity >>= \cursor ->
-      experienceAppend experiences (Just cursor) (draft payloadRef) >>= \case
-        Right event -> pure event
-        Left failure
-          | remaining <= 0 -> ioError (userError (Text.unpack failure))
-          | otherwise -> existing >>= maybe (retry (remaining - 1) payloadRef) pure
+    experienceHead experiences identity >>= appendAt
+   where
+    appendAt cursor =
+      experienceAppend experiences (Just cursor) (draft payloadRef)
+        >>= either (retryOrFail remaining payloadRef) pure
+    retryOrFail remaining' payloadRef' failure
+      | remaining' <= 0 = ioError (userError (Text.unpack failure))
+      | otherwise = existing >>= maybe (retry (remaining' - 1) payloadRef') pure
 
 withIncarnationLock :: Cognition -> Text -> IO value -> IO value
 withIncarnationLock cognition identity action =
-  modifyMVar (cognitionRunLocks cognition) acquire >>= \lock ->
-    withMVar lock (const action)
+  modifyMVar (cognitionRunLocks cognition) acquire
+    >>= flip withMVar (const action)
  where
   acquire locks =
     case Map.lookup identity locks of
       Just lock -> pure (locks, lock)
-      Nothing ->
-        newMVar () >>= \lock ->
-          pure (Map.insert identity lock locks, lock)
+      Nothing -> newMVar () >>= insertLock locks
+  insertLock locks lock =
+    pure (Map.insert identity lock locks, lock)
 
 -- | 删除分身：档案 → 派生存储 → 记录，任一环失败立即中止并返回 `Left`，
 -- 不会在部分失败后误报成功。
 deleteIncarnation :: Cognition -> Text -> Int -> IO (Either Text ())
 deleteIncarnation cognition identifier expected =
-  incarnationRead (cognitionIncarnations cognition) identifier >>= \case
-    Nothing -> pure (Left ("unknown incarnation: " <> identifier))
-    Just incarnation
-      | identifier == "yuki" -> pure (Left "default incarnation yuki cannot be deleted")
-      | incarnationRevision incarnation /= expected ->
-          pure (Left (staleIncarnation expected (incarnationRevision incarnation)))
-      | incarnationStatus incarnation /= IncarnationArchived ->
-          pure (Left ("incarnation is not archived: " <> identifier))
-      | otherwise -> deleteAll
+  incarnationRead (cognitionIncarnations cognition) identifier
+    >>= maybe
+      (pure (Left ("unknown incarnation: " <> identifier)))
+      deleteWhenArchived
  where
   derived =
     [ impressionDelete (cognitionImpressions cognition) identifier,
@@ -2109,22 +2171,27 @@ deleteIncarnation cognition identifier expected =
       longTermDelete (cognitionLongTerm cognition) identifier,
       contextEpochDeleteIncarnation (cognitionContexts cognition) identifier
     ]
+  deleteWhenArchived incarnation
+    | identifier == "yuki" = pure (Left "default incarnation yuki cannot be deleted")
+    | incarnationRevision incarnation /= expected =
+        pure (Left (staleIncarnation expected (incarnationRevision incarnation)))
+    | incarnationStatus incarnation /= IncarnationArchived =
+        pure (Left ("incarnation is not archived: " <> identifier))
+    | otherwise = deleteAll
   deleteAll =
-    taskArchiveDeleteIncarnation (cognitionArchive cognition) identifier >>= \case
-      Left failure -> pure (Left failure)
-      Right () -> deleteDerived
+    taskArchiveDeleteIncarnation (cognitionArchive cognition) identifier
+      >>= either (pure . Left) (const deleteDerived)
   deleteDerived =
     go derived
   go [] = deleteRecord
   go (action : rest) =
-    (try action :: IO (Either IOException ())) >>= \case
-      Left failure -> pure (Left (Text.pack (displayException failure)))
-      Right () -> go rest
+    (try action :: IO (Either IOException ()))
+      >>= either (pure . Left . Text.pack . displayException) (const (go rest))
   deleteRecord =
-    (try (incarnationDelete (cognitionIncarnations cognition) identifier expected) :: IO (Either IOException (Either Text Incarnation))) >>= \case
-      Left failure -> pure (Left (Text.pack (displayException failure)))
-      Right (Left failure) -> pure (Left failure)
-      Right (Right _) -> clearCaches $> Right ()
+    (try (incarnationDelete (cognitionIncarnations cognition) identifier expected) :: IO (Either IOException (Either Text Incarnation)))
+      >>= either
+        (pure . Left . Text.pack . displayException)
+        (either (pure . Left) (const (clearCaches $> Right ())))
   clearCaches =
     modifyMVar_ (cognitionSleepRequests cognition) (pure . Set.filter ((/= identifier) . fst))
       *> modifyMVar_ (cognitionActivationCache cognition) (pure . Map.filterWithKey (\key _ -> firstOfThree key /= identifier))
@@ -2306,8 +2373,8 @@ encodeText = TextEncoding.decodeUtf8 . LazyByteString.toStrict . encode
 
 stripFence :: Text -> Text
 stripFence raw =
-  fromMaybe trimmed $ do
-    inner <- Text.stripPrefix "```json" trimmed <|> Text.stripPrefix "```" trimmed
-    Text.stripSuffix "```" (Text.strip inner)
+  fromMaybe trimmed (prefix >>= stripSuffix)
  where
   trimmed = Text.strip raw
+  prefix = Text.stripPrefix "```json" trimmed <|> Text.stripPrefix "```" trimmed
+  stripSuffix inner = Text.stripSuffix "```" (Text.strip inner)

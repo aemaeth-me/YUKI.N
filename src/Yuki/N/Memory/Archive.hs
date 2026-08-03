@@ -65,7 +65,6 @@ archiveKindName = \case
   ArchiveToolCall -> "tool-call"
   ArchiveToolResult -> "tool-result"
   ArchiveWakePacket -> "wake-packet"
-
 instance ToJSON ArchiveKind where
   toJSON = String . archiveKindName
 
@@ -579,12 +578,13 @@ prepareDirectory dir =
 loadState :: FilePath -> IO (Either Text ArchiveState)
 loadState path =
   (try (eitherDecodeFileStrict path) :: IO (Either IOException (Either String StoredArchive)))
-    <&> \case
-      Left failure
-        | isDoesNotExistError failure -> Right emptyState
-        | otherwise -> Left ("cannot read task archive: " <> Text.pack (displayException failure))
-      Right (Left failure) -> Left ("invalid task archive: " <> Text.pack failure)
-      Right (Right stored) -> stateFromStored stored
+    <&> interpretLoad
+ where
+  interpretLoad (Left failure)
+    | isDoesNotExistError failure = Right emptyState
+    | otherwise = Left ("cannot read task archive: " <> Text.pack (displayException failure))
+  interpretLoad (Right (Left failure)) = Left ("invalid task archive: " <> Text.pack failure)
+  interpretLoad (Right (Right stored)) = stateFromStored stored
 
 persistState :: FilePath -> ArchiveState -> IO (Either Text ())
 persistState path state =
@@ -666,8 +666,9 @@ validateSequences =
   traverse_ contiguous
     . Map.toList
     . Map.fromListWith (<>)
-    . fmap (\entry -> (entryScope entry, [archiveEntrySeq entry]))
+    . fmap groupByScope
  where
+  groupByScope entry = (entryScope entry, [archiveEntrySeq entry])
   contiguous (scope, seqs) =
     require
       (sortOn id seqs == [1 .. length seqs])
@@ -695,14 +696,7 @@ importLegacy ::
   [ArchiveEntryDraft] ->
   IO (Either Text (Maybe ArchiveRun))
 importLegacy persist blobs lock incarnation task entries =
-  readMVar lock >>= \state ->
-    if Set.member marker (stateLegacyImports state)
-      then pure (Right Nothing)
-      else case entries of
-        [] -> markImported persist lock marker <&> fmap (const Nothing)
-        _ ->
-          appendRun persist blobs lock (Just marker) draft
-            <&> fmap Just
+  readMVar lock >>= decideImport
  where
   marker = legacyMarker incarnation task
   draft =
@@ -714,6 +708,12 @@ importLegacy persist blobs lock incarnation task entries =
       "legacy"
       Nothing
       entries
+  decideImport state
+    | Set.member marker (stateLegacyImports state) = pure (Right Nothing)
+    | null entries = markImported persist lock marker <&> fmap (const Nothing)
+    | otherwise =
+        appendRun persist blobs lock (Just marker) draft
+          <&> fmap Just
 
 markImported :: (ArchiveState -> IO (Either Text ())) -> MVar ArchiveState -> Text -> IO (Either Text ())
 markImported persist lock marker =
@@ -775,25 +775,27 @@ prepareEntries blobs run =
                     contentHash
                   ]
               )
-     in blobPut blobs "text/plain; charset=utf-8" (LazyByteString.fromStrict bytes) >>= \meta ->
-          blobAttach
-            blobs
-            identifier
-            (blobId meta)
-            (archiveRunDraftIncarnationId run)
-            "task-archive"
-            (archiveRunDraftTaskId run <> "/" <> archiveRunDraftRunId run <> "/" <> archiveEntryDraftSourceId entry)
-            <&> fmap
-              ( const
-                  ( PreparedEntry
-                      identifier
-                      (blobId meta)
-                      contentHash
-                      (Text.length content)
-                      (preview content)
-                      entry
-                  )
-              )
+     in blobPut blobs "text/plain; charset=utf-8" (LazyByteString.fromStrict bytes)
+          >>= attachPrepared identifier content contentHash entry
+  attachPrepared identifier content contentHash entry meta =
+    blobAttach
+      blobs
+      identifier
+      (blobId meta)
+      (archiveRunDraftIncarnationId run)
+      "task-archive"
+      (archiveRunDraftTaskId run <> "/" <> archiveRunDraftRunId run <> "/" <> archiveEntryDraftSourceId entry)
+      <&> fmap
+        ( const
+            ( PreparedEntry
+                identifier
+                (blobId meta)
+                contentHash
+                (Text.length content)
+                (preview content)
+                entry
+            )
+        )
 
 commitPrepared ::
   (ArchiveState -> IO (Either Text ())) ->
@@ -803,19 +805,20 @@ commitPrepared ::
   [PreparedEntry] ->
   IO (Either Text ArchiveRun)
 commitPrepared persist lock legacy draft prepared =
-  getPOSIXTime >>= \now ->
-    modifyMVar lock $ \state ->
-      either
-        (pure . (state,) . Left)
-        ( \(updated, run) ->
-            persist updated
-              <&> either
-                ((state,) . Left)
-                (const (updated, Right run))
-        )
-        (transition (round now) state)
+  getPOSIXTime >>= commitAt
  where
   identifier = runIdFor draft
+  commitAt now = modifyMVar lock (commitWith (round now))
+  commitWith stamp state =
+    either
+      (pure . (state,) . Left)
+      (persistUpdated state)
+      (transition stamp state)
+  persistUpdated state (updated, run) =
+    persist updated
+      <&> either
+        ((state,) . Left)
+        (const (updated, Right run))
   transition stamp snapshot =
     case Map.lookup identifier (stateRuns snapshot) of
       Just current -> merge stamp snapshot current
@@ -938,12 +941,13 @@ catalogTasks lock rawIncarnation requested
           . mapMaybe summary
           . Map.toList
           . Map.fromListWith (<>)
-          . fmap (\entry -> (archiveEntryTaskId entry, [entry]))
+          . fmap groupByTask
           . filter ((== incarnation) . archiveEntryIncarnationId)
           . Map.elems
           . stateEntries
  where
   incarnation = Text.strip rawIncarnation
+  groupByTask entry = (archiveEntryTaskId entry, [entry])
   summary (task, entries) =
     case sortOn archiveEntrySeq entries of
       [] -> Nothing
@@ -990,14 +994,7 @@ grepArchive :: BlobStore -> MVar ArchiveState -> ArchiveGrepRequest -> IO (Eithe
 grepArchive blobs lock request =
   case cleanGrep request of
     Left failure -> pure (Left failure)
-    Right clean ->
-      readMVar lock >>= \state ->
-        let candidates =
-              sortOn (\entry -> (evidenceRank entry, Down (entryOrder entry)))
-                . filter (grepEntry state clean)
-                . Map.elems
-                $ stateEntries state
-         in scanEntries blobs state clean candidates <&> fmap (result clean candidates)
+    Right clean -> readMVar lock >>= grepClean clean
  where
   result clean candidates hits =
     let offset = archiveGrepOffset clean
@@ -1020,6 +1017,13 @@ grepArchive blobs lock request =
           more
           more
           selected
+  grepClean clean state =
+    let candidates =
+          sortOn (\entry -> (evidenceRank entry, Down (entryOrder entry)))
+            . filter (grepEntry state clean)
+            . Map.elems
+            $ stateEntries state
+     in scanEntries blobs state clean candidates <&> fmap (result clean candidates)
 
 cleanGrep :: ArchiveGrepRequest -> Either Text ArchiveGrepRequest
 cleanGrep request =
@@ -1125,11 +1129,10 @@ scanEntries blobs state request = go []
  where
   go hits [] = pure (Right hits)
   go hits (entry : rest) =
-    fetchContent blobs entry >>= \case
-      Left failure -> pure (Left failure)
-      Right content ->
-        let found = lineHits state request entry content
-         in go (hits <> found) rest
+    fetchContent blobs entry >>= finishHit hits entry rest
+  finishHit _ _ _ (Left failure) = pure (Left failure)
+  finishHit hits entry rest (Right content) =
+    go (hits <> lineHits state request entry content) rest
 
 lineHits :: ArchiveState -> ArchiveGrepRequest -> ArchiveEntry -> Text -> [ArchiveHit]
 lineHits state request entry content =
@@ -1140,7 +1143,7 @@ lineHits state request entry content =
   needle = normalized (archiveGrepQuery request)
   normalized = bool Text.toCaseFold id (archiveGrepCaseSensitive request)
   lineMatches (lineNumber, offset, line) =
-    fmap (\column -> (lineNumber, offset, line, column)) (occurrenceColumns needle (normalized line))
+    fmap ((,,,) lineNumber offset line) (occurrenceColumns needle (normalized line))
   build index (lineNumber, offset, line, column) =
     ArchiveHit
       (archiveEntryId entry)
@@ -1195,23 +1198,24 @@ readArchive :: BlobStore -> MVar ArchiveState -> ArchiveReadRequest -> IO (Eithe
 readArchive blobs lock request =
   case cleanRead request of
     Left failure -> pure (Left failure)
-    Right clean ->
-      readMVar lock >>= \state ->
-        case Map.lookup (archiveReadEntryId clean) (stateEntries state) of
-          Nothing -> pure (Left ("unknown task archive entry: " <> archiveReadEntryId clean))
-          Just anchor
-            | archiveEntryIncarnationId anchor /= archiveReadIncarnationId clean ->
-                pure (Left ("task archive entry is not owned by incarnation: " <> archiveReadEntryId clean))
-            | otherwise ->
-                let entries =
-                      sortOn archiveEntrySeq
-                        . filter ((== entryScope anchor) . entryScope)
-                        . Map.elems
-                        $ stateEntries state
-                 in maybe
-                      (pure (Left ("task archive anchor is missing from its task: " <> archiveReadEntryId clean)))
-                      (renderWindow blobs state clean anchor entries)
-                      (findIndex ((== archiveEntryId anchor) . archiveEntryId) entries)
+    Right clean -> readMVar lock >>= readClean clean
+ where
+  readClean clean state =
+    case Map.lookup (archiveReadEntryId clean) (stateEntries state) of
+      Nothing -> pure (Left ("unknown task archive entry: " <> archiveReadEntryId clean))
+      Just anchor
+        | archiveEntryIncarnationId anchor /= archiveReadIncarnationId clean ->
+            pure (Left ("task archive entry is not owned by incarnation: " <> archiveReadEntryId clean))
+        | otherwise ->
+            let entries =
+                  sortOn archiveEntrySeq
+                    . filter ((== entryScope anchor) . entryScope)
+                    . Map.elems
+                    $ stateEntries state
+             in maybe
+                  (pure (Left ("task archive anchor is missing from its task: " <> archiveReadEntryId clean)))
+                  (renderWindow blobs state clean anchor entries)
+                  (findIndex ((== archiveEntryId anchor) . archiveEntryId) entries)
 
 cleanRead :: ArchiveReadRequest -> Either Text ArchiveReadRequest
 cleanRead request =

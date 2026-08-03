@@ -230,7 +230,9 @@ newMemoryIncarnationStore = initialize (const (pure ())) emptyState
 
 initialize :: (IncarnationState -> IO ()) -> IncarnationState -> IO IncarnationStore
 initialize persist initial =
-  getPOSIXTime >>= \now ->
+  getPOSIXTime >>= seed
+ where
+  seed now =
     let seeded =
           bool
             initial
@@ -265,16 +267,18 @@ mkStore persist lock =
     | Text.null (Text.strip name) = pure (Left "incarnation name must not be empty")
     | Text.null (Text.strip direction) = pure (Left "incarnation direction must not be empty")
     | otherwise =
-        getPOSIXTime >>= \now ->
-          modifyMVar lock $ \state ->
-            case Map.lookup identifier (stateIncarnations state) of
-              Just _ -> pure (state, Left ("incarnation already exists: " <> identifier))
-              Nothing ->
-                let stamp = round now
-                    incarnation =
-                      Incarnation identifier (Text.take 80 (Text.strip name)) (Text.strip direction) Nothing model 1 IncarnationActive stamp stamp
-                    changed = state {stateIncarnations = Map.insert identifier incarnation (stateIncarnations state)}
-                 in persist changed $> (changed, Right incarnation)
+        getPOSIXTime >>= createAt
+   where
+    createAt now =
+      modifyMVar lock $ \state ->
+        case Map.lookup identifier (stateIncarnations state) of
+          Just _ -> pure (state, Left ("incarnation already exists: " <> identifier))
+          Nothing ->
+            let stamp = round now
+                incarnation =
+                  Incarnation identifier (Text.take 80 (Text.strip name)) (Text.strip direction) Nothing model 1 IncarnationActive stamp stamp
+                changed = state {stateIncarnations = Map.insert identifier incarnation (stateIncarnations state)}
+             in persist changed $> (changed, Right incarnation)
   update identifier expected name direction model
     | Text.null (Text.strip name) = pure (Left "incarnation name must not be empty")
     | Text.null (Text.strip direction) = pure (Left "incarnation direction must not be empty")
@@ -321,7 +325,9 @@ mkStore persist lock =
                       }
                in persist changed $> (changed, Right incarnation)
   mutate identifier expected allowed change =
-    getPOSIXTime >>= \now ->
+    getPOSIXTime >>= mutateAt
+   where
+    mutateAt now =
       modifyMVar lock $ \state ->
         case Map.lookup identifier (stateIncarnations state) of
           Nothing -> pure (state, Left ("unknown incarnation: " <> identifier))
@@ -335,7 +341,9 @@ mkStore persist lock =
                     changed = state {stateIncarnations = Map.insert identifier changedIncarnation (stateIncarnations state)}
                  in persist changed $> (changed, Right changedIncarnation)
   appendPrompt owner layer source content generator invocation parent status =
-    getPOSIXTime >>= \now ->
+    getPOSIXTime >>= appendAt
+   where
+    appendAt now =
       modifyMVar lock $ \state ->
         let related =
               filter
@@ -361,22 +369,24 @@ mkStore persist lock =
           | promptIncarnationId prompt /= Just incarnationId' ->
               pure (state, Left "prompt revision belongs to another incarnation")
           | otherwise ->
-              getPOSIXTime >>= \now ->
-                let activated = incarnation {incarnationPromptRevision = Just promptId, incarnationRevision = expected + 1, incarnationUpdated = round now}
-                    prompts =
-                      Map.map
-                        ( \candidate ->
-                            if promptIncarnationId candidate == Just incarnationId' && promptLayer candidate == promptLayer prompt
-                              then candidate {promptStatus = bool PromptRetired PromptActive (promptRevisionId candidate == promptId)}
-                              else candidate
-                        )
-                        (statePrompts state)
-                    changed =
-                      state
-                        { stateIncarnations = Map.insert incarnationId' activated (stateIncarnations state),
-                          statePrompts = prompts
-                        }
-                 in persist changed $> (changed, Right activated)
+              getPOSIXTime >>= activateAt state incarnation prompt
+   where
+    activateAt state incarnation prompt now =
+      let activated = incarnation {incarnationPromptRevision = Just promptId, incarnationRevision = expected + 1, incarnationUpdated = round now}
+          prompts =
+            Map.map
+              ( \candidate ->
+                  if promptIncarnationId candidate == Just incarnationId' && promptLayer candidate == promptLayer prompt
+                    then candidate {promptStatus = bool PromptRetired PromptActive (promptRevisionId candidate == promptId)}
+                    else candidate
+              )
+              (statePrompts state)
+          changed =
+            state
+              { stateIncarnations = Map.insert incarnationId' activated (stateIncarnations state),
+                statePrompts = prompts
+              }
+       in persist changed $> (changed, Right activated)
   activateRoot expected promptId =
     modifyMVar lock $ \state ->
       let roots =
@@ -474,12 +484,13 @@ stale expected actual =
 loadState :: FilePath -> IO (Either Text IncarnationState)
 loadState path =
   (try (eitherDecodeFileStrict path) :: IO (Either IOException (Either String IncarnationState)))
-    <&> \case
-      Left failure
-        | isDoesNotExistError failure -> Right emptyState
-        | otherwise -> Left ("cannot read incarnation store: " <> Text.pack (displayException failure))
-      Right (Left failure) -> Left ("invalid incarnation store: " <> Text.pack failure)
-      Right (Right state) -> Right state
+    <&> loadResult
+ where
+  loadResult (Left failure)
+    | isDoesNotExistError failure = Right emptyState
+    | otherwise = Left ("cannot read incarnation store: " <> Text.pack (displayException failure))
+  loadResult (Right (Left failure)) = Left ("invalid incarnation store: " <> Text.pack failure)
+  loadResult (Right (Right state)) = Right state
 
 statePath :: FilePath -> FilePath
 statePath dir = dir </> "incarnations.json"

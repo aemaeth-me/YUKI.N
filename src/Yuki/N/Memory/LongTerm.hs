@@ -33,7 +33,7 @@ import Data.Functor ((<&>))
 import Data.List (find, sortOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Ord (Down (..))
 import Data.Set (Set)
 import Data.Set qualified as Set
@@ -516,9 +516,7 @@ deleteIncarnation persist lock incarnation =
 -- | 检查式删除失败时转为异常抛出（与其它 `IO ()` store 的异常语义一致）。
 deleteCheckedOrThrow :: (Text -> IO (Either Text ())) -> Text -> IO ()
 deleteCheckedOrThrow delete incarnation =
-  delete incarnation >>= \case
-    Left failure -> ioError (userError (Text.unpack failure))
-    Right () -> pure ()
+  delete incarnation >>= either (ioError . userError . Text.unpack) (const (pure ()))
 
 prepareDirectory :: FilePath -> IO (Either Text ())
 prepareDirectory dir =
@@ -530,12 +528,13 @@ prepareDirectory dir =
 loadState :: FilePath -> IO (Either Text LongTermState)
 loadState path =
   (try (eitherDecodeFileStrict path) :: IO (Either IOException (Either String StoredState)))
-    <&> \case
-      Left failure
-        | isDoesNotExistError failure -> Right emptyState
-        | otherwise -> Left ("cannot read long-term memory store: " <> Text.pack (displayException failure))
-      Right (Left failure) -> Left ("invalid long-term memory store: " <> Text.pack failure)
-      Right (Right stored) -> stateFromStored stored
+    <&> decodeState
+ where
+  decodeState (Left failure)
+    | isDoesNotExistError failure = Right emptyState
+    | otherwise = Left ("cannot read long-term memory store: " <> Text.pack (displayException failure))
+  decodeState (Right (Left failure)) = Left ("invalid long-term memory store: " <> Text.pack failure)
+  decodeState (Right (Right stored)) = stateFromStored stored
 
 persistState :: FilePath -> LongTermState -> IO (Either Text ())
 persistState path state =
@@ -560,11 +559,15 @@ stateFromStored stored
   | storedVersion stored /= storeVersion =
       Left ("unsupported long-term memory store version: " <> Text.pack (show (storedVersion stored)))
   | otherwise =
-      foldM insertSpace Map.empty (storedSpaces stored) >>= \spaces ->
-        foldM (insertMemory spaces) Map.empty (storedMemories stored) >>= \memories ->
-          validateHistories memories
-            *> foldM (insertReceipt memories) Map.empty (storedReceipts stored)
-            <&> LongTermState spaces memories
+      foldM insertSpace Map.empty (storedSpaces stored)
+        >>= loadMemories
+        >>= loadReceipts
+ where
+  loadMemories spaces = (spaces,) <$> foldM (insertMemory spaces) Map.empty (storedMemories stored)
+  loadReceipts (spaces, memories) =
+    validateHistories memories
+      *> foldM (insertReceipt memories) Map.empty (storedReceipts stored)
+      <&> LongTermState spaces memories
 
 insertSpace :: Map Text MemorySpace -> MemorySpace -> Either Text (Map Text MemorySpace)
 insertSpace spaces space =
@@ -689,7 +692,7 @@ remember ::
 remember persist lock request =
   either
     (pure . Left)
-    (\clean -> timestamp >>= \now -> mutate persist lock (rememberAt now clean))
+    (\clean -> timestamp >>= mutate persist lock . flip rememberAt clean)
     (cleanRemember request)
 
 rememberAt :: Integer -> RememberRequest -> LongTermState -> Either Text (LongTermState, LongMemory)
@@ -806,31 +809,37 @@ grep ::
   GrepRequest ->
   IO (Either Text MemoryGrepResult)
 grep persist lock request =
-  getPOSIXTime >>= \now ->
+  getPOSIXTime >>= runGrep
+ where
+  runGrep now =
     modifyMVar lock $ \state ->
       persistReceipt persist state memoryGrepReceipt (grepAt now request state)
 
 grepAt :: POSIXTime -> GrepRequest -> LongTermState -> Either Text MemoryGrepResult
 grepAt now request state =
-  cleanGrep request >>= \clean ->
-    queryTerms (grepQuery clean) <&> \terms ->
-      let ranked =
-            take (grepLimit clean)
-              . sortOn (Down . rankKey)
-              . mapMaybe (matched terms)
-              . filter (grepVisible clean)
-              $ latestMemories state
-          snippets = fmap (\(_, memory, matches) -> snippetFor memory matches) ranked
-          refs = fmap (memoryRef . (\(_, memory, _) -> memory)) ranked
-          receipt =
-            makeReceipt
-              now
-              "grep"
-              (grepIncarnationId clean)
-              (Just (grepQuery clean))
-              (grepSpaces clean state)
-              refs
-       in MemoryGrepResult snippets receipt
+  cleanGrep request
+    >>= collectTerms
+    >>= grepResults
+ where
+  collectTerms clean = (clean,) <$> queryTerms (grepQuery clean)
+  grepResults (clean, terms) =
+    let ranked =
+          take (grepLimit clean)
+            . sortOn (Down . rankKey)
+            . mapMaybe (matched terms)
+            . filter (grepVisible clean)
+            $ latestMemories state
+        snippets = fmap rankedSnippet ranked
+        refs = fmap (memoryRef . rankedMemory) ranked
+        receipt =
+          makeReceipt
+            now
+            "grep"
+            (grepIncarnationId clean)
+            (Just (grepQuery clean))
+            (grepSpaces clean state)
+            refs
+     in Right (MemoryGrepResult snippets receipt)
 
 cleanGrep :: GrepRequest -> Either Text GrepRequest
 cleanGrep request
@@ -906,6 +915,12 @@ rankKey :: (Int, LongMemory, [Text]) -> (Int, Integer, Int)
 rankKey (score, memory, _) =
   (score, longMemoryRevised memory, longMemoryRevision memory)
 
+rankedSnippet :: (Int, LongMemory, [Text]) -> MemorySnippet
+rankedSnippet (_, memory, matches) = snippetFor memory matches
+
+rankedMemory :: (Int, LongMemory, [Text]) -> LongMemory
+rankedMemory (_, memory, _) = memory
+
 snippetFor :: LongMemory -> [Text] -> MemorySnippet
 snippetFor memory matches =
   MemorySnippet
@@ -956,15 +971,17 @@ readOne ::
   ReadRequest ->
   IO (Either Text MemoryReadResult)
 readOne persist lock request =
-  getPOSIXTime >>= \now ->
+  getPOSIXTime >>= runRead
+ where
+  runRead now =
     modifyMVar lock $ \state ->
       persistReceipt persist state memoryReadReceipt (readAt now request state)
 
 readAt :: POSIXTime -> ReadRequest -> LongTermState -> Either Text MemoryReadResult
 readAt now request state =
-  cleanRead request >>= \clean ->
-    findRevision clean state >>= \memory ->
-      visibleResult clean memory
+  cleanRead request
+    >>= flip findRevision state
+    >>= visibleResult request
  where
   visibleResult clean memory
     | not (visibleTo (readIncarnationId clean) memory) =
@@ -1022,14 +1039,14 @@ void ::
 void persist lock request =
   either
     (pure . Left)
-    (\clean -> timestamp >>= \now -> mutate persist lock (voidAt now clean))
+    (\clean -> timestamp >>= mutate persist lock . flip voidAt clean)
     (cleanVoid request)
 
 voidAt :: Integer -> VoidRequest -> LongTermState -> Either Text (LongTermState, LongMemory)
 voidAt now request state =
-  latestById (voidMemoryId request) state >>= \current ->
-    owned current >>= \memory ->
-      Right (commitRevision memory state, memory)
+  latestById (voidMemoryId request) state
+    >>= owned
+    >>= commitVoid
  where
   owned current
     | longMemoryOwner current /= voidIncarnationId request =
@@ -1052,6 +1069,7 @@ voidAt now request state =
               longMemoryRevised = now,
               longMemoryStatus = MemoryVoid
             }
+  commitVoid memory = Right (commitRevision memory state, memory)
 
 cleanVoid :: VoidRequest -> Either Text VoidRequest
 cleanVoid request
@@ -1078,7 +1096,7 @@ latestById identifier state =
 inspectSpace :: MVar LongTermState -> Text -> MemoryVisibility -> IO (Either Text MemorySpace)
 inspectSpace lock rawOwner visibility
   | Text.null owner = pure (Left "memory space owner must not be empty")
-  | otherwise = readMVar lock <&> Right . (\state -> spaceAt state owner visibility)
+  | otherwise = readMVar lock <&> Right . (spaceAt <*> const owner <*> const visibility)
  where
   owner = Text.strip rawOwner
 

@@ -171,21 +171,22 @@ mkStore persist rewrite lock =
     }
  where
   append expected draft =
-    getPOSIXTime >>= \now ->
-      modifyMVar lock $ \state ->
-        let incarnation = draftIncarnationId draft
-            headSeq = Map.findWithDefault 0 incarnation (stateHeads state)
-         in case stale incarnation headSeq expected of
-              Just failure -> pure (state, Left failure)
-              Nothing ->
-                let next = headSeq + 1
-                    event = materialize next (round now) draft
-                    updated =
-                      state
-                        { stateEvents = Map.insertWith (flip (<>)) incarnation [event] (stateEvents state),
-                          stateHeads = Map.insert incarnation next (stateHeads state)
-                        }
-                 in persist event $> (updated, Right event)
+    getPOSIXTime >>= commit expected draft
+  commit expected draft now =
+    modifyMVar lock $ \state ->
+      let incarnation = draftIncarnationId draft
+          headSeq = Map.findWithDefault 0 incarnation (stateHeads state)
+       in case stale incarnation headSeq expected of
+            Just failure -> pure (state, Left failure)
+            Nothing ->
+              let next = headSeq + 1
+                  event = materialize next (round now) draft
+                  updated =
+                    state
+                      { stateEvents = Map.insertWith (flip (<>)) incarnation [event] (stateEvents state),
+                        stateHeads = Map.insert incarnation next (stateHeads state)
+                      }
+               in persist event $> (updated, Right event)
 
 stale :: Text -> Int -> Maybe ExperienceCursor -> Maybe Text
 stale _ _ Nothing = Nothing

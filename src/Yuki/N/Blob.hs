@@ -118,8 +118,7 @@ newBlobStore dir =
 
 newMemoryBlobStore :: IO BlobStore
 newMemoryBlobStore =
-  newMVar Map.empty >>= \payloads ->
-    newMVar emptyIndex <&> memoryStore payloads
+  memoryStore <$> newMVar Map.empty <*> newMVar emptyIndex
 
 fileStore :: FilePath -> MVar BlobIndex -> BlobStore
 fileStore dir = store persist write fetch
@@ -158,8 +157,9 @@ store persist write fetch lock =
           <$> readMVar lock
     }
  where
-  put mediaType bytes =
-    getPOSIXTime >>= \now ->
+  put mediaType bytes = getPOSIXTime >>= putNow
+   where
+    putNow now =
       let identifier = "sha256-" <> sha256 (LazyByteString.toStrict bytes)
           meta = BlobMeta identifier (fromIntegral (LazyByteString.length bytes)) mediaType (round now)
        in modifyMVar lock $ \index ->
@@ -170,7 +170,9 @@ store persist write fetch lock =
                   *> let updated = index {indexMetas = Map.insert identifier meta (indexMetas index)}
                       in persist updated $> (updated, meta)
   attach refId identifier incarnation purpose source =
-    getPOSIXTime >>= \now ->
+    getPOSIXTime >>= attachNow
+   where
+    attachNow now =
       modifyMVar lock $ \index ->
         case Map.lookup identifier (indexMetas index) of
           Nothing -> pure (index, Left ("unknown blob: " <> identifier))
@@ -181,13 +183,14 @@ store persist write fetch lock =
 
 loadIndex :: FilePath -> IO (Either Text BlobIndex)
 loadIndex path =
-  (try (eitherDecodeFileStrict path) :: IO (Either IOException (Either String BlobIndex)))
-    <&> \case
-      Left failure
-        | isDoesNotExistError failure -> Right emptyIndex
-        | otherwise -> Left ("cannot read blob index: " <> Text.pack (displayException failure))
-      Right (Left failure) -> Left ("invalid blob index: " <> Text.pack failure)
-      Right (Right index) -> Right index
+  classify
+    <$> (try (eitherDecodeFileStrict path) :: IO (Either IOException (Either String BlobIndex)))
+ where
+  classify (Left failure)
+    | isDoesNotExistError failure = Right emptyIndex
+    | otherwise = Left ("cannot read blob index: " <> Text.pack (displayException failure))
+  classify (Right (Left failure)) = Left ("invalid blob index: " <> Text.pack failure)
+  classify (Right (Right index)) = Right index
 
 payloadPath :: FilePath -> FilePath
 payloadPath dir = dir </> "payloads" </> "sha256"

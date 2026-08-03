@@ -126,18 +126,18 @@ mkFactStore limit lock persist = FactStore add search touch list archive invalid
     modifyMVar lock $ \facts ->
       case Map.lookup content facts of
         Just existing -> pure (facts, existing)
-        Nothing ->
-          getPOSIXTime >>= \now ->
-            let fact = Fact (factIdFor content) content kind source (round now) 0 0 False False
-                updated = retainFacts limit (Just content) (Map.insert content fact facts)
-             in persist updated $> (updated, fact)
+        Nothing -> getPOSIXTime >>= commit content kind source facts
+  commit content kind source facts now = persist updated $> (updated, fact)
+   where
+    fact = Fact (factIdFor content) content kind source (round now) 0 0 False False
+    updated = retainFacts limit (Just content) (Map.insert content fact facts)
   search query = rank query <$> list
-  touch hits =
-    getPOSIXTime >>= \now ->
-      modifyMVar lock $ \facts ->
-        let bumped = fmap (bump (round now)) hits
-            updated = merge facts bumped
-         in persist updated $> (updated, ())
+  touch hits = getPOSIXTime >>= touchNow hits
+  touchNow hits now =
+    modifyMVar lock $ \facts ->
+      let bumped = fmap (bump (round now)) hits
+          updated = merge facts bumped
+       in persist updated $> (updated, ())
   bump now fact = fact {factLastUsed = now, factUseCount = factUseCount fact + 1}
   list = Map.elems <$> readMVar lock
   archive cutoff =
@@ -179,12 +179,12 @@ newFactStoreWithLimit :: Int -> FilePath -> IO FactStore
 newFactStoreWithLimit requestedLimit dir =
   createDirectoryIfMissing True dir
     *> loadFacts path
-    >>= \loaded ->
-      let retained = retainFacts limit Nothing loaded
-       in persistFacts path retained
-            *> newMVar retained
-            <&> \lock -> mkFactStore limit lock (persistFacts path)
+    >>= buildStore . retainFacts limit Nothing
  where
+  buildStore retained =
+    persistFacts path retained
+      *> newMVar retained
+      <&> flip (mkFactStore limit) (persistFacts path)
   limit = max 1 requestedLimit
   path = factsPath dir
 
@@ -193,7 +193,7 @@ newMemoryFactStore = newMemoryFactStoreWithLimit factRetentionLimit
 
 newMemoryFactStoreWithLimit :: Int -> IO FactStore
 newMemoryFactStoreWithLimit requestedLimit =
-  newMVar Map.empty <&> \lock -> mkFactStore (max 1 requestedLimit) lock (const (pure ()))
+  newMVar Map.empty <&> flip (mkFactStore (max 1 requestedLimit)) (const (pure ()))
 
 factsPath :: FilePath -> FilePath
 factsPath dir = dir ++ "/facts.jsonl"

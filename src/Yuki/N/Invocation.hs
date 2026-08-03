@@ -51,26 +51,31 @@ invokeModel spec =
  where
   go _ [] = pure (Left "model chain exhausted")
   go spent (model : rest) =
-    attempts model spent 1 >>= \case
-      Right result -> pure (Right result)
-      Left failure
-        | null rest -> pure (Left failure)
-        | otherwise -> go (spent + max 1 (invocationAttemptsPerModel spec)) rest
+    attempts model spent 1 >>= continue
+   where
+    continue (Right result) = pure (Right result)
+    continue (Left failure)
+      | null rest = pure (Left failure)
+      | otherwise = go (spent + max 1 (invocationAttemptsPerModel spec)) rest
   attempts model spent trial =
-    runAttempt model (spent + trial) >>= \case
-      Right result -> pure (Right result)
-      Left failure
-        | trial < max 1 (invocationAttemptsPerModel spec) -> attempts model spent (trial + 1)
-        | otherwise -> pure (Left failure)
+    runAttempt model (spent + trial) >>= continue
+   where
+    continue (Right result) = pure (Right result)
+    continue (Left failure)
+      | trial < max 1 (invocationAttemptsPerModel spec) = attempts model spent (trial + 1)
+      | otherwise = pure (Left failure)
   runAttempt model ordinal =
     race
       (threadDelay (max 1 (invocationTimeoutMs spec) * 1000))
       (attempt model ordinal)
-      >>= \case
-        Left _ -> pure (Left "model invocation timed out")
-        Right result -> pure result
+      >>= continue
+   where
+    continue (Left _) = pure (Left "model invocation timed out")
+    continue (Right result) = pure result
   attempt model ordinal =
-    newIORef "" >>= \output ->
+    newIORef "" >>= withOutput
+   where
+    withOutput output =
       let request = ModelRequest (invocationMessages spec) []
           journal = scopedJournal ordinal
           emit event =
@@ -88,21 +93,20 @@ invokeModel spec =
             recordMaybe journal (ModelRequestEntry request)
               *> recordMaybe journal (ApiRequestEntry (modelRender model request))
               *> streamModel model request emit
-              >>= \finish ->
-                recordMaybe journal (ModelFinishEntry finish)
-                  *> readIORef output
-                  >>= \text ->
-                    pure
-                      ( InvocationResult
-                          (invocationId spec)
-                          (invocationKind spec)
-                          (invocationPromptRevision spec)
-                          (modelProvider model)
-                          (modelName model)
-                          ordinal
-                          text
-                          finish
-                      )
+              >>= complete
+          complete finish =
+            recordMaybe journal (ModelFinishEntry finish)
+              *> (result finish <$> readIORef output)
+          result finish text =
+            InvocationResult
+              (invocationId spec)
+              (invocationKind spec)
+              (invocationPromptRevision spec)
+              (modelProvider model)
+              (modelName model)
+              ordinal
+              text
+              finish
        in catchInvocation
             ( (try execute :: IO (Either ProviderFailure InvocationResult))
                 >>= either (pure . Left . providerMessage) (pure . Right)

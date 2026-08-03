@@ -238,8 +238,7 @@ mkStore persist blobs lock =
   ContextEpochStore
     { contextEpochCommit = commit,
       contextEpochHead = \incarnationId taskId ->
-        readMVar lock <&> \state ->
-          Map.lookup (headKey incarnationId taskId) (stateHeads state) >>= flip Map.lookup (stateEpochs state),
+        headEpoch incarnationId taskId <$> readMVar lock,
       contextEpochRead = \identifier -> Map.lookup identifier . stateEpochs <$> readMVar lock,
       contextEpochList = \incarnationId taskId ->
         sortOn contextEpochRevision
@@ -257,73 +256,83 @@ mkStore persist blobs lock =
     }
  where
   commit incarnation task expected inputs wake =
-    materializeSegments blobs incarnation task inputs >>= \segments ->
-      getPOSIXTime >>= \now ->
-        modifyMVar lock $ \state ->
-          let scope = headKey incarnation task
-              currentId = Map.lookup scope (stateHeads state)
-           in if currentId /= expected
-                then pure (state, Left (stale currentId expected))
-                else
-                  let parent = currentId >>= flip Map.lookup (stateEpochs state)
-                      revision = maybe 1 ((+ 1) . contextEpochRevision) parent
-                      segmentIds = fmap contextSegmentId segments
-                      effective = epochHash incarnation task revision segmentIds wake
-                      identifier = "epoch-" <> Text.take 32 effective
-                      epoch =
-                        ContextEpoch identifier incarnation task currentId revision segmentIds (sum (fmap (estimateTokens . segmentInputContent) inputs)) wake effective (round now)
-                      changed =
-                        state
-                          { stateEpochs = Map.insert identifier epoch (stateEpochs state),
-                            stateSegments = foldr (\segment -> Map.insert (contextSegmentId segment) segment) (stateSegments state) segments,
-                            stateHeads = Map.insert scope identifier (stateHeads state)
-                          }
-                   in persist changed $> (changed, Right epoch)
+    liftA2 (,) (materializeSegments blobs incarnation task inputs) getPOSIXTime
+      >>= commitNow incarnation task expected inputs wake
+  commitNow incarnation task expected inputs wake (segments, now) =
+    modifyMVar lock $ \state ->
+      let scope = headKey incarnation task
+          currentId = Map.lookup scope (stateHeads state)
+       in if currentId /= expected
+            then pure (state, Left (stale currentId expected))
+            else
+              let parent = currentId >>= flip Map.lookup (stateEpochs state)
+                  revision = maybe 1 ((+ 1) . contextEpochRevision) parent
+                  segmentIds = fmap contextSegmentId segments
+                  effective = epochHash incarnation task revision segmentIds wake
+                  identifier = "epoch-" <> Text.take 32 effective
+                  epoch =
+                    ContextEpoch identifier incarnation task currentId revision segmentIds (sum (fmap (estimateTokens . segmentInputContent) inputs)) wake effective (round now)
+                  changed =
+                    state
+                      { stateEpochs = Map.insert identifier epoch (stateEpochs state),
+                        stateSegments = foldr (\segment -> Map.insert (contextSegmentId segment) segment) (stateSegments state) segments,
+                        stateHeads = Map.insert scope identifier (stateHeads state)
+                      }
+               in persist changed $> (changed, Right epoch)
   project identifier =
-    readMVar lock >>= \state ->
-      case Map.lookup identifier (stateEpochs state) of
-        Nothing -> pure (Left ("unknown context epoch: " <> identifier))
-        Just epoch ->
-          traverse
-            ( \segmentId ->
-                maybe
-                  (pure (Left ("missing context segment: " <> segmentId)))
-                  (\segment -> blobFetch blobs (contextSegmentContentRef segment) <&> fmap ((,) segment . TextEncoding.decodeUtf8 . LazyByteString.toStrict))
-                  (Map.lookup segmentId (stateSegments state))
-            )
-            (contextEpochSegmentIds epoch)
-            <&> sequence
+    readMVar lock >>= projectState identifier
+  projectState identifier state =
+    maybe
+      (pure (Left ("unknown context epoch: " <> identifier)))
+      (projectEpoch (stateSegments state))
+      (Map.lookup identifier (stateEpochs state))
+  projectEpoch segments epoch =
+    traverse (fetchSegment segments) (contextEpochSegmentIds epoch) <&> sequence
+  fetchSegment segments segmentId =
+    maybe
+      (pure (Left ("missing context segment: " <> segmentId)))
+      fetchContent
+      (Map.lookup segmentId segments)
+  fetchContent segment =
+    blobFetch blobs (contextSegmentContentRef segment)
+      <&> fmap ((,) segment . TextEncoding.decodeUtf8 . LazyByteString.toStrict)
+  headEpoch incarnationId taskId state =
+    Map.lookup (headKey incarnationId taskId) (stateHeads state) >>= flip Map.lookup (stateEpochs state)
 
 materializeSegments :: BlobStore -> Text -> Text -> [ContextSegmentInput] -> IO [ContextSegment]
 materializeSegments blobs incarnation task =
   traverse materialize
  where
   materialize input =
-    getPOSIXTime >>= \now ->
-      let contentBytes = TextEncoding.encodeUtf8 (segmentInputContent input)
-          contentHash = sha256 contentBytes
-          identifier =
-            "segment-"
-              <> Text.take
-                32
-                ( sha256
-                    ( TextEncoding.encodeUtf8
-                        ( Text.intercalate
-                            "\NUL"
-                            [ incarnation,
-                              task,
-                              segmentInputSourceId input,
-                              Text.pack (show (segmentInputKind input)),
-                              contentHash,
-                              fromMaybe "" (segmentInputCausalGroup input),
-                              fromMaybe "" (segmentInputTurnGroup input)
-                            ]
-                        )
-                    )
-                )
-       in blobPut blobs "text/plain; charset=utf-8" (LazyByteString.fromStrict contentBytes) >>= \meta ->
-            blobAttach blobs identifier (blobId meta) incarnation "context-segment" (segmentInputSourceId input)
-              >>= either (ioError . userError . Text.unpack) (const (pure (segment identifier contentHash (blobId meta) (round now) input)))
+    getPOSIXTime >>= persistSegment input
+  persistSegment input now =
+    blobPut blobs "text/plain; charset=utf-8" (LazyByteString.fromStrict contentBytes)
+      >>= attachBlob
+   where
+    contentBytes = TextEncoding.encodeUtf8 (segmentInputContent input)
+    contentHash = sha256 contentBytes
+    identifier =
+      "segment-"
+        <> Text.take
+          32
+          ( sha256
+              ( TextEncoding.encodeUtf8
+                  ( Text.intercalate
+                      "\NUL"
+                      [ incarnation,
+                        task,
+                        segmentInputSourceId input,
+                        Text.pack (show (segmentInputKind input)),
+                        contentHash,
+                        fromMaybe "" (segmentInputCausalGroup input),
+                        fromMaybe "" (segmentInputTurnGroup input)
+                      ]
+                  )
+              )
+          )
+    attachBlob meta =
+      blobAttach blobs identifier (blobId meta) incarnation "context-segment" (segmentInputSourceId input)
+        >>= either (ioError . userError . Text.unpack) (const (pure (segment identifier contentHash (blobId meta) (round now) input)))
   segment identifier contentHash contentRef now input =
     ContextSegment
       identifier
@@ -399,7 +408,7 @@ aguiSegments = fmap concat . traverse one
       pure [ContextSegmentInput (AGUI.systemId message) SegmentInstruction AuthorityKernel (AGUI.systemContent message) Nothing Nothing]
     AGUI.User message ->
       AGUI.userText (AGUI.userContent message)
-        <&> \content -> [ContextSegmentInput (AGUI.userId message) SegmentUser AuthorityUser content Nothing Nothing]
+        <&> userSegment message
     AGUI.Assistant message ->
       pure
         ( [ ContextSegmentInput (AGUI.assistantId message) SegmentAssistant AuthorityAgent content Nothing (Just (AGUI.assistantId message))
@@ -428,6 +437,8 @@ aguiSegments = fmap concat . traverse one
         ]
     AGUI.Reasoning _ -> pure []
     AGUI.Activity _ -> pure []
+  userSegment message content =
+    [ContextSegmentInput (AGUI.userId message) SegmentUser AuthorityUser content Nothing Nothing]
   modelCall call =
     ModelToolCall
       (AGUI.toolCallId call)
@@ -450,7 +461,9 @@ projectedAguiMessages = project
       ([], _) -> prepend assistant rest
       calls -> projectCalls (Just assistant) calls
   projectCalls assistant (calls, remaining) =
-    traverse decodeCall calls >>= \decoded ->
+    traverse decodeCall calls >>= assemble
+   where
+    assemble decoded =
       let (results, following) = span (isKind SegmentToolResult) remaining
        in validateBatch calls decoded results
             *> ( (:)
@@ -458,7 +471,7 @@ projectedAguiMessages = project
                    <$> ((<>) <$> traverse toolResultMessage results <*> project following)
                )
   prepend current rest =
-    projectedMessage current >>= \message -> (message :) <$> project rest
+    (:) <$> projectedMessage current <*> project rest
   spanCalls leader =
     span
       ( \candidate ->
@@ -494,8 +507,10 @@ projectedAguiMessages = project
       (modelToolCallId call)
       (AGUI.FunctionCall (modelToolName call) (modelToolArguments call))
       Nothing
-  toolResultMessage projected@(segment, content) =
-    resultId projected <&> \call ->
+  toolResultMessage projected =
+    resultId projected <&> toolMessage projected
+   where
+    toolMessage (segment, content) call =
       AGUI.Tool
         ( AGUI.ToolMessage
             (contextSegmentSourceRef segment)
@@ -567,14 +582,15 @@ projectedAguiMessages = project
 
 loadState :: FilePath -> IO (Either Text ContextState)
 loadState path =
-  (try (eitherDecodeFileStrict path) :: IO (Either IOException (Either String ContextState)))
-    <&> \case
-      Left failure
-        | isDoesNotExistError failure -> Right emptyState
-        | otherwise -> Left ("cannot read context epoch store: " <> Text.pack (displayException failure))
-      Right (Left failure) -> Left ("invalid context epoch store: " <> Text.pack failure)
-      Right (Right state) -> validate (rebuildHeads state)
+  handleLoadError
+    <$> (try (eitherDecodeFileStrict path) :: IO (Either IOException (Either String ContextState)))
  where
+  handleLoadError = \case
+    Left failure
+      | isDoesNotExistError failure -> Right emptyState
+      | otherwise -> Left ("cannot read context epoch store: " <> Text.pack (displayException failure))
+    Right (Left failure) -> Left ("invalid context epoch store: " <> Text.pack failure)
+    Right (Right state) -> validate (rebuildHeads state)
   rebuildHeads state =
     state
       { stateHeads =

@@ -13,14 +13,15 @@ import Yuki.N.Config (loadSettings)
 import Yuki.N.Replay
 
 main :: IO ()
-main =
-  getArgs >>= \case
-    [] -> runFromEnvironment
-    ["check"] -> loadSettings >>= either (die . Text.unpack) (const (putStrLn "YUKI.N configuration OK"))
-    ["replay", path] -> audit path Nothing
-    ["replay", path, runId] -> audit path (Just (Text.pack runId))
-    ["anatomy", path] -> anatomize path
-    _ -> die "usage: yuki-n [check | replay JOURNAL [RUN_ID] | anatomy JOURNAL]"
+main = getArgs >>= dispatch
+
+dispatch :: [String] -> IO ()
+dispatch [] = runFromEnvironment
+dispatch ["check"] = loadSettings >>= either (die . Text.unpack) (const (putStrLn "YUKI.N configuration OK"))
+dispatch ["replay", path] = audit path Nothing
+dispatch ["replay", path, runId] = audit path (Just (Text.pack runId))
+dispatch ["anatomy", path] = anatomize path
+dispatch _ = die "usage: yuki-n [check | replay JOURNAL [RUN_ID] | anatomy JOURNAL]"
 
 anatomize :: FilePath -> IO ()
 anatomize path =

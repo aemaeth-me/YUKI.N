@@ -129,7 +129,9 @@ encryptedEntity = \case
 
 instance FromJSON Event where
   parseJSON = withObject "Event" $ \fields ->
-    fields .: "type" >>= \case
+    fields .: "type" >>= parseByType fields
+   where
+    parseByType fields = \case
       "RUN_STARTED" ->
         RunStarted <$> fields .: "threadId" <*> fields .: "runId" <*> fields .:? "parentRunId"
       "RUN_FINISHED" ->
@@ -171,7 +173,7 @@ instance FromJSON Event where
       "RAW" -> Raw <$> fields .: "event" <*> fields .:? "source"
       "CUSTOM" -> Custom <$> fields .: "name" <*> fields .: "value"
       other -> fail ("unknown AG-UI event type: " <> other)
-   where
+
     parseEntity = \case
       ("tool-call" :: Text) -> pure EncryptedToolCall
       "message" -> pure EncryptedMessage

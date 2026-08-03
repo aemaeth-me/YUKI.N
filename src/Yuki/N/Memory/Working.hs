@@ -532,43 +532,43 @@ mkStore persist lock =
     | cursorStreamId cursor /= experienceStream incarnation = pure (Left (cursorMismatch incarnation cursor))
     | cursorSeq cursor < 0 = pure (Left "experience cursor must not be negative")
     | otherwise =
-        getPOSIXTime >>= \now ->
-          modifyMVar lock $ \state ->
-            case Map.lookup incarnation (stateHeads state) of
-              Just _ -> pure (state, Left ("working memory already exists: " <> incarnation))
-              Nothing ->
-                let stamp = round now
-                    head' =
-                      WorkingMemoryHead
-                        ("working/" <> incarnation)
-                        incarnation
-                        1
-                        WorkingAwake
-                        cursor
-                        Nothing
-                        Nothing
-                        Nothing
-                        Map.empty
-                        Nothing
-                        stamp
-                        stamp
-                    changed = putHead head' state
-                 in save persist changed head'
+        stampedModifyMVar lock $ \stamp state ->
+          case Map.lookup incarnation (stateHeads state) of
+            Just _ -> pure (state, Left ("working memory already exists: " <> incarnation))
+            Nothing ->
+              let head' =
+                    WorkingMemoryHead
+                      ("working/" <> incarnation)
+                      incarnation
+                      1
+                      WorkingAwake
+                      cursor
+                      Nothing
+                      Nothing
+                      Nothing
+                      Map.empty
+                      Nothing
+                      stamp
+                      stamp
+                  changed = putHead head' state
+               in save persist changed head'
   appendCursor incarnation expected cursor =
     mutateHead persist lock incarnation expected $ \now state head' ->
       stateRequired WorkingAwake head'
         *> advance (workingMemoryCursor head') cursor
-        <&> \advanced ->
-          if advanced
-            then
-              let changedHead =
-                    head'
-                      { workingMemoryRevision = expected + 1,
-                        workingMemoryCursor = cursor,
-                        workingMemoryUpdated = now
-                      }
-               in (putHead changedHead state, changedHead)
-            else (state, head')
+        <&> advancedHead state head' now
+   where
+    advancedHead state head' now advanced =
+      if advanced
+        then
+          let changedHead =
+                head'
+                  { workingMemoryRevision = expected + 1,
+                    workingMemoryCursor = cursor,
+                    workingMemoryUpdated = now
+                  }
+           in (putHead changedHead state, changedHead)
+        else (state, head')
   putFocus incarnation expected frame =
     mutateHead persist lock incarnation expected $ \now state head' ->
       stateRequired WorkingAwake head'
@@ -595,246 +595,230 @@ mkStore persist lock =
     | any (Text.null . Text.strip) [cycleId, task, baseEpoch] =
         pure (Left "sleep cycle, task and base epoch ids must not be empty")
     | otherwise =
-        getPOSIXTime >>= \now ->
-          modifyMVar lock $ \state ->
-            case (Map.lookup incarnation (stateHeads state), Map.lookup cycleId (stateSleepCycles state)) of
-              (Nothing, _) -> pure (state, Left ("unknown working memory: " <> incarnation))
-              (_, Just _) -> pure (state, Left ("sleep cycle already exists: " <> cycleId))
-              (Just head', Nothing)
-                | workingMemoryRevision head' /= expected -> pure (state, Left (stale expected (workingMemoryRevision head')))
-                | workingMemoryStatus head' /= WorkingAwake -> pure (state, Left (wrongState WorkingAwake head'))
-                | Map.notMember task (workingMemoryFocusFrames head') -> pure (state, Left ("unknown focus task: " <> task))
-                | otherwise ->
-                    let stamp = round now
-                        changedHead =
-                          head'
-                            { workingMemoryRevision = expected + 1,
-                              workingMemoryStatus = WorkingQuiescing,
-                              workingMemoryUpdated = stamp
-                            }
-                        cycle' =
-                          SleepCycle
-                            cycleId
-                            incarnation
-                            task
-                            run
-                            baseEpoch
-                            trigger
-                            CycleQuiescing
-                            (expected + 1)
-                            (workingMemoryCursor head')
-                            []
-                            Nothing
-                            Nothing
-                            Nothing
-                            Nothing
-                            stamp
-                            stamp
-                        changed = putCycle cycle' (putHead changedHead state)
-                     in save persist changed (changedHead, cycle')
+        stampedModifyMVar lock $ \stamp state ->
+          case (Map.lookup incarnation (stateHeads state), Map.lookup cycleId (stateSleepCycles state)) of
+            (Nothing, _) -> pure (state, Left ("unknown working memory: " <> incarnation))
+            (_, Just _) -> pure (state, Left ("sleep cycle already exists: " <> cycleId))
+            (Just head', Nothing)
+              | workingMemoryRevision head' /= expected -> pure (state, Left (stale expected (workingMemoryRevision head')))
+              | workingMemoryStatus head' /= WorkingAwake -> pure (state, Left (wrongState WorkingAwake head'))
+              | Map.notMember task (workingMemoryFocusFrames head') -> pure (state, Left ("unknown focus task: " <> task))
+              | otherwise ->
+                  let changedHead =
+                        head'
+                          { workingMemoryRevision = expected + 1,
+                            workingMemoryStatus = WorkingQuiescing,
+                            workingMemoryUpdated = stamp
+                          }
+                      cycle' =
+                        SleepCycle
+                          cycleId
+                          incarnation
+                          task
+                          run
+                          baseEpoch
+                          trigger
+                          CycleQuiescing
+                          (expected + 1)
+                          (workingMemoryCursor head')
+                          []
+                          Nothing
+                          Nothing
+                          Nothing
+                          Nothing
+                          stamp
+                          stamp
+                      changed = putCycle cycle' (putHead changedHead state)
+                   in save persist changed (changedHead, cycle')
   abortSleep incarnation expected cycleId reason
     | Text.null (Text.strip reason) = pure (Left "sleep abort reason must not be empty")
     | otherwise =
-        getPOSIXTime >>= \now ->
-          modifyMVar lock $ \state ->
-            withHeadCycle state incarnation expected cycleId WorkingQuiescing CycleQuiescing $ \head' cycle' ->
-              let stamp = round now
-                  failure = Text.strip reason
-                  changedHead =
-                    head'
-                      { workingMemoryRevision = expected + 1,
-                        workingMemoryStatus = WorkingAwake,
-                        workingMemoryDegradedReason = Just failure,
-                        workingMemoryUpdated = stamp
-                      }
-                  changedCycle =
-                    cycle'
-                      { sleepCycleStatus = CycleDegraded,
-                        sleepCycleFailure = Just failure,
-                        sleepCycleUpdated = stamp
-                      }
-                  changed = putCycle changedCycle (putHead changedHead state)
-               in save persist changed (changedHead, changedCycle)
+        stampedModifyMVar lock $ \stamp state ->
+          withHeadCycle state incarnation expected cycleId WorkingQuiescing CycleQuiescing $ \head' cycle' ->
+            let failure = Text.strip reason
+                changedHead =
+                  head'
+                    { workingMemoryRevision = expected + 1,
+                      workingMemoryStatus = WorkingAwake,
+                      workingMemoryDegradedReason = Just failure,
+                      workingMemoryUpdated = stamp
+                    }
+                changedCycle =
+                  cycle'
+                    { sleepCycleStatus = CycleDegraded,
+                      sleepCycleFailure = Just failure,
+                      sleepCycleUpdated = stamp
+                    }
+                changed = putCycle changedCycle (putHead changedHead state)
+             in save persist changed (changedHead, changedCycle)
   prepareCheckpoint incarnation expected cycleId checkpoint packet =
-    getPOSIXTime >>= \now ->
-      modifyMVar lock $ \state ->
-        case (Map.lookup incarnation (stateHeads state), Map.lookup cycleId (stateSleepCycles state)) of
-          (Nothing, _) -> pure (state, Left ("unknown working memory: " <> incarnation))
-          (_, Nothing) -> pure (state, Left ("unknown sleep cycle: " <> cycleId))
-          (Just head', Just cycle')
-            | workingMemoryRevision head' /= expected -> pure (state, Left (stale expected (workingMemoryRevision head')))
-            | workingMemoryStatus head' /= WorkingQuiescing -> pure (state, Left (wrongState WorkingQuiescing head'))
-            | sleepCycleIncarnationId cycle' /= incarnation -> pure (state, Left "sleep cycle incarnation mismatch")
-            | sleepCycleStatus cycle' == CyclePrepared ->
-                case prepared state cycle' of
-                  Just (storedCheckpoint, storedPacket)
-                    | storedCheckpoint == checkpoint && storedPacket == packet -> pure (state, Right cycle')
-                  _ -> pure (state, Left ("sleep cycle already prepared: " <> cycleId))
-            | sleepCycleStatus cycle' /= CycleQuiescing -> pure (state, Left (wrongCycle CycleQuiescing cycle'))
-            | otherwise ->
-                case validatePrepared expected head' cycle' checkpoint packet state of
-                  Left failure -> pure (state, Left failure)
-                  Right () ->
-                    let stamp = round now
-                        changedCycle =
-                          cycle'
-                            { sleepCycleStatus = CyclePrepared,
-                              sleepCycleForgotten = wakePacketForgotten packet,
-                              sleepCycleCheckpointId = Just (workingCheckpointId checkpoint),
-                              sleepCycleWakePacketId = Just (wakePacketId packet),
-                              sleepCycleUpdated = stamp
-                            }
-                        changed =
-                          state
-                            { stateCheckpoints =
-                                Map.insert (workingCheckpointId checkpoint) checkpoint (stateCheckpoints state),
-                              stateWakePackets =
-                                Map.insert (wakePacketId packet) packet (stateWakePackets state),
-                              stateSleepCycles =
-                                Map.insert cycleId changedCycle (stateSleepCycles state)
-                            }
-                     in save persist changed changedCycle
+    stampedModifyMVar lock $ \stamp state ->
+      case (Map.lookup incarnation (stateHeads state), Map.lookup cycleId (stateSleepCycles state)) of
+        (Nothing, _) -> pure (state, Left ("unknown working memory: " <> incarnation))
+        (_, Nothing) -> pure (state, Left ("unknown sleep cycle: " <> cycleId))
+        (Just head', Just cycle')
+          | workingMemoryRevision head' /= expected -> pure (state, Left (stale expected (workingMemoryRevision head')))
+          | workingMemoryStatus head' /= WorkingQuiescing -> pure (state, Left (wrongState WorkingQuiescing head'))
+          | sleepCycleIncarnationId cycle' /= incarnation -> pure (state, Left "sleep cycle incarnation mismatch")
+          | sleepCycleStatus cycle' == CyclePrepared ->
+              case prepared state cycle' of
+                Just (storedCheckpoint, storedPacket)
+                  | storedCheckpoint == checkpoint && storedPacket == packet -> pure (state, Right cycle')
+                _ -> pure (state, Left ("sleep cycle already prepared: " <> cycleId))
+          | sleepCycleStatus cycle' /= CycleQuiescing -> pure (state, Left (wrongCycle CycleQuiescing cycle'))
+          | otherwise ->
+              case validatePrepared expected head' cycle' checkpoint packet state of
+                Left failure -> pure (state, Left failure)
+                Right () ->
+                  let changedCycle =
+                        cycle'
+                          { sleepCycleStatus = CyclePrepared,
+                            sleepCycleForgotten = wakePacketForgotten packet,
+                            sleepCycleCheckpointId = Just (workingCheckpointId checkpoint),
+                            sleepCycleWakePacketId = Just (wakePacketId packet),
+                            sleepCycleUpdated = stamp
+                          }
+                      changed =
+                        state
+                          { stateCheckpoints =
+                              Map.insert (workingCheckpointId checkpoint) checkpoint (stateCheckpoints state),
+                            stateWakePackets =
+                              Map.insert (wakePacketId packet) packet (stateWakePackets state),
+                            stateSleepCycles =
+                              Map.insert cycleId changedCycle (stateSleepCycles state)
+                          }
+                   in save persist changed changedCycle
   commitSleep incarnation expected cycleId =
-    getPOSIXTime >>= \now ->
-      modifyMVar lock $ \state ->
-        withHeadCycle state incarnation expected cycleId WorkingQuiescing CyclePrepared $ \head' cycle' ->
-          case prepared state cycle' of
-            Nothing -> pure (state, Left "prepared sleep objects are missing")
-            Just (checkpoint, packet) ->
-              let stamp = round now
-                  changedHead =
-                    head'
-                      { workingMemoryRevision = expected + 1,
-                        workingMemoryStatus = WorkingAsleep,
-                        workingMemoryCursor = workingCheckpointCoveredThrough checkpoint,
-                        workingMemoryCheckpointId = Just (workingCheckpointId checkpoint),
-                        workingMemoryWakePacketId = Just (wakePacketId packet),
-                        workingMemoryUpdated = stamp
-                      }
-                  changedCycle =
-                    cycle'
-                      { sleepCycleStatus = CycleAsleep,
-                        sleepCycleUpdated = stamp
-                      }
-                  changed = putCycle changedCycle (putHead changedHead state)
-               in save persist changed (changedHead, changedCycle)
+    stampedModifyMVar lock $ \stamp state ->
+      withHeadCycle state incarnation expected cycleId WorkingQuiescing CyclePrepared $ \head' cycle' ->
+        case prepared state cycle' of
+          Nothing -> pure (state, Left "prepared sleep objects are missing")
+          Just (checkpoint, packet) ->
+            let changedHead =
+                  head'
+                    { workingMemoryRevision = expected + 1,
+                      workingMemoryStatus = WorkingAsleep,
+                      workingMemoryCursor = workingCheckpointCoveredThrough checkpoint,
+                      workingMemoryCheckpointId = Just (workingCheckpointId checkpoint),
+                      workingMemoryWakePacketId = Just (wakePacketId packet),
+                      workingMemoryUpdated = stamp
+                    }
+                changedCycle =
+                  cycle'
+                    { sleepCycleStatus = CycleAsleep,
+                      sleepCycleUpdated = stamp
+                    }
+                changed = putCycle changedCycle (putHead changedHead state)
+             in save persist changed (changedHead, changedCycle)
   beginWake incarnation expected cycleId =
-    getPOSIXTime >>= \now ->
-      modifyMVar lock $ \state ->
-        withHeadCycle state incarnation expected cycleId WorkingAsleep CycleAsleep $ \head' cycle' ->
-          let stamp = round now
-              changedHead =
-                head'
-                  { workingMemoryRevision = expected + 1,
-                    workingMemoryStatus = WorkingWaking,
-                    workingMemoryUpdated = stamp
-                  }
-              changedCycle =
-                cycle'
-                  { sleepCycleStatus = CycleWaking,
-                    sleepCycleExpectedRevision = expected + 1,
-                    sleepCycleUpdated = stamp
-                  }
-              changed = putCycle changedCycle (putHead changedHead state)
-           in save persist changed (changedHead, changedCycle)
+    stampedModifyMVar lock $ \stamp state ->
+      withHeadCycle state incarnation expected cycleId WorkingAsleep CycleAsleep $ \head' cycle' ->
+        let changedHead =
+              head'
+                { workingMemoryRevision = expected + 1,
+                  workingMemoryStatus = WorkingWaking,
+                  workingMemoryUpdated = stamp
+                }
+            changedCycle =
+              cycle'
+                { sleepCycleStatus = CycleWaking,
+                  sleepCycleExpectedRevision = expected + 1,
+                  sleepCycleUpdated = stamp
+                }
+            changed = putCycle changedCycle (putHead changedHead state)
+         in save persist changed (changedHead, changedCycle)
   commitWake incarnation expected cycleId replayed frame =
-    getPOSIXTime >>= \now ->
-      modifyMVar lock $ \state ->
-        withHeadCycle state incarnation expected cycleId WorkingWaking CycleWaking $ \head' cycle' ->
-          case advance (workingMemoryCursor head') replayed
-            *> traverse_
-              ( \next ->
-                  let replayedHead = head' {workingMemoryCursor = replayed}
-                   in validateFrame replayedHead next
-                        *> validateFocusRevision
-                          (Map.lookup (focusFrameTaskId next) (workingMemoryFocusFrames head'))
-                          next
-              )
-              frame of
-            Left failure -> pure (state, Left failure)
-            Right _ ->
-              let stamp = round now
-                  awake =
-                    head'
-                      { workingMemoryRevision = expected + 1,
-                        workingMemoryStatus = WorkingAwake,
-                        workingMemoryCursor = replayed,
-                        workingMemoryDegradedReason = Nothing,
-                        workingMemoryUpdated = stamp
-                      }
-                  changedHead =
-                    maybe
-                      awake
-                      ( \next ->
-                          awake
-                            { workingMemoryActiveTaskId =
-                                bool (workingMemoryActiveTaskId awake) (Just (focusFrameTaskId next)) (focusFrameStatus next == FocusActive),
-                              workingMemoryFocusFrames =
-                                Map.insert (focusFrameTaskId next) next (workingMemoryFocusFrames awake)
-                            }
-                      )
-                      frame
-                  changedCycle =
-                    cycle'
-                      { sleepCycleStatus = CycleAwake,
-                        sleepCycleReplayCursor = Just replayed,
-                        sleepCycleUpdated = stamp
-                      }
-                  changed = putCycle changedCycle (putHead changedHead state)
-               in save persist changed (changedHead, changedCycle)
+    stampedModifyMVar lock $ \stamp state ->
+      withHeadCycle state incarnation expected cycleId WorkingWaking CycleWaking $ \head' cycle' ->
+        case advance (workingMemoryCursor head') replayed
+          *> traverse_
+            ( \next ->
+                let replayedHead = head' {workingMemoryCursor = replayed}
+                 in validateFrame replayedHead next
+                      *> validateFocusRevision
+                        (Map.lookup (focusFrameTaskId next) (workingMemoryFocusFrames head'))
+                        next
+            )
+            frame of
+          Left failure -> pure (state, Left failure)
+          Right _ ->
+            let awake =
+                  head'
+                    { workingMemoryRevision = expected + 1,
+                      workingMemoryStatus = WorkingAwake,
+                      workingMemoryCursor = replayed,
+                      workingMemoryDegradedReason = Nothing,
+                      workingMemoryUpdated = stamp
+                    }
+                changedHead =
+                  maybe
+                    awake
+                    ( \next ->
+                        awake
+                          { workingMemoryActiveTaskId =
+                              bool (workingMemoryActiveTaskId awake) (Just (focusFrameTaskId next)) (focusFrameStatus next == FocusActive),
+                            workingMemoryFocusFrames =
+                              Map.insert (focusFrameTaskId next) next (workingMemoryFocusFrames awake)
+                          }
+                    )
+                    frame
+                changedCycle =
+                  cycle'
+                    { sleepCycleStatus = CycleAwake,
+                      sleepCycleReplayCursor = Just replayed,
+                      sleepCycleUpdated = stamp
+                    }
+                changed = putCycle changedCycle (putHead changedHead state)
+             in save persist changed (changedHead, changedCycle)
   degradeWake incarnation expected cycleId reason
     | Text.null (Text.strip reason) = pure (Left "degraded wake reason must not be empty")
     | otherwise =
-        getPOSIXTime >>= \now ->
-          modifyMVar lock $ \state ->
-            withHeadCycle state incarnation expected cycleId WorkingWaking CycleWaking $ \head' cycle' ->
-              let stamp = round now
-                  failure = Text.strip reason
+        stampedModifyMVar lock $ \stamp state ->
+          withHeadCycle state incarnation expected cycleId WorkingWaking CycleWaking $ \head' cycle' ->
+            let failure = Text.strip reason
+                changedHead =
+                  head'
+                    { workingMemoryRevision = expected + 1,
+                      workingMemoryStatus = WorkingDegraded,
+                      workingMemoryDegradedReason = Just failure,
+                      workingMemoryUpdated = stamp
+                    }
+                changedCycle =
+                  cycle'
+                    { sleepCycleStatus = CycleDegraded,
+                      sleepCycleFailure = Just failure,
+                      sleepCycleUpdated = stamp
+                    }
+                changed = putCycle changedCycle (putHead changedHead state)
+             in save persist changed (changedHead, changedCycle)
+  recover incarnation replayed =
+    stampedModifyMVar lock $ \stamp state ->
+      case Map.lookup incarnation (stateHeads state) of
+        Nothing -> pure (state, Left ("unknown working memory: " <> incarnation))
+        Just head'
+          | workingMemoryStatus head' == WorkingAwake -> pure (state, Right head')
+          | otherwise ->
+              let cycle' = recoveryCycle state head'
+                  (cursor, cursorFailure) = recoveryCursor head' replayed
+                  failure = recoveryFailure head' cycle' cursorFailure
+                  checkpointId = preferCycle sleepCycleCheckpointId (workingMemoryCheckpointId head') cycle'
+                  packetId = preferCycle sleepCycleWakePacketId (workingMemoryWakePacketId head') cycle'
                   changedHead =
                     head'
-                      { workingMemoryRevision = expected + 1,
-                        workingMemoryStatus = WorkingDegraded,
-                        workingMemoryDegradedReason = Just failure,
+                      { workingMemoryRevision = workingMemoryRevision head' + 1,
+                        workingMemoryStatus = WorkingAwake,
+                        workingMemoryCursor = cursor,
+                        workingMemoryCheckpointId = checkpointId,
+                        workingMemoryWakePacketId = packetId,
+                        workingMemoryDegradedReason = failure,
                         workingMemoryUpdated = stamp
                       }
-                  changedCycle =
-                    cycle'
-                      { sleepCycleStatus = CycleDegraded,
-                        sleepCycleFailure = Just failure,
-                        sleepCycleUpdated = stamp
-                      }
-                  changed = putCycle changedCycle (putHead changedHead state)
-               in save persist changed (changedHead, changedCycle)
-  recover incarnation replayed =
-    getPOSIXTime >>= \now ->
-      modifyMVar lock $ \state ->
-        case Map.lookup incarnation (stateHeads state) of
-          Nothing -> pure (state, Left ("unknown working memory: " <> incarnation))
-          Just head'
-            | workingMemoryStatus head' == WorkingAwake -> pure (state, Right head')
-            | otherwise ->
-                let stamp = round now
-                    cycle' = recoveryCycle state head'
-                    (cursor, cursorFailure) = recoveryCursor head' replayed
-                    failure = recoveryFailure head' cycle' cursorFailure
-                    checkpointId = preferCycle sleepCycleCheckpointId (workingMemoryCheckpointId head') cycle'
-                    packetId = preferCycle sleepCycleWakePacketId (workingMemoryWakePacketId head') cycle'
-                    changedHead =
-                      head'
-                        { workingMemoryRevision = workingMemoryRevision head' + 1,
-                          workingMemoryStatus = WorkingAwake,
-                          workingMemoryCursor = cursor,
-                          workingMemoryCheckpointId = checkpointId,
-                          workingMemoryWakePacketId = packetId,
-                          workingMemoryDegradedReason = failure,
-                          workingMemoryUpdated = stamp
-                        }
-                    changed =
-                      maybe
-                        (putHead changedHead state)
-                        (\sleepCycle -> putCycle (recoveredCycle stamp cursor failure changedHead sleepCycle) (putHead changedHead state))
-                        cycle'
-                 in save persist changed changedHead
+                  changed =
+                    maybe
+                      (putHead changedHead state)
+                      (\sleepCycle -> putCycle (recoveredCycle stamp cursor failure changedHead sleepCycle) (putHead changedHead state))
+                      cycle'
+               in save persist changed changedHead
 
 recoveryCycle :: WorkingState -> WorkingMemoryHead -> Maybe SleepCycle
 recoveryCycle state head' =
@@ -904,6 +888,10 @@ recoveredCycle stamp cursor failure head' sleepCycle =
   replay = bool (Just cursor) (sleepCycleReplayCursor sleepCycle) aborted
   cycleFailure = bool (sleepCycleFailure sleepCycle) failure aborted
 
+stampedModifyMVar :: MVar state -> (Integer -> state -> IO (state, value)) -> IO value
+stampedModifyMVar var change =
+  getPOSIXTime >>= modifyMVar var . change . round
+
 mutateHead ::
   (WorkingState -> IO ()) ->
   MVar WorkingState ->
@@ -912,16 +900,15 @@ mutateHead ::
   (Integer -> WorkingState -> WorkingMemoryHead -> Either Text (WorkingState, WorkingMemoryHead)) ->
   IO (Either Text WorkingMemoryHead)
 mutateHead persist lock incarnation expected change =
-  getPOSIXTime >>= \now ->
-    modifyMVar lock $ \state ->
-      case Map.lookup incarnation (stateHeads state) of
-        Nothing -> pure (state, Left ("unknown working memory: " <> incarnation))
-        Just head'
-          | workingMemoryRevision head' /= expected -> pure (state, Left (stale expected (workingMemoryRevision head')))
-          | otherwise ->
-              case change (round now) state head' of
-                Left failure -> pure (state, Left failure)
-                Right (changed, value) -> save persist changed value
+  stampedModifyMVar lock $ \stamp state ->
+    case Map.lookup incarnation (stateHeads state) of
+      Nothing -> pure (state, Left ("unknown working memory: " <> incarnation))
+      Just head'
+        | workingMemoryRevision head' /= expected -> pure (state, Left (stale expected (workingMemoryRevision head')))
+        | otherwise ->
+            case change stamp state head' of
+              Left failure -> pure (state, Left failure)
+              Right (changed, value) -> save persist changed value
 
 withHeadCycle ::
   WorkingState ->
@@ -1084,12 +1071,14 @@ shown = Text.pack . show
 loadState :: FilePath -> IO (Either Text WorkingState)
 loadState path =
   (try (eitherDecodeFileStrict path) :: IO (Either IOException (Either String WorkingState)))
-    <&> \case
-      Left failure
-        | isDoesNotExistError failure -> Right emptyState
-        | otherwise -> Left ("cannot read working memory: " <> Text.pack (displayException failure))
-      Right (Left failure) -> Left ("invalid working memory: " <> Text.pack failure)
-      Right (Right state) -> state <$ validateState state
+    <&> decodeResult
+ where
+  decodeResult = \case
+    Left failure
+      | isDoesNotExistError failure -> Right emptyState
+      | otherwise -> Left ("cannot read working memory: " <> Text.pack (displayException failure))
+    Right (Left failure) -> Left ("invalid working memory: " <> Text.pack failure)
+    Right (Right state) -> state <$ validateState state
 
 validateState :: WorkingState -> Either Text ()
 validateState state =

@@ -105,20 +105,24 @@ replayWithStores threads facts wanted entries =
  where
   begins = [(input, settings) | Entry _ scope _ (RunBegin input settings) <- entries, length scope == 1]
   replayRun (input, settings) =
-    newMemoryState >>= \state ->
-      seedWatcher (AGUI.runThreadId input) seed state
-        >> watcherReplayModel (AGUI.runId input) entries
-        >>= \watcher ->
-          newIORef (recordedFacts runEntries) >>= \factCursor ->
-            replay
-              (memoryHooks watcher (snapshotThreads runEntries (readOnlyThreadStore threads)) (snapshotFacts factCursor (readOnlyFactStore facts)) Nothing state)
-              input
-              settings
-              (AGUI.runId input)
-              runEntries
+    newMemoryState >>= replayWith
    where
     runEntries = filter ((== [AGUI.runId input]) . entryScope) entries
     seed = WatcherState (snapshotRolling runEntries) (priorLastSeen input entries) 0 Map.empty Map.empty
+    replayWith state =
+      seedWatcher (AGUI.runThreadId input) seed state
+        *> watcherReplayModel (AGUI.runId input) entries
+        >>= replayWithModel state
+    replayWithModel state model =
+      newIORef (recordedFacts runEntries)
+        >>= replayWithAll state model
+    replayWithAll state model factCursor =
+      replay
+        (memoryHooks model (snapshotThreads runEntries (readOnlyThreadStore threads)) (snapshotFacts factCursor (readOnlyFactStore facts)) Nothing state)
+        input
+        settings
+        (AGUI.runId input)
+        runEntries
 
 snapshotRolling :: [Entry] -> Text
 snapshotRolling entries =
@@ -147,9 +151,9 @@ priorLastSeen input entries =
             seqNo < firstSeq
           ]
       )
-  priorRequest =
-    priorRunId >>= \rid ->
-      listToMaybe (reverse [request | Entry _ _ _ (ModelRequestEntry request) <- filter (entryScopeOf rid) entries])
+  priorRequest = priorRunId >>= requestOf
+  requestOf rid =
+    listToMaybe (reverse [request | Entry _ _ _ (ModelRequestEntry request) <- filter (entryScopeOf rid) entries])
   entryScopeOf rid entry = entryScope entry == [rid]
 
 recordedFacts :: [Entry] -> [[Fact]]
@@ -175,16 +179,16 @@ snapshotFacts :: IORef [[Fact]] -> FactStore -> FactStore
 snapshotFacts cursor store =
   store {factSearch = const nextBatch}
  where
-  nextBatch =
-    readIORef cursor >>= \case
-      [] -> pure []
-      (hits : rest) -> hits <$ writeIORef cursor rest
+  nextBatch = readIORef cursor >>= nextFacts
+  nextFacts [] = pure []
+  nextFacts (hits : rest) = hits <$ writeIORef cursor rest
 
 watcherReplayModel :: Text -> [Entry] -> IO Model
 watcherReplayModel runId entries =
-  newIORef memoryEntries <&> \cursor ->
-    Model "memory-replay" "memory-replay" Nothing (replayStream exhausted cursor) (const (object []))
+  newIORef memoryEntries <&> memoryModel
  where
+  memoryModel cursor =
+    Model "memory-replay" "memory-replay" Nothing (replayStream exhausted cursor) (const (object []))
   exhausted = throwIO (ReplayFailure "journal exhausted at memory replay")
   memoryEntries = [entry | entry <- entries, entryScope entry == [runId, "memory"], isModelKind (entryKind entry)]
 
@@ -194,28 +198,30 @@ select (Just runId) = find ((== runId) . AGUI.runId . fst)
 
 replay :: AgentHooks -> AGUI.RunAgentInput -> RunSettings -> Text -> [Entry] -> IO (Either Text ReplayReport)
 replay hooks input settings runId runEntries =
-  newIORef [entry | entry@(Entry _ _ _ kind) <- runEntries, isModelKind kind]
-    >>= \modelCursor ->
-      newIORef [value | Entry _ _ _ (IdEntry value) <- runEntries]
-        >>= \idCursor ->
-          newIORef [(step, messages) | Entry _ _ _ (SteeringEntry step messages) <- runEntries]
-            >>= \steerCursor ->
-              newIORef [(step, messages) | Entry _ _ _ (FollowUpEntry step messages) <- runEntries]
-                >>= \followUpCursor ->
-                  newIORef []
-                    >>= \actual ->
-                      newMemoryArtifactStore
-                        >>= \artifacts ->
-                          newBackgroundRegistry
-                            >>= \background ->
-                              ( try
-                                  (runAgent (runtime background modelCursor idCursor steerCursor followUpCursor artifacts) input (\event -> modifyIORef' actual (event :))) ::
-                                  IO (Either ReplayFailure ())
-                              )
-                                >>= either
-                                  (report actual . Just . showReplay)
-                                  (const (report actual Nothing))
+  replaySetup >>= replayRun
  where
+  replaySetup =
+    (,,,,,,)
+      <$> newIORef modelEntries
+      <*> newIORef idValues
+      <*> newIORef steerEntries
+      <*> newIORef followUpEntries
+      <*> newIORef []
+      <*> newMemoryArtifactStore
+      <*> newBackgroundRegistry
+
+  modelEntries = [entry | entry@(Entry _ _ _ kind) <- runEntries, isModelKind kind]
+  idValues = [value | Entry _ _ _ (IdEntry value) <- runEntries]
+  steerEntries = [(step, messages) | Entry _ _ _ (SteeringEntry step messages) <- runEntries]
+  followUpEntries = [(step, messages) | Entry _ _ _ (FollowUpEntry step messages) <- runEntries]
+
+  replayRun (modelCursor, idCursor, steerCursor, followUpCursor, actual, artifacts, background) =
+    ( try
+        (runAgent (runtime background modelCursor idCursor steerCursor followUpCursor artifacts) input (modifyIORef' actual . (:))) ::
+        IO (Either ReplayFailure ())
+    )
+      >>= either (report actual . Just . showReplay) (const (report actual Nothing))
+
   runtime background modelCursor idCursor steerCursor followUpCursor artifacts =
     Runtime
       { runtimeModel = Model "replay" "replay" (runSettingsContextTokens settings) (replayStream (throwIO (RunCancelled runId)) modelCursor) (const (object [])),
@@ -275,11 +281,10 @@ replay hooks input settings runId runEntries =
     ]
 
   report actual note =
-    readIORef actual
-      >>= ( \events ->
-              pure (Right (ReplayReport runId (length events) (firstDivergence note expected (filter (not . operational) events))))
-          )
-        . reverse
+    readIORef actual >>= buildReport . reverse
+   where
+    buildReport events =
+      pure (Right (ReplayReport runId (length events) (firstDivergence note expected (filter (not . operational) events))))
 
   showReplay (ReplayFailure message) = message
 
@@ -331,9 +336,10 @@ isModelKind = \case
 
 pop :: IORef [Entry] -> IO Entry -> IO Entry
 pop cursor exhausted =
-  readIORef cursor >>= \case
-    [] -> exhausted
-    (entry : rest) -> entry <$ writeIORef cursor rest
+  readIORef cursor >>= popCursor
+ where
+  popCursor [] = exhausted
+  popCursor (entry : rest) = entry <$ writeIORef cursor rest
 
 replayStream :: IO Entry -> IORef [Entry] -> ModelRequest -> (ModelEvent -> IO ()) -> IO FinishReason
 replayStream exhausted cursor request emit =
@@ -346,18 +352,16 @@ replayStream exhausted cursor request emit =
           throwIO (ReplayFailure ("model request diverged at seq " <> Text.pack (show (entrySeq entry))))
     other -> throwIO (ReplayFailure ("expected model request, found " <> kindName other))
 
-  pendingRequest =
-    readIORef cursor <&> \case
-      (Entry _ _ _ (ModelRequestEntry _) : _) -> True
-      _ -> False
+  pendingRequest = readIORef cursor <&> pending
+  pending (Entry _ _ _ (ModelRequestEntry _) : _) = True
+  pending _ = False
   contextOverflow = throwIO (ProviderFailure "context_length_exceeded (replay)")
 
-  stream =
-    pop cursor exhausted >>= \entry ->
-      case entryKind entry of
-        ModelEventEntry event -> emit event *> stream
-        ModelFinishEntry reason -> pure reason
-        other -> throwIO (ReplayFailure ("expected model event, found " <> kindName other))
+  stream = pop cursor exhausted >>= streamEntry
+  streamEntry entry = case entryKind entry of
+    ModelEventEntry event -> emit event *> stream
+    ModelFinishEntry reason -> pure reason
+    other -> throwIO (ReplayFailure ("expected model event, found " <> kindName other))
 
 replayTools ::
   Map.Map Text [Event] ->
@@ -384,9 +388,10 @@ replayTools subEvents entries toolSpecs =
 
 replayNewId :: IORef [Text] -> IO Text
 replayNewId cursor =
-  readIORef cursor >>= \case
-    [] -> throwIO (ReplayFailure "journal exhausted at id stream")
-    (value : rest) -> value <$ writeIORef cursor rest
+  readIORef cursor >>= popId
+ where
+  popId [] = throwIO (ReplayFailure "journal exhausted at id stream")
+  popId (value : rest) = value <$ writeIORef cursor rest
 
 replayQueue :: IORef [(Int, [ChatMessage])] -> Int -> IO [ChatMessage]
 replayQueue cursor step = atomicModifyIORef' cursor drain

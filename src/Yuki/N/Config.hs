@@ -7,7 +7,6 @@ where
 
 import Control.Applicative ((<|>))
 import Control.Monad ((>=>))
-import Data.Bool (bool)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
@@ -123,8 +122,9 @@ providerSettings environment =
   text key = Text.pack <$> Map.lookup key environment
   dialectSettings =
     maybe (Right (presetDialect preset)) parseDialect (text "YUKI_API_DIALECT")
-      >>= \dialect ->
-        (,) dialect <$> parseThinking dialect (text "YUKI_THINKING") (text "YUKI_REASONING_EFFORT") preset
+      >>= withThinking
+  withThinking dialect =
+    (,) dialect <$> parseThinking dialect (text "YUKI_THINKING") (text "YUKI_REASONING_EFFORT") preset
   make model baseUrl apiKey (dialect, thinking) maxTokens contextTokens =
     OpenAIConfig
       { openAIProvider = provider,
@@ -236,9 +236,12 @@ required :: Text -> Maybe value -> Either Text value
 required name = maybe (Left ("missing " <> name)) Right
 
 requiredText :: Text -> Maybe Text -> Either Text Text
-requiredText name =
-  required name >=> \value ->
-    bool (Right value) (Left (name <> " must not be empty")) (Text.null value)
+requiredText name = required name >=> nonEmptyText name
+
+nonEmptyText :: Text -> Text -> Either Text Text
+nonEmptyText name value
+  | Text.null value = Left (name <> " must not be empty")
+  | otherwise = Right value
 
 nonNegative :: Text -> String -> Either Text Int
 nonNegative name raw =
@@ -264,12 +267,12 @@ positiveBounded :: Text -> Int -> String -> Either Text Int
 positiveBounded name upper = positive name >=> bounded name upper
 
 atLeast :: Text -> Int -> String -> Either Text Int
-atLeast name lower =
-  positive name >=> \number ->
-    bool
-      (Left (name <> " must be at least " <> Text.pack (show lower)))
-      (Right number)
-      (number >= lower)
+atLeast name lower = positive name >=> atLeastValue name lower
+
+atLeastValue :: Text -> Int -> Int -> Either Text Int
+atLeastValue name lower number
+  | number >= lower = Right number
+  | otherwise = Left (name <> " must be at least " <> Text.pack (show lower))
 
 bounded :: Text -> Int -> Int -> Either Text Int
 bounded name upper number

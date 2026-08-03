@@ -59,13 +59,14 @@ proposeDispatchTool timeoutSeconds store hub =
   settle draft =
     getPOSIXTime >>= poll draft . (+ fromIntegral timeoutSeconds)
   poll draft deadline =
-    getDispatch store (dispatchId draft) >>= \case
-      Just current
-        | dispatchStatus current == Draft ->
-            getPOSIXTime >>= \now ->
-              bool (threadDelay 500000 *> poll current deadline) (pure (outcome current)) (now >= deadline)
-        | otherwise -> pure (outcome current)
-      Nothing -> pure (failure "dispatch proposal rejected: draft unavailable")
+    getDispatch store (dispatchId draft) >>= decide
+   where
+    decide (Just current)
+      | dispatchStatus current == Draft = retry current
+      | otherwise = pure (outcome current)
+    decide Nothing = pure (failure "dispatch proposal rejected: draft unavailable")
+    retry current =
+      getPOSIXTime >>= bool (threadDelay 500000 *> poll current deadline) (pure (outcome current)) . (>= deadline)
   outcome current = case dispatchStatus current of
     Dispatched ->
       success

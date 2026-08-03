@@ -6,10 +6,11 @@ module Yuki.N.SubAgent
   )
 where
 
-import Control.Applicative (liftA2)
+import Control.Applicative (liftA3)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad (void)
 import Data.Aeson
+import Data.Bool (bool)
 import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Functor (($>), (<&>))
 import Data.IORef
@@ -86,13 +87,12 @@ subAgentTool name description parent =
           Success (Delegation prompt) -> delegate context prompt
 
   delegate context prompt =
-    runtimeNewId parent >>= \subRunId ->
-      newIORef Nothing >>= \failed ->
-        newIORef "" >>= \text ->
-          let sub = childRuntime parent context
-              input = workerInput context subRunId prompt Nothing
-           in runAgent sub input (consume context subRunId failed text)
-                *> outcome failed text
+    liftA3 (,,) (runtimeNewId parent) (newIORef Nothing) (newIORef "")
+      >>= runDelegation
+   where
+    runDelegation (subRunId, failed, text) =
+      runAgent (childRuntime parent context) (workerInput context subRunId prompt Nothing) (consume context subRunId failed text)
+        *> outcome failed text
 
   consume context subRunId failed text event =
     collect failed text event
@@ -108,16 +108,18 @@ subAgentTool name description parent =
           ]
       )
 
-  collect failed text = \case
-    TextMessageContent _ delta -> modifyIORef' text (<> delta)
-    RunError message _ -> writeIORef failed (Just message)
-    _ -> pure ()
+  collect _ text (TextMessageContent _ delta) = modifyIORef' text (<> delta)
+  collect failed _ (RunError message _) = writeIORef failed (Just message)
+  collect _ _ _ = pure ()
 
   outcome failed text =
     readIORef failed
       >>= maybe
         (ToolOutcome <$> readIORef text <*> pure False <*> pure False)
-        (\message -> pure (ToolOutcome ("sub-agent failed: " <> message) True False))
+        failedOutcome
+   where
+    failedOutcome message =
+      pure (ToolOutcome ("sub-agent failed: " <> message) True False)
 
 spawnTool :: Runtime -> (Text, BackendTool)
 spawnTool parent =
@@ -148,43 +150,45 @@ spawnTool parent =
           (_, Error message) ->
             pure (ToolOutcome ("invalid tool arguments: " <> Text.pack message) True False)
           (Just registry, Success (SpawnCall prompt objective)) ->
-            countActive registry context >>= \active ->
-              if active >= limit
-                then pure (ToolOutcome "worker parallel limit reached" True False)
-                else spawn registry context prompt objective
+            countActive registry context
+              >>= spawnCheck registry context prompt objective
   countActive registry context = length <$> childrenOf registry (toolContextRunId context)
+  spawnCheck registry context prompt objective active
+    | active >= limit = pure (ToolOutcome "worker parallel limit reached" True False)
+    | otherwise = spawn registry context prompt objective
   spawn registry context prompt objective =
-    runtimeNewId parent >>= \subRunId ->
-      let sub = childRuntime parent context
-          input = workerInput context subRunId prompt objective
-       in void
-            ( forkIO
-                ( runAgent sub input (const (pure ()))
-                    *> notify registry context subRunId prompt objective
+    runtimeNewId parent >>= runSpawned
+   where
+    runSpawned subRunId =
+      void
+        ( forkIO
+            ( runAgent (childRuntime parent context) (workerInput context subRunId prompt objective) (const (pure ()))
+                *> notify registry context subRunId prompt objective
+            )
+        )
+        $> jsonOutcome (object ["agentId" .= subRunId, "status" .= ("running" :: Text)])
+  notify registry context subRunId prompt objective =
+    completionFor registry subRunId
+      >>= maybe (pure ()) steerQuietly
+   where
+    steerQuietly completion =
+      quietly
+        ( steerRun
+            registry
+            (toolContextRunId context)
+            ( ChatSystem
+                ( "[worker "
+                    <> subRunId
+                    <> " "
+                    <> outcomeText (completionOutcome completion)
+                    <> "] "
+                    <> fromMaybe (firstLine prompt) objective
+                    <> "\n"
+                    <> Text.take 2000 (completionResult completion)
                 )
             )
-            $> jsonOutcome (object ["agentId" .= subRunId, "status" .= ("running" :: Text)])
-  notify registry context subRunId prompt objective =
-    completionFor registry subRunId >>= \case
-      Nothing -> pure ()
-      Just completion ->
-        quietly
-          ( steerRun
-              registry
-              (toolContextRunId context)
-              ( ChatSystem
-                  ( "[worker "
-                      <> subRunId
-                      <> " "
-                      <> outcomeText (completionOutcome completion)
-                      <> "] "
-                      <> fromMaybe (firstLine prompt) objective
-                      <> "\n"
-                      <> Text.take 2000 (completionResult completion)
-                  )
-              )
-              $> ()
-          )
+            $> ()
+        )
 
 sendTool :: Runtime -> (Text, BackendTool)
 sendTool parent =
@@ -200,10 +204,12 @@ sendTool parent =
       (_, Error message) ->
         pure (ToolOutcome ("invalid tool arguments: " <> Text.pack message) True False)
       (Just registry, Success (SendCall agentId text)) ->
-        childOf registry (toolContextRunId context) agentId >>= \isChild ->
-          if not isChild
-            then pure (ToolOutcome "unknown worker" True False)
-            else steerRun registry agentId (ChatUser text) $> jsonOutcome (object ["delivered" .= True])
+        childOf registry (toolContextRunId context) agentId
+          >>= sendToChild registry agentId text
+  sendToChild registry agentId text isChild
+    | not isChild = pure (ToolOutcome "unknown worker" True False)
+    | otherwise =
+        steerRun registry agentId (ChatUser text) $> jsonOutcome (object ["delivered" .= True])
 
 statusTool :: Runtime -> (Text, BackendTool)
 statusTool parent =
@@ -219,23 +225,25 @@ statusTool parent =
       (_, Error message) ->
         pure (ToolOutcome ("invalid tool arguments: " <> Text.pack message) True False)
       (Just registry, Success (StatusCall agentId)) ->
-        childOf registry (toolContextRunId context) agentId >>= \running ->
-          if running
-            then pure (jsonOutcome (object ["status" .= ("running" :: Text)]))
-            else
-              completionFor registry agentId >>= \case
-                Just completion
-                  | completionParent completion == Just (toolContextRunId context) ->
-                      pure
-                        ( jsonOutcome
-                            ( object
-                                [ "status" .= statusName (completionOutcome completion),
-                                  "outcome" .= statusName (completionOutcome completion),
-                                  "result" .= completionResult completion
-                                ]
-                            )
-                        )
-                _ -> pure (ToolOutcome "unknown worker" True False)
+        childOf registry (toolContextRunId context) agentId
+          >>= statusCheck registry context agentId
+  statusCheck registry context agentId running
+    | running =
+        pure (jsonOutcome (object ["status" .= ("running" :: Text)]))
+    | otherwise =
+        completionFor registry agentId >>= completionStatus context
+  completionStatus context (Just completion)
+    | completionParent completion == Just (toolContextRunId context) =
+        pure
+          ( jsonOutcome
+              ( object
+                  [ "status" .= statusName (completionOutcome completion),
+                    "outcome" .= statusName (completionOutcome completion),
+                    "result" .= completionResult completion
+                  ]
+              )
+          )
+  completionStatus _ _ = pure (ToolOutcome "unknown worker" True False)
 
 listTool :: Runtime -> (Text, BackendTool)
 listTool parent =
@@ -244,12 +252,12 @@ listTool parent =
   name = "sub_agent_list"
   description = "List all workers spawned in this run with their status and objective."
   schema = objectSchema [] (object [])
-  execute context arguments =
+  execute context _ =
     case runtimeRuns parent of
       Nothing -> pure (ToolOutcome "worker orchestration unavailable" True False)
       Just registry ->
-        liftA2 (,) (childrenOf registry parentRunId) (completionsOf registry parentRunId) >>= \pair ->
-          pure (jsonOutcome (object ["workers" .= render pair]))
+        liftA2 (,) (childrenOf registry parentRunId) (completionsOf registry parentRunId)
+          <&> jsonOutcome . object . pure . ("workers" .=) . render
    where
     parentRunId = toolContextRunId context
     render (active, completed) = fmap running active <> fmap terminal completed
@@ -289,16 +297,23 @@ waitTool parent =
       (_, Error message) ->
         pure (ToolOutcome ("invalid tool arguments: " <> Text.pack message) True False)
       (Just registry, Success (WaitCall agentIds timeoutSeconds)) ->
-        getPOSIXTime >>= \start ->
-          poll registry (toolContextRunId context) (deadline start timeoutSeconds) agentIds
-            <&> jsonOutcome . render
+        getPOSIXTime
+          >>= waitPhase registry context agentIds timeoutSeconds
+  waitPhase registry context agentIds timeoutSeconds start =
+    poll registry (toolContextRunId context) (deadline start timeoutSeconds) agentIds
+      <&> jsonOutcome . render
   deadline start seconds = start + fromIntegral (min 3600 (max 0 (fromMaybe 300 seconds)))
-  poll registry parentRunId limit agentIds = do
-    done <- traverse (scopedCompletion registry parentRunId) agentIds
-    now <- getPOSIXTime
-    if now >= limit || all isJust done
-      then pure (zip agentIds done)
-      else threadDelay 500000 *> poll registry parentRunId limit agentIds
+  poll registry parentRunId limit agentIds =
+    traverse (scopedCompletion registry parentRunId) agentIds
+      >>= pollPhase registry parentRunId limit agentIds
+  pollPhase registry parentRunId limit agentIds done =
+    getPOSIXTime
+      >>= bool
+        (threadDelay 500000 *> poll registry parentRunId limit agentIds)
+        (pure (zip agentIds done))
+        . deadlineReached limit done
+  deadlineReached limit done now =
+    now >= limit || all isJust done
   render done =
     object
       [ "results"
@@ -325,10 +340,11 @@ cancelTool parent =
       (_, Error message) ->
         pure (ToolOutcome ("invalid tool arguments: " <> Text.pack message) True False)
       (Just registry, Success (CancelCall agentId)) ->
-        childOf registry (toolContextRunId context) agentId >>= \isChild ->
-          if not isChild
-            then pure (ToolOutcome "unknown worker" True False)
-            else cancelRun registry agentId $> jsonOutcome (object ["cancelled" .= True])
+        childOf registry (toolContextRunId context) agentId
+          >>= cancelChild registry agentId
+  cancelChild registry agentId isChild
+    | not isChild = pure (ToolOutcome "unknown worker" True False)
+    | otherwise = cancelRun registry agentId $> jsonOutcome (object ["cancelled" .= True])
 
 childOf :: RunRegistry -> Text -> Text -> IO Bool
 childOf registry parent agentId =
@@ -336,9 +352,12 @@ childOf registry parent agentId =
 
 scopedCompletion :: RunRegistry -> Text -> Text -> IO (Maybe RunCompletion)
 scopedCompletion registry parentRunId agentId =
-  completionFor registry agentId >>= \case
-    Just completion | completionParent completion == Just parentRunId -> pure (Just completion)
-    _ -> pure Nothing
+  completionFor registry agentId
+    >>= scopedToParent
+ where
+  scopedToParent (Just completion)
+    | completionParent completion == Just parentRunId = pure (Just completion)
+  scopedToParent _ = pure Nothing
 
 childRuntime :: Runtime -> ToolContext -> Runtime
 childRuntime parent context =

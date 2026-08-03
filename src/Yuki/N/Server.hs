@@ -5,8 +5,8 @@ module Yuki.N.Server
   )
 where
 
-import Control.Applicative (liftA2, (<|>))
-import Control.Concurrent (Chan, forkIO, killThread, readChan, threadDelay, writeChan)
+import Control.Applicative ((<|>))
+import Control.Concurrent (forkIO, killThread, readChan, threadDelay, writeChan)
 import Control.Exception (bracket)
 import Control.Monad (forever, join, when, (>=>))
 import Data.Aeson (FromJSON (..), ToJSON, Value (..), eitherDecode, encode, object, toJSON, withObject, (.!=), (.:), (.:?), (.=))
@@ -321,28 +321,32 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
   fleetValue hub =
     maybe skeleton present (inspectionCognition =<< inspection)
    where
-    skeleton = (\runs -> object ["incarnations" .= ([] :: [Value]), "runs" .= runs]) <$> liveRuns hub
+    skeleton = fleetObject ([] :: [Value]) <$> liveRuns hub
     present cognition =
       incarnationList (cognitionIncarnations cognition) >>= fleetEntries
     fleetEntries incarnations =
-      liveRuns hub >>= \runs ->
-        (\entries -> object ["incarnations" .= entries, "runs" .= runs]) <$> traverse (fleetEntry hub runs) incarnations
-  fleetEntry hub runs incarnation =
-    liftA2 (,) (draftCountOf identifier) (lastDeliveryOf hub identifier) >>= \(draftCount, lastDelivery) ->
-      pure
-        ( object
-            [ "id" .= identifier,
-              "name" .= incarnationName incarnation,
-              "state" .= stateOf (activeOf runs identifier) draftCount,
-              "activeRuns" .= activeOf runs identifier,
-              "waitingDrafts" .= draftCount,
-              "lastDeliveryAt" .= lastDelivery
-            ]
-        )
+      liveRuns hub >>= fleetEntriesWith incarnations
+    fleetEntriesWith incarnations running =
+      flip fleetObject running <$> traverse (fleetEntry hub running) incarnations
+    fleetObject incarnations running =
+      object ["incarnations" .= incarnations, "runs" .= running]
+  fleetEntry hub running incarnation =
+    fleetRow
+      <$> draftCountOf identifier
+      <*> lastDeliveryOf hub identifier
    where
     identifier = incarnationId incarnation
-  activeOf runs identifier =
-    length (filter ((== identifier) . liveIncarnation) runs)
+    fleetRow draftCount lastDelivery =
+      object
+        [ "id" .= identifier,
+          "name" .= incarnationName incarnation,
+          "state" .= stateOf (activeOf running identifier) draftCount,
+          "activeRuns" .= activeOf running identifier,
+          "waitingDrafts" .= draftCount,
+          "lastDeliveryAt" .= lastDelivery
+        ]
+  activeOf running identifier =
+    length (filter ((== identifier) . liveIncarnation) running)
   stateOf :: Int -> Int -> Text
   stateOf active drafts
     | active > 0 = "active"
@@ -361,14 +365,16 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
    where
     latest ledger = fmap deliveryAt . listToMaybe <$> deliveriesFor ledger identifier Nothing 1 Nothing
   activityHandler identifier hub =
-    liveRuns hub >>= \runs ->
-      liftA2 (,) (draftsOf identifier) (recentDeliveriesOf hub identifier) >>= \(drafts, recent) ->
-        respond (ok (activityJson identifier runs drafts recent))
+    liveRuns hub >>= activityRespond identifier hub
+   where
+    activityRespond identifier' hub' running =
+      liftA2 (,) (draftsOf identifier') (recentDeliveriesOf hub' identifier')
+        >>= respond . ok . uncurry (activityJson identifier' running)
   recentDeliveriesOf hub identifier =
     readIORef (telemetryLedger hub) >>= maybe (pure []) recent
    where
     recent ledger = deliveriesFor ledger identifier Nothing 20 Nothing
-  activityJson identifier runs drafts recent =
+  activityJson identifier running drafts recent =
     object
       [ "incarnationId" .= identifier,
         "home" .= object ["threadId" .= homeThreadId identifier, "activeRunId" .= homeRun],
@@ -377,7 +383,7 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
         "recentDeliveries" .= recent
       ]
    where
-    own = filter ((== identifier) . liveIncarnation) runs
+    own = filter ((== identifier) . liveIncarnation) running
     homeRun = listToMaybe [liveRunId run | run <- own, liveKind run == RunHome]
   deliveriesHandler identifier hub =
     ledgerEndpoint hub (\ledger -> deliveriesFor ledger identifier (queryText "threadId") (pageLimit + 1) pageBefore)
@@ -388,21 +394,24 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
     readIORef (telemetryLedger hub) >>= maybe (respond (missing "ledger unavailable")) page
    where
     page ledger =
-      query ledger >>= \found ->
-        respond (ok (object ["items" .= take pageLimit found, "hasMore" .= (length found > pageLimit)]))
+      query ledger >>= respond . ok . items
+    items found =
+      object ["items" .= take pageLimit found, "hasMore" .= (length found > pageLimit)]
   pageLimit = min 200 (fromMaybe 50 (queryInt "limit" request))
   pageBefore = toInteger <$> queryInt "before" request
   queryText name = Text.decodeUtf8 <$> join (lookup name (queryString request))
   activityStreamHandler hub =
     respond (responseStream status200 (corsHeaders cors <> streamHeaders) (streamActivity hub))
   streamActivity hub write flush =
-    subscribe hub >>= \chan ->
-      bracket (forkIO (heartbeat chan)) killThread (const (preamble *> cycleFrames chan))
+    subscribe hub >>= withChannel
    where
+    withChannel chan =
+      bracket (forkIO (heartbeat chan)) killThread (const (preamble *> cycleFrames chan))
     heartbeat chan = forever (threadDelay 15000000 *> writeChan chan FramePing)
-    preamble = fleetValue hub >>= \snapshot -> write (sseFrame "snapshot" snapshot) *> flush
+    preamble =
+      (fleetValue hub >>= write . sseFrame "snapshot") *> flush
     cycleFrames chan =
-      readChan chan >>= \frame -> write (encodeFrame frame) *> flush *> cycleFrames chan
+      (readChan chan >>= write . encodeFrame) *> flush *> cycleFrames chan
   withConfig use = maybe notFound use configs
   withCognition use = maybe notFound use (inspectionCognition =<< inspection)
   withDispatch use = maybe notFound use dispatches
@@ -456,36 +465,34 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
         (active "yuki")
         ( \view ->
             threadConfigRead (configViewStore view) threadId
-              >>= \local ->
-                active
-                  ( fromMaybe
-                      "yuki"
-                      (configIncarnationId (resolveThreadConfig local (configViewDefaults view)))
-                  )
+              >>= active
+                . fromMaybe "yuki"
+                . configIncarnationId
+                . flip resolveThreadConfig (configViewDefaults view)
         )
         configs
     active identifier =
-      incarnationRead (cognitionIncarnations cognition) identifier <&> \case
-        Nothing -> Left ("unknown incarnation: " <> identifier)
-        Just incarnation
-          | incarnationStatus incarnation == IncarnationArchived ->
-              Left ("incarnation is archived: " <> identifier)
-          | otherwise -> Right incarnation
+      incarnationRead (cognitionIncarnations cognition) identifier <&> incarnationGate identifier
+    incarnationGate identifier = \case
+      Nothing -> Left ("unknown incarnation: " <> identifier)
+      Just incarnation
+        | incarnationStatus incarnation == IncarnationArchived ->
+            Left ("incarnation is archived: " <> identifier)
+        | otherwise -> Right incarnation
   threadTranscript threadId =
     case inspectionSessions =<< inspection of
       Just service ->
-        findSession (serviceSessions service) threadId >>= \case
-          Nothing ->
-            transcriptLoad (serviceTranscripts service) threadId >>= \case
-              Nothing -> respond (missing "thread not found")
-              Just messages ->
-                taskOwnerFor service threadId >>= \owner ->
-                  ensureSession (serviceSessions service) threadId Nothing owner
-                    *> respond (ok (renderTranscript threadId messages))
-          Just _ ->
-            transcriptLoad (serviceTranscripts service) threadId
-              >>= respond . ok . renderTranscript threadId . fromMaybe []
+        findSession (serviceSessions service) threadId >>= transcriptSession service threadId
       Nothing -> withTranscripts (transcript threadId)
+   where
+    transcriptSession service threadId' = \case
+      Nothing -> transcriptLoad (serviceTranscripts service) threadId' >>= transcriptMissing service threadId'
+      Just _ -> transcriptLoad (serviceTranscripts service) threadId' >>= respond . ok . renderTranscript threadId' . fromMaybe []
+    transcriptMissing service threadId' = \case
+      Nothing -> respond (missing "thread not found")
+      Just messages ->
+        (taskOwnerFor service threadId' >>= ensureSession (serviceSessions service) threadId' Nothing)
+          *> respond (ok (renderTranscript threadId' messages))
   withBody :: (FromJSON body) => Text -> (body -> IO ResponseReceived) -> IO ResponseReceived
   withBody label use =
     strictRequestBody request
@@ -500,10 +507,12 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
           )
   createIncarnation cognition =
     withBody "invalid incarnation request: " $ \(CreateIncarnationRequest identifier name direction model) ->
-      resolveIncarnationId (cognitionIncarnations cognition) identifier name >>= \finalId ->
-        incarnationCreate (cognitionIncarnations cognition) finalId name direction model
-          >>= either (respond . cognitionError) (bootstrap cognition)
+      resolveIncarnationId (cognitionIncarnations cognition) identifier name
+        >>= createNew cognition name direction model
    where
+    createNew cognition' name direction model finalId =
+      incarnationCreate (cognitionIncarnations cognition') finalId name direction model
+        >>= either (respond . cognitionError) (bootstrap cognition')
     resolveIncarnationId store identifier name
       | TextValue.null (TextValue.strip identifier) = freshIncarnationId store name
       | otherwise = pure (TextValue.strip identifier)
@@ -512,16 +521,20 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
         >>= either (respond . cognitionError) (generateInitial cognition')
     generateInitial cognition' bootstrapped =
       cognitionGeneratePrompt cognition' bootstrapped "initial charter generated from the new incarnation direction"
-        >>= \case
-          Left failure ->
-            respond (ok (object ["incarnation" .= bootstrapped, "prompt" .= Null, "promptError" .= failure]))
-          Right prompt ->
-            promptActivate
-              (cognitionIncarnations cognition')
-              (incarnationId bootstrapped)
-              (incarnationRevision bootstrapped)
-              (promptRevisionId prompt)
-              >>= respond . either cognitionError (\activated -> ok (object ["incarnation" .= activated, "prompt" .= prompt]))
+        >>= either
+          (generationFailure bootstrapped)
+          (activateGeneration cognition' bootstrapped)
+    generationFailure bootstrapped failure =
+      respond (ok (object ["incarnation" .= bootstrapped, "prompt" .= Null, "promptError" .= failure]))
+    activateGeneration cognition' bootstrapped prompt =
+      promptActivate
+        (cognitionIncarnations cognition')
+        (incarnationId bootstrapped)
+        (incarnationRevision bootstrapped)
+        (promptRevisionId prompt)
+        >>= respond . either cognitionError (generationActivated prompt)
+    generationActivated prompt activated =
+      ok (object ["incarnation" .= activated, "prompt" .= prompt])
   readIncarnation identifier cognition =
     incarnationRead (cognitionIncarnations cognition) identifier
       >>= respond
@@ -539,78 +552,82 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
    where
     generateRevision cognition' changed =
       cognitionGeneratePrompt cognition' changed "identity metadata changed; regenerate the incarnation charter for audit"
-        >>= \generated ->
-          respond
-            ( ok
-                ( object
-                    [ "incarnation" .= changed,
-                      "prompt" .= either (const Nothing) Just generated,
-                      "promptError" .= either Just (const Nothing) generated
-                    ]
-                )
-            )
+        >>= respond . ok . revisionOutcome changed
+    revisionOutcome changed generated =
+      object
+        [ "incarnation" .= changed,
+          "prompt" .= either (const Nothing) Just generated,
+          "promptError" .= either Just (const Nothing) generated
+        ]
   archiveIncarnation identifier cognition =
     withBody "invalid incarnation archive request: " $ \(ActivatePromptRequest expected) ->
-      archivePreflight cognition identifier expected >>= \case
-        Left failure -> respond (cognitionError failure)
-        Right _ ->
-          maybe
-            (finishArchive cognition identifier expected Nothing [])
-            ( \service ->
-                tasksForIncarnation identifier service True >>= \owned ->
-                  activeTaskRuns owned >>= \case
-                    running@(_ : _) -> respond (conflict (activeRunMessage running))
-                    [] ->
-                      let active = filter (not . sessionArchived) . filter (not . sessionIsHome) $ owned
-                       in archiveOwnedTasks service active >>= \case
-                            Left failure -> respond (sessionError failure)
-                            Right archived ->
-                              activeTaskRuns owned >>= \case
-                                running@(_ : _) ->
-                                  rollbackTasks service archived
-                                    *> respond (conflict (activeRunMessage running))
-                                [] ->
-                                  finishArchive cognition identifier expected (Just service) archived
-            )
-            (inspectionSessions =<< inspection)
+      archivePreflight cognition identifier expected
+        >>= either
+          (respond . cognitionError)
+          (const (archiveWithSessions identifier cognition expected))
+   where
+    archiveWithSessions identifier' cognition' expected =
+      maybe
+        (finishArchive cognition' identifier' expected Nothing [])
+        (archiveTasks identifier' cognition' expected)
+        (inspectionSessions =<< inspection)
+    archiveTasks identifier' cognition' expected service =
+      tasksForIncarnation identifier' service True
+        >>= archiveUnlessRunning identifier' cognition' expected service
+    archiveUnlessRunning identifier' cognition' expected service owned =
+      activeTaskRuns owned >>= runningGate identifier' cognition' expected service owned
+    runningGate _ _ _ _ _ running@(_ : _) =
+      respond (conflict (activeRunMessage running))
+    runningGate identifier' cognition' expected service owned [] =
+      archiveOwnedTasks service active
+        >>= either (respond . sessionError) (archiveRecheck identifier' cognition' expected service owned)
+     where
+      active = filter (not . sessionArchived) . filter (not . sessionIsHome) $ owned
+    archiveRecheck identifier' cognition' expected service owned archived =
+      activeTaskRuns owned >>= recheckGate identifier' cognition' expected service archived
+    recheckGate _ _ _ service archived running@(_ : _) =
+      rollbackTasks service archived
+        *> respond (conflict (activeRunMessage running))
+    recheckGate identifier' cognition' expected service archived [] =
+      finishArchive cognition' identifier' expected (Just service) archived
   restoreIncarnation identifier cognition =
     withBody "invalid incarnation restore request: " $ \(ActivatePromptRequest expected) ->
       incarnationRestore (cognitionIncarnations cognition) identifier expected
         >>= respond . either cognitionError ok
   deleteIncarnationRoute identifier cognition =
     withBody "invalid incarnation delete request: " $ \(ActivatePromptRequest expected) ->
-      Cognition.deleteIncarnation cognition identifier expected >>= \case
-        Left failure -> respond (cognitionError failure)
-        Right _ ->
-          maybe
-            (respond (ok (object ["deleted" .= identifier])))
-            ( \service ->
-                deleteIncarnationSessions service identifier
-                  *> respond (ok (object ["deleted" .= identifier]))
-            )
-            (inspectionSessions =<< inspection)
+      Cognition.deleteIncarnation cognition identifier expected
+        >>= either (respond . cognitionError) (const (deleteSessions identifier))
+   where
+    deleteSessions identifier' =
+      maybe
+        (respond (ok (object ["deleted" .= identifier'])))
+        ( \service ->
+            deleteIncarnationSessions service identifier'
+              *> respond (ok (object ["deleted" .= identifier']))
+        )
+        (inspectionSessions =<< inspection)
   archivePreflight cognition identifier expected =
-    incarnationRead (cognitionIncarnations cognition) identifier <&> \case
-      Nothing -> Left ("unknown incarnation: " <> identifier)
+    incarnationRead (cognitionIncarnations cognition) identifier <&> archiveGate identifier expected
+   where
+    archiveGate identifier' expected' = \case
+      Nothing -> Left ("unknown incarnation: " <> identifier')
       Just incarnation
-        | identifier == "yuki" -> Left "default incarnation yuki cannot be archived"
-        | incarnationRevision incarnation /= expected ->
+        | identifier' == "yuki" -> Left "default incarnation yuki cannot be archived"
+        | incarnationRevision incarnation /= expected' ->
             Left
               ( "stale incarnation revision: expected "
-                  <> TextValue.pack (show expected)
+                  <> TextValue.pack (show expected')
                   <> ", actual "
                   <> TextValue.pack (show (incarnationRevision incarnation))
               )
         | incarnationStatus incarnation == IncarnationArchived ->
-            Left ("incarnation is already archived: " <> identifier)
+            Left ("incarnation is already archived: " <> identifier')
         | otherwise -> Right incarnation
   activeTaskRuns owned =
     maybe
       (pure [])
-      ( \registry ->
-          activeThreads registry <&> \running ->
-            filter (`elem` fmap sessionId owned) running
-      )
+      (\registry -> filter (`elem` fmap sessionId owned) <$> activeThreads registry)
       runs
   activeRunMessage running =
     "incarnation has active task runs: " <> TextValue.intercalate ", " running
@@ -618,48 +635,42 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
    where
     go archived [] = pure (Right (reverse archived))
     go archived (task : rest) =
-      archiveSession service (sessionId task) >>= \case
-        Left failure -> rollbackTasks service archived $> Left failure
-        Right changed -> go (changed : archived) rest
+      archiveSession service (sessionId task) >>= archiveStep archived rest
+    archiveStep archived rest = \case
+      Left failure -> rollbackTasks service archived $> Left failure
+      Right changed -> go (changed : archived) rest
   rollbackTasks service =
     mapM_ (restoreSession service . sessionId)
   finishArchive cognition identifier expected service archived =
-    incarnationArchive (cognitionIncarnations cognition) identifier expected >>= \case
-      Left failure ->
-        maybe (pure ()) (`rollbackTasks` archived) service
-          *> respond (cognitionError failure)
-      Right incarnation -> respond (ok incarnation)
+    incarnationArchive (cognitionIncarnations cognition) identifier expected
+      >>= either (archiveFailure service archived) (respond . ok)
+   where
+    archiveFailure service' archived' failure =
+      maybe (pure ()) (`rollbackTasks` archived') service'
+        *> respond (cognitionError failure)
   rootPrompts cognition =
     promptList (cognitionIncarnations cognition) Nothing >>= respond . ok
   editRootPrompt cognition =
     withBody "invalid root prompt revision: " $ \(EditPromptRequest source content parent) ->
       either
         (respond . bad)
-        ( \(cleanSource, cleanContent) ->
-            let store = cognitionIncarnations cognition
-             in promptList store Nothing >>= \existing ->
-                  validatePromptParent
-                    store
-                    Nothing
-                    RootConstitution
-                    (parent <|> (promptRevisionId <$> listToMaybe (reverse (sortOn promptOrdinal existing))))
-                    >>= either
-                      (respond . cognitionError)
-                      ( \lineage ->
-                          promptAppend
-                            store
-                            Nothing
-                            RootConstitution
-                            cleanSource
-                            cleanContent
-                            "manual-root-audit-edit/v1"
-                            Nothing
-                            lineage
-                            PromptDraft
-                            >>= respond . ok
-                      )
-        )
+        (appendRootPrompt cognition parent)
         (validatePromptDraft source content)
+   where
+    appendRootPrompt cognition' parent (cleanSource, cleanContent) =
+      promptList store Nothing >>= appendRootAfterList store parent cleanSource cleanContent
+     where
+      store = cognitionIncarnations cognition'
+    appendRootAfterList store parent cleanSource cleanContent existing =
+      validatePromptParent
+        store
+        Nothing
+        RootConstitution
+        (parent <|> (promptRevisionId <$> listToMaybe (reverse (sortOn promptOrdinal existing))))
+        >>= either (respond . cognitionError) (appendRoot store cleanSource cleanContent)
+    appendRoot store cleanSource cleanContent lineage =
+      promptAppend store Nothing RootConstitution cleanSource cleanContent "manual-root-audit-edit/v1" Nothing lineage PromptDraft
+        >>= respond . ok
   activateRootPrompt promptId cognition =
     withBody "invalid Root prompt activation request: " $ \(ActivatePromptRequest expected) ->
       promptActivateRoot (cognitionIncarnations cognition) expected promptId
@@ -670,45 +681,32 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
     withBody "invalid prompt revision: " $ \(EditPromptRequest source content parent) ->
       either
         (respond . bad)
-        ( \(cleanSource, cleanContent) ->
-            let store = cognitionIncarnations cognition
-             in activeIncarnation cognition identifier
-                  >>= either
-                    (respond . cognitionError)
-                    ( \current ->
-                        validatePromptParent
-                          store
-                          (Just identifier)
-                          IncarnationCharter
-                          (parent <|> incarnationPromptRevision current)
-                          >>= either
-                            (respond . cognitionError)
-                            ( \lineage ->
-                                promptAppend
-                                  store
-                                  (Just identifier)
-                                  IncarnationCharter
-                                  cleanSource
-                                  cleanContent
-                                  "manual-audit-edit/v1"
-                                  Nothing
-                                  lineage
-                                  PromptDraft
-                                  >>= respond . ok
-                            )
-                    )
-        )
+        (editPromptWith identifier cognition parent)
         (validatePromptDraft source content)
+   where
+    editPromptWith identifier' cognition' parent (cleanSource, cleanContent) =
+      activeIncarnation cognition' identifier'
+        >>= either (respond . cognitionError) (editPromptCurrent identifier' cognition' parent cleanSource cleanContent)
+    editPromptCurrent identifier' cognition' parent cleanSource cleanContent current =
+      validatePromptParent
+        store
+        (Just identifier')
+        IncarnationCharter
+        (parent <|> incarnationPromptRevision current)
+        >>= either (respond . cognitionError) (appendIncarnationPrompt store identifier' cleanSource cleanContent)
+     where
+      store = cognitionIncarnations cognition'
+    appendIncarnationPrompt store identifier' cleanSource cleanContent lineage =
+      promptAppend store (Just identifier') IncarnationCharter cleanSource cleanContent "manual-audit-edit/v1" Nothing lineage PromptDraft
+        >>= respond . ok
   generatePrompt identifier cognition =
     withBody "invalid prompt generation request: " $ \(GeneratePromptRequest source activate) ->
       activeIncarnation cognition identifier
-        >>= either
-          (respond . cognitionError)
-          ( \current ->
-              cognitionGeneratePrompt cognition current source
-                >>= either (respond . failed) (finish current cognition activate)
-          )
+        >>= either (respond . cognitionError) (generateFor cognition source activate)
    where
+    generateFor cognition' source activate current =
+      cognitionGeneratePrompt cognition' current source
+        >>= either (respond . failed) (finish current cognition' activate)
     finish current _ False prompt = respond (ok (object ["incarnation" .= current, "prompt" .= prompt]))
     finish current cognition' True prompt =
       promptActivate
@@ -716,17 +714,21 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
         (incarnationId current)
         (incarnationRevision current)
         (promptRevisionId prompt)
-        >>= respond . either cognitionError (\activated -> ok (object ["incarnation" .= activated, "prompt" .= prompt]))
+        >>= respond . either cognitionError (generationResult prompt)
+    generationResult prompt activated =
+      ok (object ["incarnation" .= activated, "prompt" .= prompt])
   activatePrompt identifier promptId cognition =
     withBody "invalid prompt activation request: " $ \(ActivatePromptRequest expected) ->
       promptActivate (cognitionIncarnations cognition) identifier expected promptId
         >>= respond . either cognitionError ok
   activeIncarnation cognition identifier =
-    incarnationRead (cognitionIncarnations cognition) identifier <&> \case
-      Nothing -> Left ("unknown incarnation: " <> identifier)
+    incarnationRead (cognitionIncarnations cognition) identifier <&> activeGate identifier
+   where
+    activeGate identifier' = \case
+      Nothing -> Left ("unknown incarnation: " <> identifier')
       Just incarnation
         | incarnationStatus incarnation == IncarnationArchived ->
-            Left ("incarnation is archived: " <> identifier)
+            Left ("incarnation is archived: " <> identifier')
         | otherwise -> Right incarnation
   readImpression identifier cognition =
     impressionRead (cognitionImpressions cognition) identifier >>= respond . ok
@@ -833,149 +835,140 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
     filter ((== identifier) . sessionOwnerId) <$> listSessions (serviceSessions service) archived
   createThread service =
     withBody "invalid create request: " $ \(CreateSessionRequest threadId title requestedOwner) ->
-      validateTaskOwner requestedOwner >>= \case
-        Left failure -> respond (cognitionError failure)
-        Right () ->
-          let owner = fromMaybe "yuki" (nonBlankText =<< requestedOwner)
-           in createSession (serviceSessions service) threadId title owner Nothing Nothing >>= \case
-                Left failure -> respond (sessionError failure)
-                Right created ->
-                  bindTaskOwner service threadId owner *> respond (ok created)
+      validateTaskOwner requestedOwner
+        >>= either
+          (respond . cognitionError)
+          (const (createSessionFor service threadId title requestedOwner))
+   where
+    createSessionFor service' threadId title requestedOwner =
+      let owner = fromMaybe "yuki" (nonBlankText =<< requestedOwner)
+       in createSession (serviceSessions service') threadId title owner Nothing Nothing
+            >>= either (respond . sessionError) (createdSession service' threadId owner)
+    createdSession service' threadId owner created =
+      bindTaskOwner service' threadId owner *> respond (ok created)
   validateTaskOwner Nothing = pure (Right ())
   validateTaskOwner (Just identifier) =
     maybe
       (pure (Left "incarnation service is unavailable"))
-      ( \cognition ->
-          incarnationRead (cognitionIncarnations cognition) identifier <&> \case
-            Nothing -> Left ("unknown incarnation: " <> identifier)
-            Just incarnation
-              | incarnationStatus incarnation == IncarnationArchived ->
-                  Left ("incarnation is archived: " <> identifier)
-              | otherwise -> Right ()
-      )
+      (\cognition -> incarnationRead (cognitionIncarnations cognition) identifier <&> taskOwnerGate identifier)
       (inspectionCognition =<< inspection)
+   where
+    taskOwnerGate identifier' = \case
+      Nothing -> Left ("unknown incarnation: " <> identifier')
+      Just incarnation
+        | incarnationStatus incarnation == IncarnationArchived ->
+            Left ("incarnation is archived: " <> identifier')
+        | otherwise -> Right ()
   bindTaskOwner service threadId identifier =
     threadConfigRead (serviceConfigs service) threadId
-      >>= \current ->
-        threadConfigWrite
-          (serviceConfigs service)
-          threadId
-          current {configIncarnationId = Just identifier}
+      >>= writeOwner (serviceConfigs service) threadId identifier
+   where
+    writeOwner store threadId' identifier' current =
+      threadConfigWrite store threadId' current {configIncarnationId = Just identifier'}
   renameThread threadId service =
     withBody "invalid rename request: " $ \(RenameSessionRequest title) ->
       renameSession (serviceSessions service) threadId title >>= sessionResult
   homeGuard service threadId continue =
-    findSession (serviceSessions service) threadId >>= \case
-      Just meta | sessionIsHome meta -> respond (jsonResponse cors status400 [] (message "home_session_immutable"))
-      _ -> continue
+    findSession (serviceSessions service) threadId >>= homeGate continue
+   where
+    homeGate _ (Just meta)
+      | sessionIsHome meta =
+          respond (jsonResponse cors status400 [] (message "home_session_immutable"))
+    homeGate continue' _ = continue'
   archiveThread threadId service = homeGuard service threadId (archiveSession service threadId >>= sessionResult)
   restoreThread threadId service =
     homeGuard service threadId $
       maybe
         (restoreSession service threadId >>= sessionResult)
-        ( \cognition ->
-            incarnationForThread cognition threadId >>= \case
-              Left failure -> respond (cognitionError failure)
-              Right _ -> restoreSession service threadId >>= sessionResult
-        )
+        (restoreWithCognition threadId service)
         (inspectionCognition =<< inspection)
+   where
+    restoreWithCognition threadId' service' cognition =
+      incarnationForThread cognition threadId'
+        >>= either (respond . cognitionError) (const (restoreSession service' threadId' >>= sessionResult))
   forkThread source service =
     homeGuard service source $
-      refreshTaskProjection source service >>= \case
-        Left failure -> respond (cognitionError failure)
-        Right () ->
-          withBody "invalid fork request: " $ \(ForkSessionRequest target title node) ->
-            forkSession service source target node title >>= sessionResult
+      refreshTaskProjection source service
+        >>= either (respond . cognitionError) (forkWithBody source service)
+   where
+    forkWithBody source' service' () =
+      withBody "invalid fork request: " $ \(ForkSessionRequest target title node) ->
+        forkSession service' source' target node title >>= sessionResult
   sleepThread threadId service =
     case inspectionCognition =<< inspection of
       Nothing ->
         transcriptLoad (serviceTranscripts service) threadId
           >>= maybe (respond (missing "thread not found")) legacyCompact
       Just cognition ->
-        readSleepRequest >>= \_reason ->
-          incarnationForThread cognition threadId >>= \case
-            Left failure -> respond (cognitionError failure)
-            Right incarnation ->
-              authoritativeMessages cognition service (incarnationId incarnation) threadId >>= \case
-                Left failure -> respond (cognitionError failure)
-                Right messages ->
-                  runtimeFor threadId >>= \runtime ->
-                    newId >>= \sleepRunId ->
-                      cognitionSleepMessages
-                        cognition
-                        incarnation
-                        threadId
-                        (Just sleepRunId)
-                        SleepManual
-                        runtime
-                        messages
-                        >>= either
-                          (respond . cognitionError)
-                          ( \result ->
-                              transcriptSave
-                                (serviceTranscripts service)
-                                threadId
-                                (compactionMessages (sleepResultCompaction result))
-                                *> ( taskOwnerFor service threadId
-                                       >>= ensureSession (serviceSessions service) threadId Nothing
-                                   )
-                                *> respond (ok result)
-                          )
+        readSleepRequest
+          >>= const (incarnationForThread cognition threadId)
+          >>= either (respond . cognitionError) (sleepWithIncarnation threadId service cognition)
    where
+    sleepWithIncarnation threadId' service' cognition incarnation =
+      authoritativeMessages cognition service' (incarnationId incarnation) threadId'
+        >>= either (respond . cognitionError) (sleepWithMessages threadId' service' cognition incarnation)
+    sleepWithMessages threadId' service' cognition incarnation messages =
+      runtimeFor threadId' >>= sleepWithRuntime threadId' service' cognition incarnation messages
+    sleepWithRuntime threadId' service' cognition incarnation messages runtime =
+      newId >>= sleepWithRunId threadId' service' cognition incarnation messages runtime
+    sleepWithRunId threadId' service' cognition incarnation messages runtime sleepRunId =
+      cognitionSleepMessages cognition incarnation threadId' (Just sleepRunId) SleepManual runtime messages
+        >>= either (respond . cognitionError) (sleepCompleted threadId' service')
+    sleepCompleted threadId' service' result =
+      transcriptSave (serviceTranscripts service') threadId' (compactionMessages (sleepResultCompaction result))
+        *> (taskOwnerFor service' threadId' >>= ensureSession (serviceSessions service') threadId' Nothing)
+        *> respond (ok result)
     legacyCompact messages =
-      runtimeFor threadId >>= \runtime ->
-        compactHistory runtime True messages >>= \case
-          Nothing ->
-            respond
-              ( ok
-                  ( object
-                      [ "changed" .= False,
-                        "beforeTokens" .= estimateMessagesTokens messages,
-                        "message" .= ("当前上下文尚未达到手动压缩阈值。" :: Text)
-                      ]
-                  )
+      runtimeFor threadId >>= compactWithRuntime messages
+    compactWithRuntime messages runtime =
+      compactHistory runtime True messages >>= compactOutcome messages
+    compactOutcome messages = \case
+      Nothing ->
+        respond
+          ( ok
+              ( object
+                  [ "changed" .= False,
+                    "beforeTokens" .= estimateMessagesTokens messages,
+                    "message" .= ("当前上下文尚未达到手动压缩阈值。" :: Text)
+                  ]
               )
-          Just compaction ->
-            transcriptSave (serviceTranscripts service) threadId (compactionMessages compaction)
-              *> ( taskOwnerFor service threadId
-                     >>= ensureSession (serviceSessions service) threadId Nothing
-                 )
-              *> respond
-                ( ok
-                    ( object
-                        [ "changed" .= True,
-                          "beforeTokens" .= compactionBeforeTokens compaction,
-                          "afterTokens" .= compactionAfterTokens compaction,
-                          "budgetTokens" .= compactionBudgetTokens compaction,
-                          "droppedMessages" .= length (compactionDropped compaction),
-                          "summary" .= compactionSummary compaction
-                        ]
-                    )
-                )
+          )
+      Just compaction ->
+        transcriptSave (serviceTranscripts service) threadId (compactionMessages compaction)
+          *> (taskOwnerFor service threadId >>= ensureSession (serviceSessions service) threadId Nothing)
+          *> respond (ok (compactValue compaction))
+    compactValue compaction =
+      object
+        [ "changed" .= True,
+          "beforeTokens" .= compactionBeforeTokens compaction,
+          "afterTokens" .= compactionAfterTokens compaction,
+          "budgetTokens" .= compactionBudgetTokens compaction,
+          "droppedMessages" .= length (compactionDropped compaction),
+          "summary" .= compactionSummary compaction
+        ]
     readSleepRequest =
-      strictRequestBody request >>= \body ->
-        if LazyByteString.null body
-          then pure (SleepThreadRequest Nothing)
-          else
-            either
-              (const (pure (SleepThreadRequest Nothing)))
-              pure
-              (eitherDecode body)
+      strictRequestBody request >>= sleepRequestFromBody
+    sleepRequestFromBody body
+      | LazyByteString.null body = pure (SleepThreadRequest Nothing)
+      | otherwise = either (const (pure (SleepThreadRequest Nothing))) pure (eitherDecode body)
   refreshTaskProjection threadId service =
     case inspectionCognition =<< inspection of
       Nothing -> pure (Right ())
       Just cognition ->
-        incarnationForThread cognition threadId >>= \case
-          Left failure -> pure (Left failure)
-          Right incarnation ->
-            authoritativeMessages cognition service (incarnationId incarnation) threadId >>= \case
-              Left failure -> pure (Left failure)
-              Right messages ->
-                Right () <$ transcriptSave (serviceTranscripts service) threadId messages
+        incarnationForThread cognition threadId
+          >>= either (pure . Left) (projectWithIncarnation threadId service cognition)
+   where
+    projectWithIncarnation threadId' service' cognition incarnation =
+      authoritativeMessages cognition service' (incarnationId incarnation) threadId'
+        >>= either (pure . Left) (projectWithMessages threadId' service')
+    projectWithMessages threadId' service' messages =
+      Right () <$ transcriptSave (serviceTranscripts service') threadId' messages
   exportThread threadId service =
-    refreshTaskProjection threadId service >>= \case
-      Left failure -> respond (cognitionError failure)
-      Right () -> exportSession service threadId >>= respond . maybe (missing "thread not found") ok
+    refreshTaskProjection threadId service
+      >>= either (respond . cognitionError) (exportAfterProjection threadId service)
+   where
+    exportAfterProjection threadId' service' () =
+      exportSession service' threadId' >>= respond . maybe (missing "thread not found") ok
   importThread service =
     withBody "invalid import request: " $ \incoming ->
       homeGuard service (importTarget incoming) (importSession service incoming >>= sessionResult)
@@ -1008,27 +1001,27 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
      where
       unlocked = maybe (persist config) (`validateActive` config) (configIncarnationId config)
       locked service =
-        findSession (serviceSessions service) threadId >>= \case
-          Nothing -> unlocked
-          Just meta ->
-            let owner = sessionOwnerId meta
-             in case nonBlankText =<< configIncarnationId config of
-                  Just requested
-                    | requested /= owner ->
-                        respond (conflict ("thread incarnation is immutable: " <> owner))
-                  _ -> validateActive owner config {configIncarnationId = Just owner}
+        findSession (serviceSessions service) threadId >>= lockedSession config
+      lockedSession config' = \case
+        Nothing -> unlocked
+        Just meta ->
+          let owner = sessionOwnerId meta
+           in case nonBlankText =<< configIncarnationId config' of
+                Just requested
+                  | requested /= owner ->
+                      respond (conflict ("thread incarnation is immutable: " <> owner))
+                _ -> validateActive owner config' {configIncarnationId = Just owner}
     validateActive identifier config =
       maybe
         (persist config)
-        ( \cognition ->
-            incarnationRead (cognitionIncarnations cognition) identifier >>= \case
-              Nothing -> respond (missing ("unknown incarnation: " <> identifier))
-              Just incarnation
-                | incarnationStatus incarnation == IncarnationArchived ->
-                    respond (conflict ("incarnation is archived: " <> identifier))
-                | otherwise -> persist config
-        )
+        (\cognition -> incarnationRead (cognitionIncarnations cognition) identifier >>= validateActiveIncarnation config identifier)
         (inspectionCognition =<< inspection)
+    validateActiveIncarnation config identifier = \case
+      Nothing -> respond (missing ("unknown incarnation: " <> identifier))
+      Just incarnation
+        | incarnationStatus incarnation == IncarnationArchived ->
+            respond (conflict ("incarnation is archived: " <> identifier))
+        | otherwise -> persist config
     persist config =
       threadConfigWrite (configViewStore view) threadId config
         *> respond (responseLBS status204 (corsHeaders cors) "")
@@ -1045,10 +1038,15 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
       threadConfigRead (configViewStore view) threadId
         >>= maybe
           (respond (ok (object ["prefix" .= prefix, "paths" .= ([] :: [Text])])))
-          (\dir -> completePaths dir prefix >>= \matches -> respond (ok (object ["prefix" .= prefix, "paths" .= matches])))
+          (completeFor prefix)
           . cwdPath
           . configCwd
           . flip resolveThreadConfig (configViewDefaults view)
+   where
+    completeFor prefix dir =
+      completePaths dir prefix >>= respond . ok . completed prefix
+    completed prefix matches =
+      object ["prefix" .= prefix, "paths" .= matches]
   facts (_, factStore) = ok <$> factList factStore
   artifact identifier store = maybe (missing "artifact not found") plain <$> artifactFetch store identifier
   journalRuns = respond . ok . runIds
@@ -1088,12 +1086,13 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
         >>= either (respond . bad . ("invalid cancel request: " <>) . fromString) decide . cancelWanted
      where
       decide runId =
-        cancelRun registry runId >>= \cancelled ->
-          when cancelled (traverse_ (\hub -> noteCancelling hub runId) telemetry)
-            *> bool
-              (respond (missing "run not found"))
-              (respond (responseLBS status202 (corsHeaders cors) ""))
-              cancelled
+        cancelRun registry runId >>= cancelOutcome runId
+      cancelOutcome runId cancelled =
+        when cancelled (traverse_ (\hub -> noteCancelling hub runId) telemetry)
+          *> bool
+            (respond (missing "run not found"))
+            (respond (responseLBS status202 (corsHeaders cors) ""))
+            cancelled
   handleSteer = maybe notFound steer runs
    where
     steer registry =
@@ -1122,32 +1121,31 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
         maybe (streamRun input) prepare (inspectionSessions =<< inspection)
    where
     prepare service =
-      taskOwnerFor service (AGUI.runThreadId input) >>= \owner ->
-        ensureSession (serviceSessions service) (AGUI.runThreadId input) (latestUserTitle input) owner
-          >>= \meta ->
-            bool
-              (validateIncarnation service)
-              (respond (conflict "thread is archived"))
-              (sessionArchived meta)
+      taskOwnerFor service (AGUI.runThreadId input)
+        >>= ensureSession (serviceSessions service) (AGUI.runThreadId input) (latestUserTitle input)
+        >>= bool
+          (validateIncarnation service)
+          (respond (conflict "thread is archived"))
+          . sessionArchived
     validateIncarnation service =
       maybe
         (accept service)
-        ( \cognition ->
-            incarnationForThread cognition (AGUI.runThreadId input) >>= \case
-              Left failure -> respond (cognitionError failure)
-              Right _ -> accept service
-        )
+        (validateIncarnationWith service)
         (inspectionCognition =<< inspection)
+    validateIncarnationWith service cognition =
+      incarnationForThread cognition (AGUI.runThreadId input)
+        >>= either (respond . cognitionError) (const (accept service))
     accept service =
-      authoritativeInput (inspectionCognition =<< inspection) configs service input >>= \case
-        Left failure -> respond (failed failure)
-        Right accepted -> streamRun accepted
+      authoritativeInput (inspectionCognition =<< inspection) configs service input
+        >>= either (respond . failed) streamRun
     streamRun accepted =
-      runtimeFor (AGUI.runThreadId accepted) >>= \runtime ->
-        respond
-          ( responseStream status200 (corsHeaders cors <> streamHeaders) $ \write flush ->
-              runAgent runtime accepted (\event -> write (encodeEvent event) *> flush)
-          )
+      runtimeFor (AGUI.runThreadId accepted)
+        >>= respond
+          . responseStream status200 (corsHeaders cors <> streamHeaders)
+          . streamFor accepted
+     where
+      streamFor accepted' runtime write flush =
+        runAgent runtime accepted' (\event -> write (encodeEvent event) *> flush)
   conflict text = jsonResponse cors status409 [] (message text)
   includeArchived = join (lookup "archived" (queryString request)) == Just "true"
 
@@ -1169,14 +1167,16 @@ validatePromptParent ::
   IO (Either Text (Maybe Text))
 validatePromptParent _ _ _ Nothing = pure (Right Nothing)
 validatePromptParent store owner layer (Just identifier) =
-  promptRead store identifier <&> \case
-    Nothing -> Left ("unknown parent prompt revision: " <> identifier)
+  promptRead store identifier <&> parentGate owner layer identifier
+ where
+  parentGate owner' layer' identifier' = \case
+    Nothing -> Left ("unknown parent prompt revision: " <> identifier')
     Just parent
-      | promptIncarnationId parent /= owner ->
+      | promptIncarnationId parent /= owner' ->
           Left "parent prompt revision belongs to another owner"
-      | promptLayer parent /= layer ->
+      | promptLayer parent /= layer' ->
           Left "parent prompt revision belongs to another layer"
-      | otherwise -> Right (Just identifier)
+      | otherwise -> Right (Just identifier')
 
 latestUserTitle :: AGUI.RunAgentInput -> Maybe Text
 latestUserTitle input =
@@ -1192,11 +1192,10 @@ latestUserTitle input =
 
 taskOwnerFor :: SessionService -> Text -> IO Text
 taskOwnerFor service threadId =
-  findSession (serviceSessions service) threadId >>= \case
-    Just meta -> pure (sessionOwnerId meta)
-    Nothing ->
-      threadConfigRead (serviceConfigs service) threadId
-        <&> fromMaybe "yuki" . (nonBlankText =<<) . configIncarnationId
+  maybe
+    (threadConfigRead (serviceConfigs service) threadId <&> fromMaybe "yuki" . (nonBlankText =<<) . configIncarnationId)
+    (pure . sessionOwnerId)
+    =<< findSession (serviceSessions service) threadId
 
 sessionOwnerId :: SessionMeta -> Text
 sessionOwnerId = fromMaybe "yuki" . nonBlankText . sessionIncarnationId
@@ -1211,40 +1210,47 @@ nonBlankText value
 authoritativeInput :: Maybe Cognition -> Maybe ConfigView -> SessionService -> AGUI.RunAgentInput -> IO (Either Text AGUI.RunAgentInput)
 authoritativeInput Nothing _ service input = Right <$> transcriptInput service input
 authoritativeInput (Just cognition) _ service input =
-  taskOwnerFor service task >>= \identity ->
-    contextEpochHead (cognitionContexts cognition) identity task >>= \case
-      Nothing -> Right <$> transcriptInput service input
-      Just epoch ->
-        contextEpochProject (cognitionContexts cognition) (contextEpochId epoch)
-          <&> (>>= projectInput)
+  taskOwnerFor service task
+    >>= flip (contextEpochHead (cognitionContexts cognition)) task
+    >>= epochInput service input
  where
   task = AGUI.runThreadId input
+  epochInput service' input' = \case
+    Nothing -> Right <$> transcriptInput service' input'
+    Just epoch ->
+      contextEpochProject (cognitionContexts cognition) (contextEpochId epoch)
+        <&> (>>= projectInput)
   projectInput projected =
-    projectedAguiMessages projected <&> \messages ->
-      input
-        { AGUI.runMessages =
-            appendLatestUser messages (latestUserMessage input)
-        }
+    projectedAguiMessages projected <&> projectMessages input
+  projectMessages input'' messages =
+    input''
+      { AGUI.runMessages =
+          appendLatestUser messages (latestUserMessage input'')
+      }
 
 transcriptInput :: SessionService -> AGUI.RunAgentInput -> IO AGUI.RunAgentInput
 transcriptInput service input =
-  transcriptLoad (serviceTranscripts service) (AGUI.runThreadId input) <&> \case
-    Nothing -> input
-    Just [] -> input
+  transcriptLoad (serviceTranscripts service) (AGUI.runThreadId input) <&> transcriptInputFromHistory input
+ where
+  transcriptInputFromHistory input' = \case
+    Nothing -> input'
+    Just [] -> input'
     Just history ->
-      input
+      input'
         { AGUI.runMessages =
-            appendLatestUser (toAguiMessages history) (latestUserMessage input)
+            appendLatestUser (toAguiMessages history) (latestUserMessage input')
         }
 
 authoritativeMessages :: Cognition -> SessionService -> Text -> Text -> IO (Either Text [ChatMessage])
 authoritativeMessages cognition service identity task =
-  contextEpochHead (cognitionContexts cognition) identity task >>= \case
+  contextEpochHead (cognitionContexts cognition) identity task >>= epochMessages cognition service task
+ where
+  epochMessages cognition' service' task' = \case
     Just epoch ->
-      contextEpochProject (cognitionContexts cognition) (contextEpochId epoch)
+      contextEpochProject (cognitionContexts cognition') (contextEpochId epoch)
         <&> (>>= projectedAguiMessages >=> toChatMessages)
     Nothing ->
-      transcriptLoad (serviceTranscripts service) task
+      transcriptLoad (serviceTranscripts service') task'
         <&> maybe (Left "thread not found") Right
 
 appendLatestUser :: [AGUI.Message] -> Maybe AGUI.Message -> [AGUI.Message]

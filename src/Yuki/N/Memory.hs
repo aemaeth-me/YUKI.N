@@ -169,8 +169,7 @@ watcherStep model facts journal state input messages =
       Just (Retrieval query _)
         | spent >= retrievalRunBudget || cooling query -> commit base Nothing
         | otherwise ->
-            factSearch facts query
-              >>= \hits -> commit (spend query base) (Just hits)
+            factSearch facts query >>= commit (spend query base) . Just
     spent = Map.findWithDefault 0 runId (watcherSpent seen)
     cooling query =
       maybe False (watcherRound seen <) (Map.lookup (queryHash query) (watcherCooldowns seen))
@@ -210,13 +209,12 @@ injectBriefing store journal state input messages
  where
   runId = AGUI.runId input
   cached = readIORef state >>= maybe render pure . Map.lookup runId . memoryBriefings
-  render =
-    threadBrief store (AGUI.runThreadId input)
-      >>= \brief ->
-        let rendered = renderBriefing <$> (brief >>= inhabited)
-         in recordMaybe (subJournal runId <$> journal) (StoreBriefEntry (toJSON brief))
-              *> modifyIORef' state (insertBriefing runId rendered)
-              $> rendered
+  render = threadBrief store (AGUI.runThreadId input) >>= renderBrief
+  renderBrief brief =
+    let rendered = renderBriefing <$> (brief >>= inhabited)
+     in recordMaybe (subJournal runId <$> journal) (StoreBriefEntry (toJSON brief))
+          *> modifyIORef' state (insertBriefing runId rendered)
+          $> rendered
 
 insertBriefing :: Text -> Maybe Text -> MemoryState -> MemoryState
 insertBriefing runId rendered state = state {memoryBriefings = Map.insert runId rendered (memoryBriefings state)}
@@ -268,13 +266,14 @@ clearRunState state input =
   clearBudget watcher = watcher {watcherSpent = Map.delete runId (watcherSpent watcher)}
 
 memoryTransientCounts :: IORef MemoryState -> IO (Int, Int, Int, Int)
-memoryTransientCounts state =
-  readIORef state <&> \memory ->
-    ( Map.size (memoryBriefings memory),
-      Map.size (memoryCandidates memory),
-      sum (Map.size . watcherSpent <$> Map.elems (memoryWatchers memory)),
-      sum (Map.size . watcherCooldowns <$> Map.elems (memoryWatchers memory))
-    )
+memoryTransientCounts = fmap counts . readIORef
+ where
+  counts =
+    (,,,)
+      <$> Map.size . memoryBriefings
+      <*> Map.size . memoryCandidates
+      <*> sum . fmap (Map.size . watcherSpent) . Map.elems . memoryWatchers
+      <*> sum . fmap (Map.size . watcherCooldowns) . Map.elems . memoryWatchers
 
 inhabited :: ThreadBrief -> Maybe ThreadBrief
 inhabited brief = bool (Just brief) Nothing (Text.null (briefRollingSummary brief) && null (briefEpisodes brief))
@@ -302,8 +301,9 @@ iso8601 = Text.pack . iso8601Show
 
 complete :: Model -> [ChatMessage] -> IO Text
 complete model messages =
-  newIORef "" >>= \text -> streamModel model (ModelRequest messages []) (gather text) *> readIORef text
+  newIORef "" >>= run
  where
+  run text = streamModel model (ModelRequest messages []) (gather text) *> readIORef text
   gather text = \case
     ModelTextDelta delta -> modifyIORef' text (<> delta)
     _ -> pure ()
@@ -317,10 +317,11 @@ journaledModel runId journal model = maybe model wrap scoped
       { streamModel = \request emit ->
           record (ModelRequestEntry request)
             *> streamModel model request (\event -> record (ModelEventEntry event) *> emit event)
-            >>= \reason -> reason <$ record (ModelFinishEntry reason)
+            >>= finish
       }
    where
     record = recordMaybe (Just watched)
+    finish reason = record (ModelFinishEntry reason) $> reason
 
 watcherPrompt :: Text -> [ChatMessage] -> [ChatMessage]
 watcherPrompt previous delta =
@@ -415,7 +416,7 @@ newThreadStore :: FilePath -> IO ThreadStore
 newThreadStore dir =
   createDirectoryIfMissing True (threadsPath dir)
     *> newMVar ()
-    <&> \lock -> ThreadStore (save lock) (readBrief dir)
+    <&> flip ThreadStore (readBrief dir) . save
  where
   save lock threadId episode =
     withMVar lock (const (persist dir threadId episode))
@@ -433,7 +434,7 @@ readBrief dir threadId =
 newMemoryThreadStore :: IO ThreadStore
 newMemoryThreadStore =
   newIORef Map.empty
-    <&> \threads -> ThreadStore (save threads) (brief threads)
+    <&> liftA2 ThreadStore save brief
  where
   save threads threadId episode =
     modifyIORef' threads (Map.alter (Just . extendBrief episode . fromMaybe emptyBrief) threadId)

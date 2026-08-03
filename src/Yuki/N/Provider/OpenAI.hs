@@ -21,7 +21,7 @@ where
 
 import Control.Applicative ((<|>))
 import Control.Exception (catch, throwIO, try)
-import Control.Monad (foldM, join, mfilter, (=<<))
+import Control.Monad (foldM, join, mfilter)
 import Data.Aeson
 import Data.Aeson.Types (Pair, parseMaybe)
 import Data.Bifunctor (first)
@@ -31,7 +31,7 @@ import Data.ByteString qualified as ByteString
 import Data.ByteString.Char8 qualified as Char8
 import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Foldable (traverse_)
-import Data.Functor (($>), (<&>))
+import Data.Functor (($>))
 import Data.Maybe (fromMaybe, maybeToList)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -95,23 +95,25 @@ streamProvider ::
 streamProvider manager config modelRequest emit =
   action `catch` rethrowHttp
  where
-  action = buildRequest config modelRequest >>= \request -> withResponse request manager (consumeResponse (openAIDialect config) emit)
+  action = buildRequest config modelRequest >>= requestWith
+  requestWith request = withResponse request manager (consumeResponse (openAIDialect config) emit)
   rethrowHttp = throwIO . ProviderFailure . ("provider request failed: " <>) . httpError
 
 buildRequest :: OpenAIConfig -> ModelRequest -> IO Request
 buildRequest config modelRequest =
-  parseRequest (Text.unpack (apiEndpoint config))
-    <&> \request ->
-      request
-        { method = "POST",
-          requestHeaders =
-            [ (hAuthorization, "Bearer " <> TextEncoding.encodeUtf8 (openAIApiKey config)),
-              (hContentType, "application/json"),
-              (hAccept, "text/event-stream")
-            ],
-          requestBody = RequestBodyLBS (encode (requestValue config modelRequest)),
-          responseTimeout = responseTimeoutNone
-        }
+  asPostRequest <$> parseRequest (Text.unpack (apiEndpoint config))
+ where
+  asPostRequest request =
+    request
+      { method = "POST",
+        requestHeaders =
+          [ (hAuthorization, "Bearer " <> TextEncoding.encodeUtf8 (openAIApiKey config)),
+            (hContentType, "application/json"),
+            (hAccept, "text/event-stream")
+          ],
+        requestBody = RequestBodyLBS (encode (requestValue config modelRequest)),
+        responseTimeout = responseTimeoutNone
+      }
 
 apiEndpoint :: OpenAIConfig -> Text
 apiEndpoint config =
@@ -132,8 +134,8 @@ fetchModelIds manager config =
  where
   request =
     parseRequest (Text.unpack (modelsEndpoint (openAIBaseUrl config)))
-      >>= \req ->
-        httpLbs req {requestHeaders = [(hAuthorization, "Bearer " <> TextEncoding.encodeUtf8 (openAIApiKey config))]} manager
+      >>= flip httpLbs manager . withAuthHeaders
+  withAuthHeaders req = req {requestHeaders = [(hAuthorization, "Bearer " <> TextEncoding.encodeUtf8 (openAIApiKey config))]}
   showHttp (exception :: HttpException) = show exception
   inspect response
     | statusCode (responseStatus response) > 299 =
@@ -207,8 +209,9 @@ responseMessage role content =
     ]
 
 responseReasoningValue :: AssistantTurn -> Maybe Value
-responseReasoningValue turn =
-  turnReasoning turn <&> \content ->
+responseReasoningValue = fmap reasoningValue . turnReasoning
+ where
+  reasoningValue content =
     object
       [ "type" .= ("reasoning" :: Text),
         "content"
@@ -355,7 +358,9 @@ consumePayloads dialect emit initial = foldM consume (initial, False)
 providerPayload :: ApiDialect -> ByteString -> Either ProviderFailure ([ModelEvent], Maybe FinishReason, Bool)
 providerPayload DeepSeek payload = decodeResponsesEvent payload >>= responseEvent
 providerPayload OpenAICompatible payload =
-  decodeChunk payload >>= chunkEvents <&> \(events, reason) -> (events, reason, False)
+  uncurry finalize <$> (decodeChunk payload >>= chunkEvents)
+ where
+  finalize events reason = (events, reason, False)
 
 responseEvent :: ResponsesEvent -> Either ProviderFailure ([ModelEvent], Maybe FinishReason, Bool)
 responseEvent event =

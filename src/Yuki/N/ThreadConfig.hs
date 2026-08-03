@@ -59,8 +59,9 @@ newThreadConfigStore :: FilePath -> IO ThreadConfigStore
 newThreadConfigStore dir =
   createDirectoryIfMissing True (configsPath dir)
     *> newMVar ()
-    <&> \lock -> ThreadConfigStore (load dir) (save lock) (delete lock)
+    <&> mkStore
  where
+  mkStore lock = ThreadConfigStore (load dir) (save lock) (delete lock)
   save lock threadId config =
     withMVar lock (const (atomicEncodeFile (configPath dir threadId) config))
   delete lock threadId =
@@ -83,15 +84,19 @@ configPath dir threadId = configsPath dir ++ "/" ++ Text.unpack (sanitizeThreadI
 newMemoryThreadConfigStore :: IO ThreadConfigStore
 newMemoryThreadConfigStore =
   newIORef Map.empty
-    <&> \configs ->
-      ThreadConfigStore
-        (\threadId -> Map.findWithDefault emptyThreadConfig threadId <$> readIORef configs)
-        (\threadId config -> modifyIORef' configs (Map.insert threadId config))
-        (\threadId -> modifyIORef' configs (Map.delete threadId))
+    <&> mkStore
+ where
+  mkStore configs =
+    ThreadConfigStore
+      ((<$> readIORef configs) . Map.findWithDefault emptyThreadConfig)
+      ((modifyIORef' configs .) . Map.insert)
+      (modifyIORef' configs . Map.delete)
 
 resolveRuntime :: Manager -> OpenAIConfig -> Maybe ArtifactStore -> Runtime -> ThreadConfig -> ProviderRegistry -> Map.Map String Text -> IO Runtime
 resolveRuntime manager provider artifacts base config registry keyMap =
-  liftA2 (,) workToolSet ledgerPair <&> \(tools, pair) ->
+  liftA2 build workToolSet ledgerPair
+ where
+  build tools pair =
     registerSubAgent
       base
         { runtimeModel = maybe (fallbackModel base) (openAIModel manager) chosenConfig,
@@ -100,17 +105,16 @@ resolveRuntime manager provider artifacts base config registry keyMap =
           runtimeHooks = bool defaultHooks (runtimeHooks base) (configMemory config /= Just False),
           runtimeContext = applyContext <$> runtimeContext base
         }
- where
   dispatchTool =
     maybe
       Map.empty
       (\store -> Map.singleton "propose_dispatch" (proposeDispatchTool (runtimeDispatchConfirmTimeout base) store (runtimeTelemetry base)))
       (runtimeDispatchStore base)
-  chosenConfig =
-    configProvider config >>= \name ->
-      Map.lookup name registry >>= \entry ->
-        Map.lookup (Text.unpack name) keyMap <&> \key ->
-          applyEffort (providerConfig entry key (configModel config <|> Just (providerDefaultModel entry)))
+  chosenConfig = configProvider config >>= pick
+  pick name =
+    liftA2 resolve (Map.lookup name registry) (Map.lookup (Text.unpack name) keyMap)
+  resolve entry key =
+    applyEffort (providerConfig entry key (configModel config <|> Just (providerDefaultModel entry)))
   fallbackModel source
     | isNothing (configModel config) && isNothing (configReasoningEffort config) = runtimeModel source
     | otherwise = openAIModel manager (applyEffort provider) {openAIModelName = fromMaybe (openAIModelName provider) (configModel config)}
@@ -118,7 +122,7 @@ resolveRuntime manager provider artifacts base config registry keyMap =
   artifactTools = maybe Map.empty (Map.singleton artifactReadToolName . artifactReadTool) artifacts
   workToolSet = maybe (pure Map.empty) (fmap byName . withBackground) (cwdPath (configCwd config))
   withBackground cwd = (<> backgroundTools (runtimeBackground base) cwd) <$> workTools artifacts cwd
-  byName = Map.fromList . fmap (\tool -> (toolName (backendToolSpec tool), tool))
+  byName = Map.fromList . fmap ((,) <$> (toolName . backendToolSpec) <*> id)
   gated = fsGate . shellGate
   fsGate = bool (Map.filterWithKey (\name _ -> not ("fs_" `Text.isPrefixOf` name))) id (configFs config /= Just False)
   shellGate = bool (Map.filterWithKey (\name _ -> not ("shell" `Text.isPrefixOf` name))) id (configShell config /= Just False)
@@ -150,11 +154,14 @@ fsInterceptor telemetry ledger diffBytes root kind tool =
       Nothing -> runBackendTool original context arguments
       Just path ->
         let target = root </> path
-         in boundedRead target >>= \old ->
-              runBackendTool original context arguments >>= \outcome ->
-                bool (record original context target path old $> outcome) (pure outcome) (toolOutcomeError outcome)
+         in liftA2 (,) (boundedRead target) (runBackendTool original context arguments)
+              >>= commit original context target path
+  commit original context target path (old, outcome) =
+    bool (record original context target path old $> outcome) (pure outcome) (toolOutcomeError outcome)
   record original context target path old =
-    boundedRead target >>= \new ->
+    boundedRead target >>= recordChanges
+   where
+    recordChanges new =
       quietly
         ( recordFsChange ledger telemetry (change original context path old new)
             *> recordDelivery ledger telemetry (delivery context path new)
@@ -195,9 +202,8 @@ fsInterceptor telemetry ledger diffBytes root kind tool =
    where
     diff = unified path (fromMaybe "" old) (fromMaybe "" new)
   boundedRead path =
-    try @IOException (LazyTextIO.readFile path >>= evaluate . LazyText.toStrict . LazyText.take 200000) >>= \case
-      Left _ -> pure Nothing
-      Right content -> pure (Just content)
+    either (const Nothing) Just
+      <$> try @IOException (LazyTextIO.readFile path >>= evaluate . LazyText.toStrict . LazyText.take 200000)
 
 globalThreadConfig :: Settings -> ThreadConfig
 globalThreadConfig settings =

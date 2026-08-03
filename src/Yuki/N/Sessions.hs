@@ -182,7 +182,9 @@ newSessionStore dir =
 
 ensure :: MVar (Map Text SessionMeta) -> FilePath -> SessionKind -> Text -> Maybe Text -> Text -> IO SessionMeta
 ensure lock path kind threadId title rawOwner =
-  getPOSIXTime >>= \now ->
+  getPOSIXTime >>= commit
+ where
+  commit now =
     modifyMVar lock $ \sessions ->
       let stamp = round now
           owner = cleanOwner rawOwner
@@ -200,7 +202,6 @@ ensure lock path kind threadId title rawOwner =
               (Map.lookup threadId sessions)
           updated = Map.insert threadId meta sessions
        in persist path updated $> (updated, meta)
- where
   refreshedTitle current
     | sessionTitle current == threadId = cleanTitle threadId title
     | otherwise = sessionTitle current
@@ -229,16 +230,17 @@ create lock path threadId title rawOwner parent node
   | isHomeThreadId threadId = pure (Left ("reserved thread id: " <> threadId))
   | Text.null owner = pure (Left "incarnation id must not be empty")
   | otherwise =
-      getPOSIXTime >>= \now ->
-        modifyMVar lock $ \sessions ->
-          case Map.lookup threadId sessions of
-            Just _ -> pure (sessions, Left ("thread already exists: " <> threadId))
-            Nothing ->
-              let stamp = round now
-                  meta = SessionMeta threadId (cleanTitle threadId title) owner stamp stamp False parent node SessionTask
-                  updated = Map.insert threadId meta sessions
-               in persist path updated $> (updated, Right meta)
+      getPOSIXTime >>= commit
  where
+  commit now =
+    modifyMVar lock $ \sessions ->
+      case Map.lookup threadId sessions of
+        Just _ -> pure (sessions, Left ("thread already exists: " <> threadId))
+        Nothing ->
+          let stamp = round now
+              meta = SessionMeta threadId (cleanTitle threadId title) owner stamp stamp False parent node SessionTask
+              updated = Map.insert threadId meta sessions
+           in persist path updated $> (updated, Right meta)
   owner = Text.strip rawOwner
 
 claim :: MVar (Map Text SessionMeta) -> FilePath -> Text -> Text -> IO (Either Text SessionMeta)
@@ -278,7 +280,9 @@ archive lock path threadId archived =
 
 update :: MVar (Map Text SessionMeta) -> FilePath -> Text -> (Integer -> SessionMeta -> SessionMeta) -> IO (Either Text SessionMeta)
 update lock path threadId change =
-  getPOSIXTime >>= \now ->
+  getPOSIXTime >>= commit
+ where
+  commit now =
     modifyMVar lock $ \sessions ->
       case Map.lookup threadId sessions of
         Nothing -> pure (sessions, Left ("unknown thread: " <> threadId))
@@ -292,13 +296,13 @@ persist path = atomicEncodeFile path . Map.elems
 
 loadIndex :: FilePath -> IO (Map Text SessionMeta)
 loadIndex path =
-  (try (eitherDecodeFileStrict path) :: IO (Either IOException (Either String [SessionMeta]))) >>= \case
-    Left failure
-      | isDoesNotExistError failure -> pure Map.empty
-      | otherwise -> warn (displayException failure)
-    Right (Left failure) -> warn failure
-    Right (Right sessions) -> pure (Map.fromList [(sessionId meta, meta) | meta <- sessions])
+  (try (eitherDecodeFileStrict path) :: IO (Either IOException (Either String [SessionMeta]))) >>= fromIndex
  where
+  fromIndex (Left failure)
+    | isDoesNotExistError failure = pure Map.empty
+    | otherwise = warn (displayException failure)
+  fromIndex (Right (Left failure)) = warn failure
+  fromIndex (Right (Right sessions)) = pure (Map.fromList [(sessionId meta, meta) | meta <- sessions])
   warn failure =
     Map.empty
       <$ TextIO.hPutStrLn stderr ("YUKI.N sessions index: " <> Text.pack failure)
@@ -309,36 +313,39 @@ migrateSessionOwners sessions configs =
  where
   migrateAll [] = pure (Right ())
   migrateAll (meta : rest) =
-    threadConfigRead configs identifier >>= \config ->
-      let owner =
-            bool
-              (sessionIncarnationId meta)
-              (fromMaybe "yuki" (nonBlank =<< configIncarnationId config))
-              (Text.null (Text.strip (sessionIncarnationId meta)))
-       in claimSessionOwner sessions identifier owner >>= \case
-            Left failure -> pure (Left failure)
-            Right claimed ->
-              canonicalize claimed config *> migrateAll rest
+    threadConfigRead configs identifier >>= migrateOne
    where
     identifier = sessionId meta
-    canonicalize claimed config =
-      bool
-        (pure ())
-        (threadConfigWrite configs identifier (config {configIncarnationId = Just (sessionIncarnationId claimed)}))
-        (configIncarnationId config /= Just (sessionIncarnationId claimed))
+    migrateOne config =
+      claimSessionOwner sessions identifier owner >>= onClaim
+     where
+      owner =
+        bool
+          (sessionIncarnationId meta)
+          (fromMaybe "yuki" (nonBlank =<< configIncarnationId config))
+          (Text.null (Text.strip (sessionIncarnationId meta)))
+      onClaim (Left failure) = pure (Left failure)
+      onClaim (Right claimed) = canonicalize claimed *> migrateAll rest
+      canonicalize claimed =
+        bool
+          (pure ())
+          (threadConfigWrite configs identifier (config {configIncarnationId = Just (sessionIncarnationId claimed)}))
+          (configIncarnationId config /= Just (sessionIncarnationId claimed))
 
 archiveSession :: SessionService -> Text -> IO (Either Text SessionMeta)
 archiveSession service threadId =
-  setSessionArchived (serviceSessions service) threadId True >>= \result ->
+  setSessionArchived (serviceSessions service) threadId True >>= keep
+ where
+  keep result =
     result <$ either (const (pure ())) (const (serviceArchiveThread service threadId)) result
 
 deleteIncarnationSessions :: SessionService -> Text -> IO ()
 deleteIncarnationSessions service incarnation =
   deleteSessionsFor (serviceSessions service) incarnation >>= mapM_ cleanup
  where
-  cleanup meta = do
+  cleanup meta =
     transcriptDelete (serviceTranscripts service) (sessionId meta)
-    threadConfigDelete (serviceConfigs service) (sessionId meta)
+      >> threadConfigDelete (serviceConfigs service) (sessionId meta)
 
 restoreSession :: SessionService -> Text -> IO (Either Text SessionMeta)
 restoreSession service threadId = setSessionArchived (serviceSessions service) threadId False
@@ -359,23 +366,25 @@ forkSession service source target node title
       findSession (serviceSessions service) target >>= maybe fork (const (pure (Left ("thread already exists: " <> target))))
  where
   fork =
-    findSession (serviceSessions service) source >>= \case
-      Nothing -> pure (Left ("unknown thread: " <> source))
-      Just sourceMeta ->
-        transcriptLoad (serviceTranscripts service) source >>= \case
-          Nothing -> pure (Left ("source transcript not found: " <> source))
-          Just transcript ->
-            either (pure . Left) (materialize sourceMeta) (prefixAt node transcript)
+    findSession (serviceSessions service) source >>= withSource
+  withSource Nothing = pure (Left ("unknown thread: " <> source))
+  withSource (Just sourceMeta) =
+    transcriptLoad (serviceTranscripts service) source >>= withTranscript sourceMeta
+  withTranscript _ Nothing = pure (Left ("source transcript not found: " <> source))
+  withTranscript sourceMeta (Just transcript) =
+    either (pure . Left) (materialize sourceMeta) (prefixAt node transcript)
   materialize sourceMeta prefix =
-    threadConfigRead (serviceConfigs service) source >>= \config ->
-      let owner = sessionOwner sourceMeta
-          copied = config {configIncarnationId = Just owner}
-       in createSession (serviceSessions service) target title owner (Just source) node >>= \case
-            Left failure -> pure (Left failure)
-            Right created ->
-              transcriptSave (serviceTranscripts service) target prefix
-                *> threadConfigWrite (serviceConfigs service) target copied
-                $> Right created
+    threadConfigRead (serviceConfigs service) source >>= writeCopy sourceMeta prefix
+  writeCopy sourceMeta prefix config =
+    let owner = sessionOwner sourceMeta
+        copied = config {configIncarnationId = Just owner}
+     in createSession (serviceSessions service) target title owner (Just source) node
+          >>= either (pure . Left) (complete copied)
+   where
+    complete copied created =
+      transcriptSave (serviceTranscripts service) target prefix
+        *> threadConfigWrite (serviceConfigs service) target copied
+        $> Right created
 
 importSession :: SessionService -> ImportRequest -> IO (Either Text SessionMeta)
 importSession service request
@@ -396,12 +405,13 @@ importSession service request
       )
   config = (bundleConfig bundle) {configIncarnationId = Just owner}
   materialize =
-    createSession (serviceSessions service) target title owner (sessionParent sourceMeta) (sessionForkNode sourceMeta) >>= \case
-      Left failure -> pure (Left failure)
-      Right created ->
-        transcriptSave (serviceTranscripts service) target (bundleTranscript bundle)
-          *> threadConfigWrite (serviceConfigs service) target config
-          $> Right created
+    createSession (serviceSessions service) target title owner (sessionParent sourceMeta) (sessionForkNode sourceMeta)
+      >>= either (pure . Left) complete
+   where
+    complete created =
+      transcriptSave (serviceTranscripts service) target (bundleTranscript bundle)
+        *> threadConfigWrite (serviceConfigs service) target config
+        $> Right created
 
 prefixAt :: Maybe Text -> [ChatMessage] -> Either Text [ChatMessage]
 prefixAt Nothing messages = Right messages

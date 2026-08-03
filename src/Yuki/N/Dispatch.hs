@@ -52,12 +52,8 @@ newDispatchStore dir =
   store lock =
     DispatchStore
       { createDispatch = create lock path,
-        getDispatch = \identifier -> Map.lookup identifier <$> readMVar lock,
-        listDispatches = \incarnation status ->
-          sortOn (Down . dispatchCreatedAt)
-            . filter (matches incarnation status)
-            . Map.elems
-            <$> readMVar lock,
+        getDispatch = lookupDraft lock,
+        listDispatches = listDrafts lock,
         patchDispatch = \identifier patch -> mutate lock path identifier (applyPatch patch),
         markDispatchDispatched = \identifier threadId ->
           mutate lock path identifier $ \now draft ->
@@ -75,34 +71,41 @@ newDispatchStore dir =
           mutate lock path identifier $ \now draft ->
             draft {dispatchError = Just failure, dispatchUpdatedAt = now}
       }
+  lookupDraft lock identifier = Map.lookup identifier <$> readMVar lock
+  listDrafts lock incarnation status =
+    sortOn (Down . dispatchCreatedAt)
+      . filter (matches incarnation status)
+      . Map.elems
+      <$> readMVar lock
   matches incarnation status draft =
     dispatchIncarnationId draft == incarnation
       && maybe True (== dispatchStatus draft) status
 
 create :: MVar (Map Text DispatchDraft) -> FilePath -> NewDispatch -> IO DispatchDraft
 create lock path new =
-  newDispatchId >>= \identifier ->
-    getPOSIXTime >>= \now ->
-      modifyMVar lock $ \drafts ->
-        let stamp = round now
-            draft =
-              DispatchDraft
-                identifier
-                (newDispatchIncarnationId new)
-                (newDispatchSource new)
-                (newDispatchInput new)
-                (newDispatchTitle new)
-                (newDispatchPrompt new)
-                (newDispatchConfig new)
-                (newDispatchGeneration new)
-                Draft
-                Nothing
-                Nothing
-                stamp
-                stamp
-                Nothing
-            updated = Map.insert identifier draft drafts
-         in persist path updated $> (updated, draft)
+  liftA2 (,) newDispatchId getPOSIXTime
+    >>= modifyMVar lock . insert
+ where
+  insert (identifier, now) drafts =
+    let stamp = round now
+        draft =
+          DispatchDraft
+            identifier
+            (newDispatchIncarnationId new)
+            (newDispatchSource new)
+            (newDispatchInput new)
+            (newDispatchTitle new)
+            (newDispatchPrompt new)
+            (newDispatchConfig new)
+            (newDispatchGeneration new)
+            Draft
+            Nothing
+            Nothing
+            stamp
+            stamp
+            Nothing
+        updated = Map.insert identifier draft drafts
+     in persist path updated $> (updated, draft)
 
 applyPatch :: DispatchPatch -> Integer -> DispatchDraft -> DispatchDraft
 applyPatch patch now draft =
@@ -115,30 +118,32 @@ applyPatch patch now draft =
 
 mutate :: MVar (Map Text DispatchDraft) -> FilePath -> Text -> (Integer -> DispatchDraft -> DispatchDraft) -> IO (Either Text DispatchDraft)
 mutate lock path identifier change =
-  getPOSIXTime >>= \now ->
-    modifyMVar lock $ \drafts ->
-      case Map.lookup identifier drafts of
-        Nothing -> pure (drafts, Left ("unknown dispatch: " <> identifier))
-        Just current
-          | dispatchStatus current /= Draft ->
-              pure (drafts, Left ("dispatch is not draft: " <> identifier))
-          | otherwise ->
-              let changed = change (round now) current
-                  updated = Map.insert identifier changed drafts
-               in persist path updated $> (updated, Right changed)
+  getPOSIXTime >>= modifyMVar lock . apply
+ where
+  apply now drafts =
+    case Map.lookup identifier drafts of
+      Nothing -> pure (drafts, Left ("unknown dispatch: " <> identifier))
+      Just current
+        | dispatchStatus current /= Draft ->
+            pure (drafts, Left ("dispatch is not draft: " <> identifier))
+        | otherwise ->
+            let changed = change (round now) current
+                updated = Map.insert identifier changed drafts
+             in persist path updated $> (updated, Right changed)
 
 persist :: FilePath -> Map Text DispatchDraft -> IO ()
 persist path = atomicEncodeFile path . Map.elems
 
 loadDrafts :: FilePath -> IO (Map Text DispatchDraft)
 loadDrafts path =
-  (try (eitherDecodeFileStrict path) :: IO (Either IOException (Either String [DispatchDraft]))) >>= \case
-    Left failure
-      | isDoesNotExistError failure -> pure Map.empty
-      | otherwise -> warn (displayException failure)
-    Right (Left failure) -> warn failure
-    Right (Right drafts) -> pure (Map.fromList [(dispatchId draft, draft) | draft <- drafts])
+  (try (eitherDecodeFileStrict path) :: IO (Either IOException (Either String [DispatchDraft])))
+    >>= parse
  where
+  parse (Left failure)
+    | isDoesNotExistError failure = pure Map.empty
+    | otherwise = warn (displayException failure)
+  parse (Right (Left failure)) = warn failure
+  parse (Right (Right drafts)) = pure (Map.fromList [(dispatchId draft, draft) | draft <- drafts])
   warn failure =
     Map.empty
       <$ TextIO.hPutStrLn stderr ("YUKI.N dispatches index: " <> Text.pack failure)
@@ -172,11 +177,11 @@ draftGenerationPrompt =
 generateDraft :: (InvocationSpec -> IO (Either Text InvocationResult)) -> [Model] -> Int -> Maybe Journal -> Incarnation -> Text -> IO (Text, Text, DispatchGeneration)
 generateDraft invoke models timeoutSeconds journal incarnation input
   | null models = pure (fallbackDraft input)
-  | otherwise =
-      newDispatchId >>= \identifier ->
-        either (const (fallbackDraft input)) (generated identifier)
-          <$> invoke (specification identifier)
+  | otherwise = newDispatchId >>= run
  where
+  run identifier =
+    either (const (fallbackDraft input)) (generated identifier)
+      <$> invoke (specification identifier)
   specification identifier =
     InvocationSpec
       identifier
@@ -206,7 +211,7 @@ parseGenerated identifier raw =
  where
   decoded =
     eitherDecodeStrict (TextEncoding.encodeUtf8 (unfence raw))
-      >>= parseEither (withObject "dispatch draft" (\fields -> (,) <$> fields .: "title" <*> fields .: "prompt"))
+      >>= parseEither (withObject "dispatch draft" (liftA2 (,) <$> (.: "title") <*> (.: "prompt")))
   validate (title, prompt)
     | Text.null cleanTitle || Text.null cleanPrompt = Nothing
     | otherwise = Just (Text.take 60 cleanTitle, cleanPrompt, GeneratedModel identifier)
@@ -216,9 +221,9 @@ parseGenerated identifier raw =
 
 unfence :: Text -> Text
 unfence raw =
-  fromMaybe trimmed $ do
-    inner <- Text.stripPrefix "```json" trimmed <|> Text.stripPrefix "```" trimmed
-    Text.stripSuffix "```" (Text.strip inner)
+  fromMaybe trimmed $
+    (Text.stripPrefix "```json" trimmed <|> Text.stripPrefix "```" trimmed)
+      >>= Text.stripSuffix "```" . Text.strip
  where
   trimmed = Text.strip raw
 
@@ -286,8 +291,10 @@ newDispatchService dispatches service incarnations newThreadId generate =
   DispatchService dispatches materialize (confirmDraft dispatches service incarnations newThreadId)
  where
   materialize incarnation input =
-    generate incarnation input >>= \(title, prompt, generation) ->
-      threadConfigRead (serviceConfigs service) (homeThreadId (incarnationId incarnation)) >>= \config ->
-        createDispatch
-          dispatches
-          (NewDispatch DispatchUser (incarnationId incarnation) input title prompt config generation)
+    createDispatch dispatches
+      =<< liftA2
+        (build incarnation input)
+        (generate incarnation input)
+        (threadConfigRead (serviceConfigs service) (homeThreadId (incarnationId incarnation)))
+  build incarnation input (title, prompt, generation) config =
+    NewDispatch DispatchUser (incarnationId incarnation) input title prompt config generation

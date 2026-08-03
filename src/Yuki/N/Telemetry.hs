@@ -181,10 +181,11 @@ instance ToJSON FsChangeOrigin where
 
 instance FromJSON FsChangeOrigin where
   parseJSON = withObject "FsChangeOrigin" $ \fields ->
-    fields .: "kind" >>= \case
-      "tool" -> OriginTool <$> fields .: "toolName" <*> fields .: "callId"
-      "git" -> pure OriginGit
-      other -> fail ("unknown fs change origin: " <> Text.unpack other)
+    fields .: "kind" >>= parseOrigin fields
+   where
+    parseOrigin fields "tool" = OriginTool <$> fields .: "toolName" <*> fields .: "callId"
+    parseOrigin _ "git" = pure OriginGit
+    parseOrigin _ other = fail ("unknown fs change origin: " <> Text.unpack other)
 
 data FsChangeRecord = FsChangeRecord
   { fsChangeId :: Text,
@@ -353,10 +354,11 @@ liveRuns telemetry = Map.elems <$> readIORef (telemetryLive telemetry)
 
 telemetryRunStarting :: Telemetry -> Text -> RunDescriptor -> Int -> Text -> IO ()
 telemetryRunStarting telemetry runId descriptor maxTurns model =
-  telemetryClock telemetry >>= \now ->
+  telemetryClock telemetry >>= startAt
+ where
+  startAt now =
     atomicModifyIORef' (telemetryLive telemetry) (\live -> (Map.insert runId (fresh (seconds now)) (bump 1 descriptor live), ()))
       *> forceStatus telemetry runId now
- where
   fresh startedAt =
     LiveStatus
       runId
@@ -385,15 +387,17 @@ telemetryRunStopping telemetry runId = finalize telemetry runId "failed"
 
 noteCancelling :: Telemetry -> Text -> IO ()
 noteCancelling telemetry runId =
-  telemetryClock telemetry >>= \now ->
+  telemetryClock telemetry >>= cancelAt
+ where
+  cancelAt now =
     mutate telemetry runId (\status -> status {livePhase = PhaseCancelling, liveLastActivity = Just "cancelling"})
       *> forceStatus telemetry runId now
 
 noteEvent :: Telemetry -> Text -> Event -> IO ()
 noteEvent telemetry runId event =
-  telemetryClock telemetry >>= \now ->
-    maybe (project now) (finalize telemetry runId) (terminalOutcome event)
+  telemetryClock telemetry >>= noteAt
  where
+  noteAt now = maybe (project now) (finalize telemetry runId) (terminalOutcome event)
   project now =
     mutate telemetry runId (apply now event) *> throttled telemetry runId now
 
@@ -474,9 +478,10 @@ mutate telemetry runId change =
 
 finalize :: Telemetry -> Text -> Text -> IO ()
 finalize telemetry runId outcome =
-  atomicModifyIORef' (telemetryLive telemetry) (\live -> (Map.delete runId live, Map.lookup runId live)) >>= \existed ->
-    when (isJust existed) (adjustParent existed *> cleanup *> publish telemetry (FrameRunEnd runId outcome))
+  atomicModifyIORef' (telemetryLive telemetry) (\live -> (Map.delete runId live, Map.lookup runId live)) >>= finish
  where
+  finish existed =
+    when (isJust existed) (adjustParent existed *> cleanup *> publish telemetry (FrameRunEnd runId outcome))
   adjustParent =
     maybe (pure ()) (\parent -> atomicModifyIORef' (telemetryLive telemetry) (\live -> (Map.adjust discount parent live, ())))
       . (liveParent =<<)
@@ -488,11 +493,15 @@ throttleMicros = 200000
 
 throttled :: Telemetry -> Text -> Integer -> IO ()
 throttled telemetry runId now =
-  readIORef (telemetryPublished telemetry) >>= \published ->
-    when (maybe True (\last -> now - last >= throttleMicros) (Map.lookup runId published)) (forceStatus telemetry runId now)
+  readIORef (telemetryPublished telemetry) >>= publishIfDue
+ where
+  publishIfDue published =
+    when (maybe True (\lastSeen -> now - lastSeen >= throttleMicros) (Map.lookup runId published)) (forceStatus telemetry runId now)
 
 forceStatus :: Telemetry -> Text -> Integer -> IO ()
 forceStatus telemetry runId now =
-  readIORef (telemetryLive telemetry) >>= \live ->
+  readIORef (telemetryLive telemetry) >>= publishStatus
+ where
+  publishStatus live =
     maybe (pure ()) (\status -> publish telemetry (FrameStatus status)) (Map.lookup runId live)
       *> atomicModifyIORef' (telemetryPublished telemetry) (\published -> (Map.insert runId now published, ()))

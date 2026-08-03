@@ -8,6 +8,7 @@ module Yuki.N.Transcript
   )
 where
 
+import Control.Applicative (liftA3)
 import Control.Concurrent.MVar (newMVar, withMVar)
 import Control.Exception (IOException, try)
 import Control.Monad (when)
@@ -38,7 +39,7 @@ newTranscriptStore :: FilePath -> IO TranscriptStore
 newTranscriptStore dir =
   createDirectoryIfMissing True (transcriptsPath dir)
     *> newMVar ()
-    <&> \lock -> TranscriptStore (save lock) load (delete lock)
+    <&> liftA3 TranscriptStore save (const load) delete
  where
   save lock threadId messages =
     withMVar lock (const (atomicEncodeFile (transcriptPath dir threadId) (withoutSystem messages)))
@@ -54,11 +55,14 @@ removeIfExists path = doesFileExist path >>= flip when (removeFile path)
 newMemoryTranscriptStore :: IO TranscriptStore
 newMemoryTranscriptStore =
   newIORef Map.empty
-    <&> \transcripts ->
-      TranscriptStore
-        (\threadId -> modifyIORef' transcripts . Map.insert threadId . withoutSystem)
-        (\threadId -> Map.lookup threadId <$> readIORef transcripts)
-        (\threadId -> modifyIORef' transcripts (Map.delete threadId))
+    <&> liftA3 TranscriptStore save load delete
+ where
+  save transcripts threadId =
+    modifyIORef' transcripts . Map.insert threadId . withoutSystem
+  load transcripts threadId =
+    Map.lookup threadId <$> readIORef transcripts
+  delete transcripts threadId =
+    modifyIORef' transcripts (Map.delete threadId)
 
 transcriptHooks :: TranscriptStore -> AgentHooks
 transcriptHooks store = defaultHooks {afterRun = persist}

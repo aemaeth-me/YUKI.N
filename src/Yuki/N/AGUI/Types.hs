@@ -178,8 +178,9 @@ instance ToJSON RunAgentInput where
         <> pair "parentRunId" (runParentId input)
 
 instance FromJSON Message where
-  parseJSON value@(Object o) =
-    o .: "role" >>= \case
+  parseJSON value@(Object o) = o .: "role" >>= parseRole
+   where
+    parseRole = \case
       ("developer" :: Text) -> Developer <$> parseJSON value
       "system" -> System <$> parseJSON value
       "assistant" -> Assistant <$> parseJSON value
@@ -301,8 +302,9 @@ instance ToJSON UserContent where
     UserParts parts -> toJSON parts
 
 instance FromJSON InputContent where
-  parseJSON = withObject "InputContent" $ \o ->
-    o .: "type" >>= \case
+  parseJSON = withObject "InputContent" $ \o -> o .: "type" >>= parseKind o
+   where
+    parseKind o = \case
       ("text" :: Text) -> InputText <$> o .: "text"
       "image" -> InputImage <$> o .: "source" <*> o .:? "metadata"
       "audio" -> InputAudio <$> o .: "source" <*> o .:? "metadata"
@@ -322,8 +324,9 @@ instance ToJSON InputContent where
       object $ ["type" .= (kind :: Text), "source" .= source] <> pair "metadata" metadata
 
 instance FromJSON InputSource where
-  parseJSON = withObject "InputSource" $ \o ->
-    o .: "type" >>= \case
+  parseJSON = withObject "InputSource" $ \o -> o .: "type" >>= parseKind o
+   where
+    parseKind o = \case
       ("data" :: Text) -> DataSource <$> o .: "value" <*> required o "mimeType" "mime_type"
       "url" -> UrlSource <$> o .: "value" <*> optional o "mimeType" "mime_type"
       kind -> fail ("unsupported AG-UI input source type: " <> Text.unpack kind)

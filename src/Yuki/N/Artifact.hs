@@ -132,50 +132,52 @@ newArtifactStoreWithLimit :: Int -> FilePath -> IO ArtifactStore
 newArtifactStoreWithLimit requestedLimit dir =
   createDirectoryIfMissing True (objectsPath dir)
     *> newMVar ()
-    >>= \lock ->
-      withMVar lock (const (compact dir limit))
-        $> ArtifactStore (save lock) fetch (list lock)
+    >>= publish
  where
   limit = max 1 requestedLimit
+  publish lock =
+    withMVar lock (const (compact dir limit))
+      $> ArtifactStore (save lock) fetch (list lock)
   save lock toolName content =
-    withMVar lock $ \_ ->
-      place (fetchObject dir) (writeObject dir content) content >>= \identifier ->
-        getPOSIXTime >>= \now ->
-          readIndex dir >>= \metas ->
-            let current = artifactMeta identifier toolName content (round now)
-                retained = take limit (current : filter ((/= identifier) . artifactMetaId) metas)
-             in writeIndex dir retained
-                  *> removeArtifacts dir (drop limit (current : filter ((/= identifier) . artifactMetaId) metas))
-                  $> identifier
+    withMVar lock (const (place (fetchObject dir) (writeObject dir content) content >>= commit toolName content))
+  commit toolName content identifier =
+    liftA2 (,) getPOSIXTime (readIndex dir) >>= finalize toolName content identifier
+  finalize toolName content identifier (now, metas) =
+    let current = artifactMeta identifier toolName content (round now)
+        retained = take limit (current : filter ((/= identifier) . artifactMetaId) metas)
+     in writeIndex dir retained
+          *> removeArtifacts dir (drop limit (current : filter ((/= identifier) . artifactMetaId) metas))
+          $> identifier
   fetch identifier
     | Text.null identifier || not (Text.all safe identifier) = pure Nothing
     | otherwise = fetchObject dir identifier
   safe char = Char.isAsciiLower char || Char.isDigit char || char == '-'
   list lock =
-    withMVar lock $ \_ ->
-      readIndex dir >>= \metas ->
-        traverse (enrich dir) metas >>= \enriched ->
-          enriched <$ bool (pure ()) (writeIndex dir enriched) (metas /= enriched)
+    withMVar lock (const (readIndex dir >>= syncIndex))
+  syncIndex metas = traverse (enrich dir) metas >>= refresh metas
+  refresh metas enriched =
+    enriched <$ bool (pure ()) (writeIndex dir enriched) (metas /= enriched)
 
 newMemoryArtifactStore :: IO ArtifactStore
 newMemoryArtifactStore = newMemoryArtifactStoreWithLimit artifactRetentionLimit
 
 newMemoryArtifactStoreWithLimit :: Int -> IO ArtifactStore
 newMemoryArtifactStoreWithLimit requestedLimit =
-  newIORef Map.empty <&> \objects -> ArtifactStore (save objects) (fetch objects) (list objects)
+  newIORef Map.empty <&> mkStore
  where
   limit = max 1 requestedLimit
+  mkStore objects = ArtifactStore (save objects) (fetch objects) (list objects)
   save objects toolName content = place (fetch objects) (store objects toolName content) content
   store objects toolName content identifier =
-    getPOSIXTime
-      >>= \now ->
-        modifyIORef'
-          objects
-          ( \current ->
-              let inserted = Map.insert identifier (artifactMeta identifier toolName content (round now), content) current
-                  retained = Set.fromList (take limit (identifier : filter (/= identifier) (Map.keys current)))
-               in Map.restrictKeys inserted retained
-          )
+    getPOSIXTime >>= update objects toolName content identifier
+  update objects toolName content identifier now =
+    modifyIORef'
+      objects
+      ( \current ->
+          let inserted = Map.insert identifier (artifactMeta identifier toolName content (round now), content) current
+              retained = Set.fromList (take limit (identifier : filter (/= identifier) (Map.keys current)))
+           in Map.restrictKeys inserted retained
+      )
   fetch objects identifier = fmap snd . Map.lookup identifier <$> readIORef objects
   list objects = fmap fst . Map.elems <$> readIORef objects
 
@@ -203,12 +205,11 @@ place fetch write content = attempt base 1
  where
   base = artifactIdFor content
   attempt :: Text -> Int -> IO Text
-  attempt candidate n =
-    fetch candidate >>= \case
-      Nothing -> candidate <$ write candidate
-      Just existing
-        | existing == content -> pure candidate
-        | otherwise -> attempt (base <> "-" <> Text.pack (show n)) (n + 1)
+  attempt candidate n = fetch candidate >>= decide candidate n
+  decide candidate _ Nothing = candidate <$ write candidate
+  decide candidate n (Just existing)
+    | existing == content = pure candidate
+    | otherwise = attempt (base <> "-" <> Text.pack (show n)) (n + 1)
 
 objectsPath :: FilePath -> FilePath
 objectsPath dir = dir ++ "/objects"
@@ -242,7 +243,9 @@ writeIndex dir =
 
 compact :: FilePath -> Int -> IO ()
 compact dir limit =
-  readIndex dir >>= \metas ->
+  readIndex dir >>= keepLimited
+ where
+  keepLimited metas =
     writeIndex dir (take limit metas)
       *> removeArtifacts dir (drop limit metas)
 

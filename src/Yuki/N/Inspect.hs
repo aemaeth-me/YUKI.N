@@ -223,16 +223,20 @@ runTrace runId entries = build <$> listToMaybe begins
   assistantSteps = mapMaybe assistantStep messageIds
   messageIds = nub [identifier | (_, TextMessageContent identifier _) <- events]
   assistantStep identifier =
-    let matching = [(entry, delta) | (entry, TextMessageContent message delta) <- events, message == identifier]
-        content = Text.concat (fmap snd matching)
-     in listToMaybe matching <&> \(first, _) -> step first "assistant" "Yuki 回答" (Text.take 1200 content) "completed" Nothing []
+    listToMaybe matching <&> assistantOf
+   where
+    matching = [(entry, delta) | (entry, TextMessageContent message delta) <- events, message == identifier]
+    content = Text.concat (fmap snd matching)
+    assistantOf (first, _) = step first "assistant" "Yuki 回答" (Text.take 1200 content) "completed" Nothing []
   reasoningSteps = mapMaybe reasoningStep reasoningIds
   reasoningIds = nub [identifier | (_, ReasoningStarted identifier) <- events]
   reasoningStep identifier =
-    let matching = [entry | (entry, event) <- events, reasoningId event == Just identifier]
-        ended = any ((== ReasoningEnded identifier) . snd) events
-        detail = Text.pack (show (length [() | (_, ReasoningMessageContent message _) <- events, message == identifier])) <> " 个推理片段"
-     in listToMaybe matching <&> \first -> step first "reasoning" "模型推理" detail (bool "running" "completed" ended) Nothing []
+    listToMaybe matching <&> reasoningOf
+   where
+    matching = [entry | (entry, event) <- events, reasoningId event == Just identifier]
+    ended = any ((== ReasoningEnded identifier) . snd) events
+    detail = Text.pack (show (length [() | (_, ReasoningMessageContent message _) <- events, message == identifier])) <> " 个推理片段"
+    reasoningOf first = step first "reasoning" "模型推理" detail (bool "running" "completed" ended) Nothing []
   toolSteps =
     [ step
         entry

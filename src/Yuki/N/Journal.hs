@@ -16,6 +16,7 @@ module Yuki.N.Journal
   )
 where
 
+import Control.Applicative (liftA3)
 import Control.Concurrent.MVar
 import Control.Exception (IOException, displayException, try)
 import Data.Aeson
@@ -25,7 +26,7 @@ import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Foldable (toList, traverse_)
 import Data.Functor ((<&>))
 import Data.IORef
-import Data.Maybe (fromMaybe, isJust, listToMaybe)
+import Data.Maybe (isJust, listToMaybe)
 import Data.Sequence ((|>))
 import Data.Sequence qualified as Seq
 import Data.Set qualified as Set
@@ -198,8 +199,9 @@ mkJournal :: MVar Int -> (Entry -> IO ()) -> IO [Entry] -> [Text] -> Journal
 mkJournal counter sink snapshot scope = Journal record scope snapshot
  where
   record scoped kind =
-    getPOSIXTime >>= \time ->
-      modifyMVar counter (\seqNo -> pure (seqNo + 1, Entry seqNo scoped (Just (round time)) kind)) >>= sink
+    getPOSIXTime >>= persist scoped kind >>= sink
+  persist scoped kind time =
+    modifyMVar counter (\seqNo -> pure (seqNo + 1, Entry seqNo scoped (Just (round time)) kind))
 
 journalFilePath :: FilePath -> FilePath
 journalFilePath dir = dir ++ "/journal.jsonl"
@@ -220,13 +222,15 @@ newFileJournalWithLimit requestedLimit dir =
   path = journalFilePath dir
   initialize snapshot =
     repair snapshot retained
-      *> newMVar (nextSeq (journalReadEntries snapshot))
-      >>= \counter ->
-        newMVar () >>= \lock ->
-          newIORef (Seq.fromList retained) >>= \cache ->
-            pure (mkJournal counter (sink lock cache) (toList <$> readIORef cache) [])
+      *> liftA3
+        assemble
+        (newMVar (nextSeq (journalReadEntries snapshot)))
+        (newMVar ())
+        (newIORef (Seq.fromList retained))
    where
     retained = retainRuns limit (journalReadEntries snapshot)
+    assemble counter lock cache =
+      mkJournal counter (sink lock cache) (toList <$> readIORef cache) []
   repair snapshot retained =
     bool
       (pure ())
@@ -237,17 +241,18 @@ newFileJournalWithLimit requestedLimit dir =
       )
       (isJust (journalReadWarning snapshot) || length retained /= length (journalReadEntries snapshot))
   sink lock cache entry =
-    withMVar lock $ \_ ->
-      readIORef cache >>= \current ->
-        let expanded = current |> entry
-            retained = Seq.fromList (retainRuns limit (toList expanded))
-            compact = isRunBegin entry && Seq.length retained < Seq.length expanded
-            persist =
-              bool
-                (append entry)
-                (atomicWriteLazy path (renderEntries (toList retained)))
-                compact
-         in persist *> writeIORef cache (bool expanded retained compact)
+    withMVar lock (\_ -> readIORef cache >>= writeEntry)
+   where
+    writeEntry current =
+      let expanded = current |> entry
+          retained = Seq.fromList (retainRuns limit (toList expanded))
+          compact = isRunBegin entry && Seq.length retained < Seq.length expanded
+          persist =
+            bool
+              (append entry)
+              (atomicWriteLazy path (renderEntries (toList retained)))
+              compact
+       in persist *> writeIORef cache (bool expanded retained compact)
   append entry =
     withFile
       path
@@ -312,12 +317,12 @@ parseBytes bytes = parseLines [] numbered
 
 newMemoryJournal :: IO (Journal, IO [Entry])
 newMemoryJournal =
-  newMVar 0 >>= \counter ->
-    newIORef Seq.empty >>= \store ->
-      pure
-        ( mkJournal counter (\entry -> modifyIORef' store (|> entry)) (toList <$> readIORef store) [],
-          toList <$> readIORef store
-        )
+  liftA2 assemble (newMVar 0) (newIORef Seq.empty)
+ where
+  assemble counter store =
+    ( mkJournal counter (modifyIORef' store . flip (|>)) (toList <$> readIORef store) [],
+      toList <$> readIORef store
+    )
 
 subJournal :: Text -> Journal -> Journal
 subJournal runId journal = journal {journalScope = journalScope journal <> [runId]}
@@ -329,5 +334,7 @@ recordMaybe :: Maybe Journal -> EntryKind -> IO ()
 recordMaybe journal kind = traverse_ (\j -> journalRecord j kind) journal
 
 journalNewId :: Journal -> IO Text -> IO Text
-journalNewId journal action =
-  action >>= \value -> value <$ journalRecord journal (IdEntry value)
+journalNewId journal action = action >>= journalRecordId journal
+
+journalRecordId :: Journal -> Text -> IO Text
+journalRecordId journal value = value <$ journalRecord journal (IdEntry value)

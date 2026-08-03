@@ -27,7 +27,6 @@ import Control.Monad (when)
 import Data.Aeson (eitherDecodeStrict', encode)
 import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Foldable (traverse_)
-import Data.Functor ((<&>))
 import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
@@ -63,39 +62,47 @@ appendFsChange ledger record =
 
 appendLine :: FilePath -> LazyByteString.ByteString -> IO ()
 appendLine path line =
-  try @IOException (LazyByteString.appendFile path (line <> "\n")) >>= \case
-    Left exception -> TextIO.hPutStrLn stderr ("yuki.telemetry: append failed: " <> Text.pack (displayException exception))
-    Right () -> pure ()
+  try @IOException (LazyByteString.appendFile path (line <> "\n"))
+    >>= either logAppendError (const (pure ()))
+ where
+  logAppendError exception =
+    TextIO.hPutStrLn stderr ("yuki.telemetry: append failed: " <> Text.pack (displayException exception))
 
 recordDelivery :: Ledger -> Telemetry -> DeliveryRecord -> IO ()
 recordDelivery ledger telemetry record =
-  liftA2 (,) (telemetryClock telemetry) (hashUnique <$> newUnique) >>= \(now, unique) ->
-    let stamped =
-          record
-            { deliveryId = "dlv-" <> Text.pack (show (seconds now)) <> "-" <> Text.pack (show unique),
-              deliveryAt = seconds now
-            }
-     in quietly (appendDelivery ledger stamped *> publish telemetry (FrameDelivery stamped))
+  liftA2 stamp (telemetryClock telemetry) (hashUnique <$> newUnique)
+    >>= quietly . persist
+ where
+  stamp now unique =
+    record
+      { deliveryId = "dlv-" <> Text.pack (show (seconds now)) <> "-" <> Text.pack (show unique),
+        deliveryAt = seconds now
+      }
+  persist stamped =
+    appendDelivery ledger stamped *> publish telemetry (FrameDelivery stamped)
 
 recordFsChange :: Ledger -> Telemetry -> FsChangeRecord -> IO ()
 recordFsChange ledger telemetry record =
-  liftA2 (,) (telemetryClock telemetry) (hashUnique <$> newUnique) >>= \(now, unique) ->
-    let stamped =
-          record
-            { fsChangeId = "fsc-" <> Text.pack (show (seconds now)) <> "-" <> Text.pack (show unique),
-              fsChangeAt = seconds now
-            }
-     in quietly (appendFsChange ledger stamped *> publish telemetry (FrameFsChange stamped))
+  liftA2 stamp (telemetryClock telemetry) (hashUnique <$> newUnique)
+    >>= quietly . persist
+ where
+  stamp now unique =
+    record
+      { fsChangeId = "fsc-" <> Text.pack (show (seconds now)) <> "-" <> Text.pack (show unique),
+        fsChangeAt = seconds now
+      }
+  persist stamped =
+    appendFsChange ledger stamped *> publish telemetry (FrameFsChange stamped)
 
 quietly :: IO () -> IO ()
 quietly action =
-  try @SomeException action >>= \case
-    Left exception ->
-      maybe
-        (TextIO.hPutStrLn stderr ("yuki.telemetry: " <> Text.pack (displayException exception)))
-        throwIO
-        (fromException exception :: Maybe SomeAsyncException)
-    Right () -> pure ()
+  try @SomeException action >>= either rethrowAsync (const (pure ()))
+ where
+  rethrowAsync exception =
+    maybe
+      (TextIO.hPutStrLn stderr ("yuki.telemetry: " <> Text.pack (displayException exception)))
+      throwIO
+      (fromException exception :: Maybe SomeAsyncException)
 
 deliveriesFor :: Ledger -> Text -> Maybe Text -> Int -> Maybe Integer -> IO [DeliveryRecord]
 deliveriesFor ledger incarnation threadId limit before =
@@ -130,22 +137,29 @@ fsChangesFor ledger incarnation threadId runId limit before =
 
 readLines :: FilePath -> IO [LazyByteString.ByteString]
 readLines path =
-  try @IOException (LazyByteString.readFile path) >>= \case
-    Left _ -> pure []
-    Right bytes -> pure (filter (not . LazyByteString.null) (LazyByteString.split 10 bytes))
+  try @IOException (LazyByteString.readFile path)
+    >>= either (const (pure [])) (pure . splitLines)
+ where
+  splitLines = filter (not . LazyByteString.null) . LazyByteString.split 10
 
 enrichFromGit :: Ledger -> Telemetry -> Int -> Text -> Text -> Text -> Maybe FilePath -> IO ()
 enrichFromGit ledger telemetry timeoutSeconds incarnation runId threadId cwd =
   quietly (maybe (pure ()) enrich cwd)
  where
   enrich dir =
-    gitSucceeds dir ["rev-parse", "--is-inside-work-tree"] >>= \inside ->
-      when inside (collect dir)
+    gitSucceeds dir ["rev-parse", "--is-inside-work-tree"] >>= flip when (collect dir)
   collect dir =
-    liftA2 (,) (parsePorcelain <$> gitLines dir ["status", "--porcelain"]) (statPairs <$> gitLines dir ["diff", "--stat", "HEAD"])
-      >>= \(changed, stats) ->
-        fsChangesFor ledger incarnation (Just threadId) (Just runId) 200 Nothing
-          >>= (\known -> traverse_ (appendChanged stats known) changed) . Set.fromList . fmap fsChangePath
+    liftA2
+      (,)
+      (parsePorcelain <$> gitLines dir ["status", "--porcelain"])
+      (statPairs <$> gitLines dir ["diff", "--stat", "HEAD"])
+      >>= recordChanged
+  recordChanged (changed, stats) =
+    fsChangesFor ledger incarnation (Just threadId) (Just runId) 200 Nothing
+      >>= recordMissing . Set.fromList . fmap fsChangePath
+   where
+    recordMissing known =
+      traverse_ (appendChanged stats known) changed
   appendChanged stats known (path, op) =
     when (Set.notMember path known) (recordFsChange ledger telemetry (gitRecord stats path op))
   gitRecord stats path op =
@@ -162,16 +176,14 @@ enrichFromGit ledger telemetry timeoutSeconds incarnation runId threadId cwd =
         fsChangeAt = 0
       }
   gitSucceeds dir args =
-    timed (readProcessWithExitCode "git" ("-C" : dir : args) "") <&> \case
-      Nothing -> False
-      Just (ExitSuccess, _, _) -> True
-      Just _ -> False
+    maybe False isExitSuccess <$> timed (readProcessWithExitCode "git" ("-C" : dir : args) "")
   gitLines dir args =
-    timed (readProcessWithExitCode "git" ("-C" : dir : args) "") <&> \case
-      Nothing -> []
-      Just (ExitSuccess, output, _) -> Text.lines (Text.pack output)
-      Just _ -> []
+    maybe [] exitOutput <$> timed (readProcessWithExitCode "git" ("-C" : dir : args) "")
   timed = timeout (timeoutSeconds * 1000000)
+  isExitSuccess (ExitSuccess, _, _) = True
+  isExitSuccess _ = False
+  exitOutput (ExitSuccess, output, _) = Text.lines (Text.pack output)
+  exitOutput _ = []
 
 parsePorcelain :: [Text] -> [(Text, FsChangeOp)]
 parsePorcelain = mapMaybe parseLine

@@ -11,6 +11,7 @@ module Yuki.N.Dispatch.Types
 where
 
 import Data.Aeson
+import Data.Aeson.Types (Parser)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Yuki.N.ThreadConfig.Types (ThreadConfig)
@@ -27,10 +28,13 @@ instance ToJSON DispatchSource where
 
 instance FromJSON DispatchSource where
   parseJSON = withObject "DispatchSource" $ \fields ->
-    fields .: "type" >>= \case
-      "user" -> pure DispatchUser
-      "agent" -> DispatchAgent <$> fields .: "runId" <*> fields .: "callId"
-      other -> fail ("unknown dispatch source: " <> Text.unpack other)
+    fields .: "type" >>= parseDispatchSource fields
+
+parseDispatchSource :: Object -> Text -> Parser DispatchSource
+parseDispatchSource fields = \case
+  "user" -> pure DispatchUser
+  "agent" -> DispatchAgent <$> fields .: "runId" <*> fields .: "callId"
+  other -> fail ("unknown dispatch source: " <> Text.unpack other)
 
 data DispatchGeneration
   = GeneratedModel {generatedInvocationId :: Text}
@@ -46,11 +50,14 @@ instance ToJSON DispatchGeneration where
 
 instance FromJSON DispatchGeneration where
   parseJSON = withObject "DispatchGeneration" $ \fields ->
-    fields .: "type" >>= \case
-      "model" -> GeneratedModel <$> fields .: "invocationId"
-      "fallback" -> pure GeneratedFallback
-      "agent" -> pure GeneratedAgent
-      other -> fail ("unknown dispatch generation: " <> Text.unpack other)
+    fields .: "type" >>= parseDispatchGeneration fields
+
+parseDispatchGeneration :: Object -> Text -> Parser DispatchGeneration
+parseDispatchGeneration fields = \case
+  "model" -> GeneratedModel <$> fields .: "invocationId"
+  "fallback" -> pure GeneratedFallback
+  "agent" -> pure GeneratedAgent
+  other -> fail ("unknown dispatch generation: " <> Text.unpack other)
 
 data DispatchStatus = Draft | Dispatched | Cancelled
   deriving stock (Eq, Show)
