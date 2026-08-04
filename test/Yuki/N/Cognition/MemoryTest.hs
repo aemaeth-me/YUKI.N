@@ -7,7 +7,6 @@ module Yuki.N.Cognition.MemoryTest
     cognitionImpressionProposalGuard,
     cognitionImpressionEvidenceGuard,
     cognitionImpressionDiagnosticGuard,
-    cognitionImpressionFalseMigration,
     cognitionMemoryTests,
   )
 where
@@ -16,7 +15,6 @@ import Data.Aeson
 import Data.Functor (($>))
 import Data.IORef
 import Data.List (sort)
-import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -211,53 +209,6 @@ cognitionImpressionDiagnosticGuard =
       "{}"
       >>= assertLeft
 
-cognitionImpressionFalseMigration :: Assertion
-cognitionImpressionFalseMigration = withWorkDir $ \dir -> do
-  encodeFile (dir ++ "/impressions.json") legacy
-  store <- newImpressionStore dir >>= expectTextRight
-  state <- impressionRead store "yuki-8nckh0"
-  revisions <- impressionRevisions store "yuki-8nckh0"
-  reopened <- newImpressionStore dir >>= expectTextRight
-  again <- impressionRead reopened "yuki-8nckh0"
-  impressionRevision state @?= 4
-  impressionItems state @?= []
-  impressionRevision again @?= 4
-  assertBool
-    "migration records the voided impression"
-    ( any
-        (elem "impression-q1r2s3" . impressionRevisionVoidProposals)
-        revisions
-    )
- where
-  legacy =
-    object
-      [ "states"
-          .= Map.fromList
-            [ ( "yuki-8nckh0" :: Text,
-                object
-                  [ "incarnationId" .= ("yuki-8nckh0" :: Text),
-                    "revision" .= (3 :: Int),
-                    "items"
-                      .= [ object
-                             [ "id" .= ("impression-q1r2s3" :: Text),
-                               "label" .= ("GrepTruncationAwareness" :: Text),
-                               "intuition" .= ("memory_grep scannedEntries hid 改天孙观为婺女观." :: Text),
-                               "strength" .= (0.9 :: Double),
-                               "sourceMemoryIds" .= ([] :: [Text]),
-                               "sourceExperienceRefs" .= ["event-1" :: Text],
-                               "updated" .= (1 :: Int)
-                             ]
-                         ],
-                    "generatorRevision" .= ("impression-consolidation/v2" :: Text),
-                    "effectiveHash" .= ("old" :: Text),
-                    "updated" .= (1 :: Int)
-                  ]
-              )
-            ],
-        "activations" .= ([] :: [Value]),
-        "revisions" .= ([] :: [Value])
-      ]
-
 ungroundedProposalModel :: Model
 ungroundedProposalModel =
   fakeModel $ \_ emit ->
@@ -377,6 +328,5 @@ cognitionMemoryTests =
       testCase "consolidates impressions from the actual experience payload closure" cognitionImpressionClosure,
       testCase "rejects ungrounded impression memory proposals" cognitionImpressionProposalGuard,
       testCase "requires current evidence for new impressions" cognitionImpressionEvidenceGuard,
-      testCase "keeps tool diagnostics out of impressions" cognitionImpressionDiagnosticGuard,
-      testCase "migrates the known false grep impression with provenance" cognitionImpressionFalseMigration
+      testCase "keeps tool diagnostics out of impressions" cognitionImpressionDiagnosticGuard
     ]

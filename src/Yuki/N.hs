@@ -2,16 +2,13 @@ module Yuki.N (runFromEnvironment) where
 
 import Control.Applicative (liftA3, (<|>))
 import Control.Exception (SomeException, bracket, displayException, try)
-import Control.Monad (join, when)
-import Data.Aeson (toJSON)
+import Control.Monad (when)
 import Data.Bool (bool)
-import Data.Foldable (traverse_)
 import Data.Functor ((<&>))
 import Data.IORef (writeIORef)
 import Data.List (find)
 import Data.Map.Strict qualified as Map
 import Data.Maybe (catMaybes, fromMaybe, isNothing, listToMaybe)
-import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as TextIO
@@ -31,12 +28,9 @@ import Yuki.N.Cognition
 import Yuki.N.Config
 import Yuki.N.Context (ContextConfig (..))
 import Yuki.N.Dispatch
-import Yuki.N.Facts (Fact (..), FactStore (..), factKindName, newFactStore)
-import Yuki.N.Incarnation (IncarnationStore (..))
 import Yuki.N.Inspect
 import Yuki.N.Invocation (invokeModel)
 import Yuki.N.Journal
-import Yuki.N.Memory (ThreadStore (..), newThreadStore)
 import Yuki.N.Model (AssistantTurn (..), ChatMessage (..), Model)
 import Yuki.N.Provider.OpenAI
 import Yuki.N.Providers (ProviderRegistry, loadAuthJson, loadProviders, providerConfig, providerKeyMap, providerListing)
@@ -84,15 +78,14 @@ serve env manager journal artifacts settings runs background =
       journal
       >>= either (die . Text.unpack) (serveCognition telemetry ledger registry keyMap fallbacks)
   serveCognition telemetry ledger registry keyMap fallbacks cognition =
-    (,,,,) <$> legacyMemoryOf settings <*> transcriptOf settings <*> configStore <*> newSessionStore (settingsDataDir settings) <*> newDispatchStore (settingsDataDir settings)
+    (,,,) <$> transcriptOf settings <*> configStore <*> newSessionStore (settingsDataDir settings) <*> newDispatchStore (settingsDataDir settings)
       >>= serveStores telemetry ledger registry keyMap fallbacks cognition
-  serveStores telemetry ledger registry keyMap fallbacks cognition (memory, transcripts, store, sessions, dispatches) =
+  serveStores telemetry ledger registry keyMap fallbacks cognition (transcripts, store, sessions, dispatches) =
     migrateSessionOwners sessions store
-      >>= either (die . Text.unpack) (serveReady telemetry ledger registry keyMap fallbacks cognition memory transcripts store sessions dispatches)
-  serveReady telemetry ledger registry keyMap fallbacks cognition memory (transcriptHooks', transcripts) store sessions dispatches () =
-    migrateLegacy cognition memory transcripts service defaults
-      *> putStrLn (banner settings)
-      *> runServer settings (inspection cognition memory transcripts service) (Just (view store registry keyMap)) (Just runs) (Just dispatchService) (Just telemetry) (resolve telemetry ledger cognition sessions store registry keyMap transcriptHooks' fallbacks dispatches)
+      >>= either (die . Text.unpack) (serveReady telemetry ledger registry keyMap fallbacks cognition transcripts store sessions dispatches)
+  serveReady telemetry ledger registry keyMap fallbacks cognition (transcriptHooks', transcripts) store sessions dispatches () =
+    putStrLn (banner settings)
+      *> runServer settings (inspection cognition transcripts service) (Just (view store registry keyMap)) (Just runs) (Just dispatchService) (Just telemetry) (resolve telemetry ledger cognition sessions store registry keyMap transcriptHooks' fallbacks dispatches)
    where
     service = SessionService sessions transcripts store (shutdownBackgroundThread background)
     dispatchService =
@@ -102,7 +95,7 @@ serve env manager journal artifacts settings runs background =
         (cognitionIncarnations cognition)
         newId
         (generateDraft invokeModel (cognitionModelsOf manager settings <> fallbacks) (settingsDispatchGenerateTimeout settings) journal)
-  inspection cognition memory transcripts sessions =
+  inspection cognition transcripts sessions =
     Just
       ( withCognition
           cognition
@@ -112,7 +105,7 @@ serve env manager journal artifacts settings runs background =
                   id
                   withLiveJournal
                   journal
-                  (newInspection memory artifacts (journalFilePath <$> settingsJournalDir settings) (Just transcripts))
+                  (newInspection artifacts (journalFilePath <$> settingsJournalDir settings) (Just transcripts))
               )
           )
       )
@@ -203,12 +196,6 @@ transcriptOf settings =
   build dir = newTranscriptStore dir <&> withHooks
   withHooks store = (transcriptHooks store, store)
 
-legacyMemoryOf :: Settings -> IO (Maybe (ThreadStore, FactStore))
-legacyMemoryOf settings =
-  traverse
-    (\dir -> liftA2 (,) (newThreadStore dir) (newFactStore dir))
-    (settingsMemoryDir settings)
-
 cognitionDir :: Settings -> FilePath
 cognitionDir settings =
   fromMaybe (settingsDataDir settings) (settingsMemoryDir settings) </> "cognition-v2"
@@ -224,122 +211,6 @@ cognitionModelsOf manager settings =
               (settingsMemoryModel settings)
         }
   ]
-
-migrateLegacy ::
-  Cognition ->
-  Maybe (ThreadStore, FactStore) ->
-  TranscriptStore ->
-  SessionService ->
-  ThreadConfig ->
-  IO ()
-migrateLegacy cognition legacy transcripts sessions defaults =
-  listSessions (serviceSessions sessions) True >>= migrateAll
- where
-  migrateAll allSessions =
-    traverse_ (migrateTask collisions) allSessions *> traverse_ migrateFacts legacy
-   where
-    collisions =
-      Set.fromList
-        ( concat
-            [ identifiers
-            | identifiers <- Map.elems (Map.fromListWith (<>) [(legacyTaskId (sessionId session), [sessionId session]) | session <- allSessions]),
-              length identifiers > 1
-            ]
-        )
-  migrateTask collisions session
-    | sessionId session `Set.member` collisions =
-        putStrLn
-          ( "YUKI.N cognition migration: skipped ambiguous legacy task path "
-              <> Text.unpack (sessionId session)
-              <> " (dot/dash collision)"
-          )
-    | otherwise =
-        loadConfig (sessionId session) >>= migrateConfig
-   where
-    migrateConfig local =
-      migrationIncarnation
-        (fromMaybe "yuki" (configIncarnationId (resolveThreadConfig local defaults)))
-        >>= migrateIncarnation
-    migrateIncarnation incarnation =
-      liftA2 (,) (loadTranscript (sessionId session)) (loadBrief (sessionId session))
-        >>= migrateContent incarnation
-    migrateContent incarnation (transcript, brief) =
-      case (transcript, brief) of
-        (Nothing, Nothing) -> pure ()
-        _ ->
-          cognitionMigrateLegacyTask
-            cognition
-            incarnation
-            (sessionId session)
-            (fromMaybe [] transcript)
-            (toJSON <$> brief)
-            >>= report ("task " <> sessionId session)
-  loadConfig task =
-    threadConfigRead (serviceConfigs sessions) task
-      >>= loadConfigCurrent
-   where
-    loadConfigCurrent current
-      | current /= emptyThreadConfig || legacyTaskId task == task = pure current
-      | otherwise =
-          threadConfigRead (serviceConfigs sessions) (legacyTaskId task)
-            >>= loadConfigFallback
-     where
-      loadConfigFallback fallback
-        | fallback == emptyThreadConfig = pure fallback
-        | otherwise = fallback <$ threadConfigWrite (serviceConfigs sessions) task fallback
-  loadTranscript task =
-    transcriptLoad transcripts task
-      >>= loadTranscriptCurrent
-   where
-    loadTranscriptCurrent (Just messages) = pure (Just messages)
-    loadTranscriptCurrent Nothing
-      | legacyTaskId task == task = pure Nothing
-      | otherwise =
-          transcriptLoad transcripts (legacyTaskId task)
-            >>= loadTranscriptFallback
-     where
-      loadTranscriptFallback fallback =
-        fallback <$ traverse_ (transcriptSave transcripts task) fallback
-  loadBrief task =
-    traverse (flip threadBrief task . fst) legacy
-      >>= loadBriefCurrent
-   where
-    loadBriefCurrent current =
-      case join current of
-        Just brief -> pure (Just brief)
-        Nothing
-          | legacyTaskId task == task -> pure Nothing
-          | otherwise ->
-              traverse (flip threadBrief (legacyTaskId task) . fst) legacy <&> (>>= id)
-  migrationIncarnation identifier =
-    incarnationRead (cognitionIncarnations cognition) identifier
-      >>= migrationIncarnationCurrent
-   where
-    migrationIncarnationCurrent Nothing = ioError (userError ("unknown incarnation: " <> Text.unpack identifier))
-    migrationIncarnationCurrent (Just incarnation) = pure incarnation
-  migrateFacts (_, facts) =
-    ensureIncarnation cognition "yuki"
-      >>= migrateFactList
-   where
-    migrateFactList incarnation =
-      factList facts
-        >>= traverse_ migrateOneFact
-          . filter ((&&) <$> (not . factArchived) <*> (not . factVoid))
-     where
-      migrateOneFact fact =
-        cognitionMigrateLegacyMemory
-          cognition
-          incarnation
-          (factKindName (factKind fact))
-          (factContent fact)
-          (take 16 (Text.words (Text.toLower (factContent fact))))
-          ["legacy-fact/" <> factId fact, factSource fact]
-          >>= report ("fact " <> factId fact)
-  report label =
-    either
-      (putStrLn . Text.unpack . \failure -> "YUKI.N cognition migration (" <> label <> "): " <> failure)
-      (const (pure ()))
-  legacyTaskId = Text.map (\character -> if character == '.' then '-' else character)
 
 fallbackModels :: Manager -> Settings -> ProviderRegistry -> Map.Map String Text -> IO [Model]
 fallbackModels manager settings registry keyMap =

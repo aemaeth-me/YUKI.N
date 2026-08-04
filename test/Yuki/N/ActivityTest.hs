@@ -61,7 +61,7 @@ fixture withCognition' use =
     use (app, telemetry, ledger)
  where
   plainInspection service =
-    withSessionService service (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service)))
+    withSessionService service (newInspection Nothing Nothing (Just (serviceTranscripts service)))
 
 cognitionInspection :: FilePath -> SessionService -> IO Inspection
 cognitionInspection dir service =
@@ -71,7 +71,7 @@ cognitionInspection dir service =
       pure
         ( withCognition
             cognition
-            (withSessionService service (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service))))
+            (withSessionService service (newInspection Nothing Nothing (Just (serviceTranscripts service))))
         )
 
 activity404 :: Assertion
@@ -79,7 +79,7 @@ activity404 =
   withWorkDir $ \dir -> do
     service <- sessionServiceAt dir (const (pure ()))
     runtime <- testRuntime okModel [] Parallel
-    let inspection = withSessionService service (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service)))
+    let inspection = withSessionService service (newInspection Nothing Nothing (Just (serviceTranscripts service)))
         app = application Nothing (Just inspection) Nothing Nothing Nothing Nothing (const (pure runtime))
     response <- runSession (request (httpGet ["incarnations", "yuki", "activity"])) app
     simpleStatus response @?= status404
@@ -147,7 +147,7 @@ streamFrames =
     writeIORef (telemetryLedger telemetry) (Just ledger)
     service <- sessionServiceAt dir (const (pure ()))
     runtime <- testRuntime okModel [] Parallel
-    let inspection = withSessionService service (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service)))
+    let inspection = withSessionService service (newInspection Nothing Nothing (Just (serviceTranscripts service)))
         app = application Nothing (Just inspection) Nothing Nothing Nothing (Just telemetry) (const (pure runtime))
     testWithApplication (pure app) $ \port -> do
       manager <- newManager defaultManagerSettings

@@ -6,28 +6,24 @@ module Yuki.N.SessionTest
     sessionTransfers,
     sessionArchiveCleanup,
     sessionRoutes,
-    sessionManualCompact,
     sessionAgentIndex,
   )
 where
 
 import Data.Aeson
-import Data.Aeson.Types (parseMaybe)
 import Data.ByteString.Lazy qualified as LazyByteString
 import Data.IORef
 import Data.List (sort)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Network.HTTP.Types
-import Network.Wai (pathInfo, queryString, requestMethod)
+import Network.Wai (queryString)
 import Network.Wai.Test
 import System.Directory (createDirectoryIfMissing)
 import Test.Tasty
 import Test.Tasty.HUnit
 import Yuki.N.AGUI.Types
 import Yuki.N.Agent
-import Yuki.N.Artifact
-import Yuki.N.Context
 import Yuki.N.Inspect
 import Yuki.N.Model
 import Yuki.N.Server
@@ -41,12 +37,11 @@ sessionTests =
   testGroup
     "local sessions"
     [ testCase "metadata index survives reopen, rename, archive and restore" sessionIndexPersists,
-      testCase "migrates legacy owners from config and makes them immutable" sessionOwnerMigration,
+      testCase "migrates prior owners from config and makes them immutable" sessionOwnerMigration,
       testCase "forks at a stable history node without changing the source" sessionForks,
       testCase "exports and imports a complete bundle without overwriting duplicates" sessionTransfers,
       testCase "archive invokes thread cleanup" sessionArchiveCleanup,
       testCase "HTTP routes list, create, rename, archive, restore and serve empty transcripts" sessionRoutes,
-      testCase "manual compaction persists a bounded transcript and local snapshot" sessionManualCompact,
       testCase "agent requests auto-index valid sessions and reject archived ones" sessionAgentIndex,
       testCase "session meta roundtrips through JSON including kind" sessionKindRoundtrip,
       testCase "session meta JSON without kind defaults to task" sessionKindDefaultsToTask,
@@ -79,7 +74,7 @@ sessionIndexPersists = withWorkDir $ \dir -> do
 sessionOwnerMigration :: Assertion
 sessionOwnerMigration = withWorkDir $ \dir -> do
   let path = dir ++ "/sessions/index.json"
-      legacy identifier =
+      priorMeta identifier =
         object
           [ "id" .= (identifier :: Text),
             "title" .= identifier,
@@ -88,18 +83,18 @@ sessionOwnerMigration = withWorkDir $ \dir -> do
             "archived" .= False
           ]
   createDirectoryIfMissing True (dir ++ "/sessions")
-  LazyByteString.writeFile path (encode [legacy "legacy-art", legacy "legacy-yuki"])
+  LazyByteString.writeFile path (encode [priorMeta "old-art", priorMeta "old-yuki"])
   sessions <- newSessionStore dir
   configs <- newThreadConfigStore dir
-  threadConfigWrite configs "legacy-art" emptyThreadConfig {configIncarnationId = Just "art"}
+  threadConfigWrite configs "old-art" emptyThreadConfig {configIncarnationId = Just "art"}
   _ <- migrateSessionOwners sessions configs >>= expectTextRight
-  art <- findSession sessions "legacy-art"
-  yuki <- findSession sessions "legacy-yuki"
-  artConfig <- threadConfigRead configs "legacy-art"
-  yukiConfig <- threadConfigRead configs "legacy-yuki"
-  reassigned <- claimSessionOwner sessions "legacy-art" "yuki"
+  art <- findSession sessions "old-art"
+  yuki <- findSession sessions "old-yuki"
+  artConfig <- threadConfigRead configs "old-art"
+  yukiConfig <- threadConfigRead configs "old-yuki"
+  reassigned <- claimSessionOwner sessions "old-art" "yuki"
   reopened <- newSessionStore dir
-  stored <- findSession reopened "legacy-art"
+  stored <- findSession reopened "old-art"
   fmap sessionIncarnationId art @?= Just "art"
   fmap sessionIncarnationId yuki @?= Just "yuki"
   configIncarnationId artConfig @?= Just "art"
@@ -158,7 +153,7 @@ sessionTransfers = withWorkDir $ \dir -> do
     sessionIncarnationId imported @?= "art"
     transcriptLoad (serviceTranscripts service) "imported" >>= (@?= Just transcriptHistory)
     threadConfigRead (serviceConfigs service) "imported" >>= (@?= config)
-    legacy <-
+    ownerless <-
       importSession
         service
         ( ImportRequest
@@ -166,12 +161,12 @@ sessionTransfers = withWorkDir $ \dir -> do
               { bundleMeta =
                   (bundleMeta bundle) {sessionIncarnationId = ""}
               }
-            (Just "legacy-imported")
+            (Just "ownerless-imported")
             Nothing
         )
         >>= expectTextRight
-    sessionIncarnationId legacy @?= "art"
-    stored <- threadConfigRead (serviceConfigs service) "legacy-imported"
+    sessionIncarnationId ownerless @?= "art"
+    stored <- threadConfigRead (serviceConfigs service) "ownerless-imported"
     configIncarnationId stored @?= Just "art"
     transcriptSave (serviceTranscripts service) "imported" [ChatUser "keep"]
     assertLeft =<< importSession service (ImportRequest bundle (Just "imported") Nothing)
@@ -190,7 +185,7 @@ sessionRoutes :: Assertion
 sessionRoutes = withWorkDir $ \dir -> do
   service <- sessionServiceAt dir (const (pure ()))
   base <- testRuntime okModel [] Parallel
-  let inspection = withSessionService service (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service)))
+  let inspection = withSessionService service (newInspection Nothing Nothing (Just (serviceTranscripts service)))
       app = application Nothing (Just inspection) Nothing Nothing Nothing Nothing (const (pure base))
   created <- runSession (srequest (jsonRequest methodPost ["threads"] (object ["threadId" .= ("route" :: Text), "title" .= ("Route" :: Text)]))) app
   renamed <- runSession (srequest (jsonRequest methodPatch ["threads", "route"] (object ["title" .= ("Named" :: Text)]))) app
@@ -207,39 +202,11 @@ sessionRoutes = withWorkDir $ \dir -> do
   simpleStatus emptyTranscript @?= status200
   simpleStatus restored @?= status200
 
-sessionManualCompact :: Assertion
-sessionManualCompact = withWorkDir $ \dir -> do
-  service <- sessionServiceAt dir (const (pure ()))
-  artifacts <- newMemoryArtifactStore
-  base <- testRuntime (okModel {modelContextTokens = Just 512}) [] Parallel
-  let inspection =
-        withSessionService
-          service
-          (newInspection Nothing (Just artifacts) Nothing (Just (serviceTranscripts service)))
-      runtime = base {runtimeArtifactStore = Just artifacts, runtimeContext = Just contextConfig}
-      app = application Nothing (Just inspection) Nothing Nothing Nothing Nothing (const (pure runtime))
-  _ <- createSession (serviceSessions service) "compact-me" Nothing "yuki" Nothing Nothing >>= expectTextRight
-  transcriptSave (serviceTranscripts service) "compact-me" contextConversation
-  response <-
-    runSession
-      (request defaultRequest {requestMethod = methodPost, pathInfo = ["threads", "compact-me", "compact"]})
-      app
-  stored <- transcriptLoad (serviceTranscripts service) "compact-me"
-  metas <- artifactList artifacts
-  case eitherDecode (simpleBody response) :: Either String Value of
-    Left message -> assertFailure message
-    Right body -> do
-      simpleStatus response @?= status200
-      parseMaybe (withObject "compact" (.: "changed")) body @?= Just True
-      assertBool "persisted transcript is bounded" (maybe False ((<= 256) . estimateMessagesTokens) stored)
-      assertBool "persisted transcript keeps a summary" (maybe False (any isContextSummary) stored)
-      fmap artifactMetaToolName metas @?= ["context_compaction"]
-
 sessionAgentIndex :: Assertion
 sessionAgentIndex = withWorkDir $ \dir -> do
   service <- sessionServiceAt dir (const (pure ()))
   base <- testRuntime okModel [] Parallel
-  let inspection = withSessionService service (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service)))
+  let inspection = withSessionService service (newInspection Nothing Nothing (Just (serviceTranscripts service)))
       app = application Nothing (Just inspection) Nothing Nothing Nothing Nothing (const (pure base))
       input = (sampleInput []) {runThreadId = "auto", runId = "auto-run"}
   first <- runSession (srequest (jsonRequest methodPost ["agent"] input)) app
@@ -264,10 +231,10 @@ sessionKindRoundtrip = do
   home = task {sessionKind = SessionHome}
 
 sessionKindDefaultsToTask :: Assertion
-sessionKindDefaultsToTask = fromJSON legacy @?= Success task
+sessionKindDefaultsToTask = fromJSON withoutKind @?= Success task
  where
   task = SessionMeta "alpha" "Alpha" "yuki" 0 0 False Nothing Nothing SessionTask
-  legacy =
+  withoutKind =
     object
       [ "id" .= ("alpha" :: Text),
         "title" .= ("Alpha" :: Text),
@@ -316,7 +283,7 @@ sessionKindFilterOverHttp :: Assertion
 sessionKindFilterOverHttp = withWorkDir $ \dir -> do
   service <- sessionServiceAt dir (const (pure ()))
   base <- testRuntime okModel [] Parallel
-  let inspection = withSessionService service (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service)))
+  let inspection = withSessionService service (newInspection Nothing Nothing (Just (serviceTranscripts service)))
       app = application Nothing (Just inspection) Nothing Nothing Nothing Nothing (const (pure base))
   _ <- createSession (serviceSessions service) "task-a" (Just "Task A") "yuki" Nothing Nothing >>= expectTextRight
   _ <- ensureHomeSession (serviceSessions service) "yuki" (Just "Yuki")

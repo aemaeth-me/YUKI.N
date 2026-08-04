@@ -459,7 +459,6 @@ instance ToJSON ArchiveReadResult where
 
 data TaskArchiveStore = TaskArchiveStore
   { taskArchiveAppend :: ArchiveRunDraft -> IO (Either Text ArchiveRun),
-    taskArchiveImportLegacy :: Text -> Text -> [ArchiveEntryDraft] -> IO (Either Text (Maybe ArchiveRun)),
     taskArchiveTasks :: Text -> Int -> IO [ArchiveTaskSummary],
     taskArchiveRecent :: Text -> Int -> IO [ArchiveEntryCatalog],
     taskArchiveGrep :: ArchiveGrepRequest -> IO (Either Text ArchiveGrepResult),
@@ -471,15 +470,13 @@ data TaskArchiveStore = TaskArchiveStore
 data ArchiveState = ArchiveState
   { stateRuns :: Map Text ArchiveRun,
     stateEntries :: Map Text ArchiveEntry,
-    stateHeads :: Map Text Int,
-    stateLegacyImports :: Set Text
+    stateHeads :: Map Text Int
   }
 
 data StoredArchive = StoredArchive
   { storedArchiveVersion :: Int,
     storedArchiveRuns :: [ArchiveRun],
-    storedArchiveEntries :: [ArchiveEntry],
-    storedArchiveLegacyImports :: [Text]
+    storedArchiveEntries :: [ArchiveEntry]
   }
 
 instance ToJSON StoredArchive where
@@ -487,8 +484,7 @@ instance ToJSON StoredArchive where
     object
       [ "version" .= storedArchiveVersion stored,
         "runs" .= storedArchiveRuns stored,
-        "entries" .= storedArchiveEntries stored,
-        "legacyImports" .= storedArchiveLegacyImports stored
+        "entries" .= storedArchiveEntries stored
       ]
 
 instance FromJSON StoredArchive where
@@ -497,7 +493,6 @@ instance FromJSON StoredArchive where
       <$> fields .: "version"
       <*> fields .:? "runs" .!= []
       <*> fields .:? "entries" .!= []
-      <*> fields .:? "legacyImports" .!= []
 
 data PreparedEntry = PreparedEntry
   { preparedId :: Text,
@@ -521,7 +516,7 @@ defaultReadChars = 6000
 maximumReadChars = 20000
 
 emptyState :: ArchiveState
-emptyState = ArchiveState Map.empty Map.empty Map.empty Set.empty
+emptyState = ArchiveState Map.empty Map.empty Map.empty
 
 newTaskArchiveStore :: FilePath -> BlobStore -> IO (Either Text TaskArchiveStore)
 newTaskArchiveStore dir blobs =
@@ -540,8 +535,7 @@ newMemoryTaskArchiveStore blobs =
 makeStore :: (ArchiveState -> IO (Either Text ())) -> BlobStore -> MVar ArchiveState -> TaskArchiveStore
 makeStore persist blobs lock =
   TaskArchiveStore
-    { taskArchiveAppend = appendRun persist blobs lock Nothing,
-      taskArchiveImportLegacy = importLegacy persist blobs lock,
+    { taskArchiveAppend = appendRun persist blobs lock,
       taskArchiveTasks = catalogTasks lock,
       taskArchiveRecent = recentEntries lock,
       taskArchiveGrep = grepArchive blobs lock,
@@ -599,7 +593,6 @@ stateToStored state =
     archiveVersion
     (sortOn archiveRunCreated (Map.elems (stateRuns state)))
     (sortOn ((,,) <$> archiveEntryTaskId <*> archiveEntrySeq <*> archiveEntryId) (Map.elems (stateEntries state)))
-    (Set.toAscList (stateLegacyImports state))
 
 stateFromStored :: StoredArchive -> Either Text ArchiveState
 stateFromStored stored
@@ -612,7 +605,7 @@ stateFromStored stored
         *> traverse_ validateEntry entries
         *> traverse_ (validateRun entryMap) runs
         *> validateSequences entries
-        $> ArchiveState runMap entryMap heads (Set.fromList (storedArchiveLegacyImports stored))
+        $> ArchiveState runMap entryMap heads
  where
   runs = storedArchiveRuns stored
   entries = storedArchiveEntries stored
@@ -678,51 +671,13 @@ appendRun ::
   (ArchiveState -> IO (Either Text ())) ->
   BlobStore ->
   MVar ArchiveState ->
-  Maybe Text ->
   ArchiveRunDraft ->
   IO (Either Text ArchiveRun)
-appendRun persist blobs lock legacy draft =
+appendRun persist blobs lock draft =
   either
     (pure . Left)
-    (\clean -> prepareEntries blobs clean >>= either (pure . Left) (commitPrepared persist lock legacy clean))
+    (\clean -> prepareEntries blobs clean >>= either (pure . Left) (commitPrepared persist lock clean))
     (cleanRunDraft draft)
-
-importLegacy ::
-  (ArchiveState -> IO (Either Text ())) ->
-  BlobStore ->
-  MVar ArchiveState ->
-  Text ->
-  Text ->
-  [ArchiveEntryDraft] ->
-  IO (Either Text (Maybe ArchiveRun))
-importLegacy persist blobs lock incarnation task entries =
-  readMVar lock >>= decideImport
- where
-  marker = legacyMarker incarnation task
-  draft =
-    ArchiveRunDraft
-      incarnation
-      task
-      ("legacy-import-" <> Text.take 24 (digest [incarnation, task]))
-      Nothing
-      "legacy"
-      Nothing
-      entries
-  decideImport state
-    | Set.member marker (stateLegacyImports state) = pure (Right Nothing)
-    | null entries = markImported persist lock marker <&> fmap (const Nothing)
-    | otherwise =
-        appendRun persist blobs lock (Just marker) draft
-          <&> fmap Just
-
-markImported :: (ArchiveState -> IO (Either Text ())) -> MVar ArchiveState -> Text -> IO (Either Text ())
-markImported persist lock marker =
-  modifyMVar lock $ \state ->
-    let updated = state {stateLegacyImports = Set.insert marker (stateLegacyImports state)}
-     in persist updated
-          <&> either
-            ((state,) . Left)
-            (const (updated, Right ()))
 
 cleanRunDraft :: ArchiveRunDraft -> Either Text ArchiveRunDraft
 cleanRunDraft draft =
@@ -731,7 +686,7 @@ cleanRunDraft draft =
       nonEmpty "archive task id" task,
       nonEmpty "archive run id" run,
       nonEmpty "archive run status" status,
-      require (status `elem` ["running", "completed", "failed", "cancelled", "legacy"]) ("invalid archive run status: " <> status),
+      require (status `elem` ["running", "completed", "failed", "cancelled"]) ("invalid archive run status: " <> status),
       traverse_ validateDraft entries,
       unique "archive entry source" archiveEntryDraftSourceId entries
     ]
@@ -800,11 +755,10 @@ prepareEntries blobs run =
 commitPrepared ::
   (ArchiveState -> IO (Either Text ())) ->
   MVar ArchiveState ->
-  Maybe Text ->
   ArchiveRunDraft ->
   [PreparedEntry] ->
   IO (Either Text ArchiveRun)
-commitPrepared persist lock legacy draft prepared =
+commitPrepared persist lock draft prepared =
   getPOSIXTime >>= commitAt
  where
   identifier = runIdFor draft
@@ -839,16 +793,13 @@ commitPrepared persist lock legacy draft prepared =
                     (fmap archiveEntryId entries)
                     stamp
                 updated =
-                  mark
-                    snapshot
-                      { stateRuns = Map.insert identifier run (stateRuns snapshot),
-                        stateEntries = foldr (\entry -> Map.insert (archiveEntryId entry) entry) (stateEntries snapshot) entries,
-                        stateHeads = Map.insert scope (start + length entries) (stateHeads snapshot)
-                      }
+                  snapshot
+                    { stateRuns = Map.insert identifier run (stateRuns snapshot),
+                      stateEntries = foldr (\entry -> Map.insert (archiveEntryId entry) entry) (stateEntries snapshot) entries,
+                      stateHeads = Map.insert scope (start + length entries) (stateHeads snapshot)
+                    }
              in Right (updated, run)
    where
-    mark state' =
-      maybe state' (\marker -> state' {stateLegacyImports = Set.insert marker (stateLegacyImports state')}) legacy
     merge stamp' snapshot' current =
       validateIdentity current
         *> validateTransition current
@@ -866,12 +817,11 @@ commitPrepared persist lock legacy draft prepared =
                      archiveRunEntryIds = archiveRunEntryIds current <> fmap archiveEntryId entries
                    }
                updated =
-                 mark
-                   snapshot'
-                     { stateRuns = Map.insert identifier revised (stateRuns snapshot'),
-                       stateEntries = foldr (\entry -> Map.insert (archiveEntryId entry) entry) (stateEntries snapshot') entries,
-                       stateHeads = Map.insert scope (taskStart + length entries) (stateHeads snapshot')
-                     }
+                 snapshot'
+                   { stateRuns = Map.insert identifier revised (stateRuns snapshot'),
+                     stateEntries = foldr (\entry -> Map.insert (archiveEntryId entry) entry) (stateEntries snapshot') entries,
+                     stateHeads = Map.insert scope (taskStart + length entries) (stateHeads snapshot')
+                   }
             in Right (updated, revised)
     validateIdentity current =
       require
@@ -1380,9 +1330,6 @@ runScope run =
 
 scopeKey :: Text -> Text -> Text
 scopeKey incarnation task = Text.intercalate "\NUL" [incarnation, task]
-
-legacyMarker :: Text -> Text -> Text
-legacyMarker incarnation task = "legacy/" <> digest [incarnation, task]
 
 runIdFor :: ArchiveRunDraft -> Text
 runIdFor draft =

@@ -1,4 +1,7 @@
-module Yuki.N.Domain.Diff (unified) where
+module Yuki.N.Domain.Diff
+  ( unified,
+  )
+where
 
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map

@@ -274,7 +274,7 @@ cognitionFixture use =
                 cognition
                 ( withSessionService
                     service
-                    (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service)))
+                    (newInspection Nothing Nothing (Just (serviceTranscripts service)))
                 )
             app = application Nothing (Just inspection) Nothing Nothing Nothing Nothing (const (pure runtime {runtimeContext = Just contextConfig}))
         use app cognition service

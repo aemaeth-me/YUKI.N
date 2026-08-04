@@ -29,7 +29,6 @@ import Yuki.N.AGUI.Types
 import Yuki.N.Agent
 import Yuki.N.Inspect
 import Yuki.N.Journal
-import Yuki.N.Memory
 import Yuki.N.Model
 import Yuki.N.Replay
 import Yuki.N.TestSupport
@@ -91,13 +90,13 @@ entryTimeJson =
   sequence_
     [ eitherDecode (encode stamped) @?= Right stamped,
       eitherDecode (encode unstamped) @?= Right unstamped,
-      eitherDecode legacy @?= Right legacyEntry
+      eitherDecode unstampedJson @?= Right unstampedEntry
     ]
  where
   stamped = Entry 7 ["run"] (Just 1700000000) (IdEntry "id-1")
   unstamped = Entry 8 ["run"] Nothing (IdEntry "id-2")
-  legacyEntry = Entry 9 ["run"] Nothing (IdEntry "id-3")
-  legacy =
+  unstampedEntry = Entry 9 ["run"] Nothing (IdEntry "id-3")
+  unstampedJson =
     encode
       ( object
           [ "seq" .= (9 :: Int),
@@ -152,33 +151,27 @@ atomicStoreRecovery :: Assertion
 atomicStoreRecovery = withWorkDir $ \dir -> do
   transcripts <- newTranscriptStore dir
   configs <- newThreadConfigStore dir
-  threads <- newThreadStore dir
   journal <- newFileJournal dir
   let config = emptyThreadConfig {configSystemPrompt = Just "kept"}
       history = [ChatUser "hello", ChatAssistant (AssistantTurn "answer" (Just "world") Nothing [])]
   transcriptSave transcripts "thread" history
   threadConfigWrite configs "thread" config
-  threadSaveEpisode threads "thread" (Episode "run-1" "memory" 1700000000)
   recordMaybe (Just journal) (IdEntry "before-crash")
   traverse_
     (\path -> TextIO.writeFile path "{partial")
     [ dir ++ "/transcripts/thread.json.tmp-killed",
-      dir ++ "/threads-config/thread.json.tmp-killed",
-      dir ++ "/threads/thread.json.tmp-killed"
+      dir ++ "/threads-config/thread.json.tmp-killed"
     ]
   LazyByteString.appendFile (journalFilePath dir) "{\"seq\":"
   reopenedTranscripts <- newTranscriptStore dir
   reopenedConfigs <- newThreadConfigStore dir
-  reopenedThreads <- newThreadStore dir
   reopenedJournal <- newFileJournal dir
   recordMaybe (Just reopenedJournal) (IdEntry "after-crash")
   savedHistory <- transcriptLoad reopenedTranscripts "thread"
   savedConfig <- threadConfigRead reopenedConfigs "thread"
-  savedBrief <- threadBrief reopenedThreads "thread"
   entries <- readJournal (journalFilePath dir) >>= either (assertFailure . Text.unpack) pure
   savedHistory @?= Just history
   savedConfig @?= config
-  fmap briefRollingSummary savedBrief @?= Just "memory"
   fmap entrySeq entries @?= [0, 1]
   fmap entryKind entries @?= [IdEntry "before-crash", IdEntry "after-crash"]
 

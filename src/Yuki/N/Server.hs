@@ -32,7 +32,7 @@ import System.Directory (doesDirectoryExist)
 import Text.Read (readMaybe)
 import Yuki.N.AGUI.Event (Event)
 import Yuki.N.AGUI.Types qualified as AGUI
-import Yuki.N.Agent (BackendTool (..), Runtime (..), compactHistory, defaultHooks, newId, runAgent, runtimeContextWindow, toChatMessages)
+import Yuki.N.Agent (BackendTool (..), Runtime (..), defaultHooks, newId, runAgent, runtimeContextWindow, toChatMessages)
 import Yuki.N.Artifact (ArtifactStore (..))
 import Yuki.N.Cognition
 import Yuki.N.Cognition qualified as Cognition
@@ -42,7 +42,6 @@ import Yuki.N.Context
     ContextConfig (..),
     contextBudget,
     contextWindow,
-    estimateMessagesTokens,
     estimateToolsTokens,
   )
 import Yuki.N.ContextEpoch
@@ -52,17 +51,15 @@ import Yuki.N.ContextEpoch
   )
 import Yuki.N.Dispatch
 import Yuki.N.Experience (ExperienceStore (..))
-import Yuki.N.Facts (FactStore (..))
 import Yuki.N.Incarnation
 import Yuki.N.Inspect (Inspection (..), forRun, runIds, runSummary, runTrace)
 import Yuki.N.Journal (journalSnapshot)
-import Yuki.N.Memory (ThreadStore (..))
 import Yuki.N.Memory.Archive
 import Yuki.N.Memory.Impression (ImpressionStore (..))
 import Yuki.N.Memory.LongTerm
 import Yuki.N.Memory.Working
 import Yuki.N.Model (ChatMessage (ChatUser))
-import Yuki.N.Replay (memoryInjected, readJournal, replayEntries, replayWithStores)
+import Yuki.N.Replay (readJournal, replayEntries)
 import Yuki.N.Runs (RunKind (..), RunRegistry, activeThreads, cancelRun, followUpRun, steerRun)
 import Yuki.N.Sessions
 import Yuki.N.Telemetry (ActivityFrame (..), DeliveryRecord (..), Ledger, LiveStatus (..), Telemetry, liveRuns, noteCancelling, subscribe, telemetryLedger)
@@ -211,7 +208,7 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
   route "POST" ["agent", "cancel"] = handleCancel
   route "POST" ["agent", "steer"] = handleSteer
   route "POST" ["agent", "follow-up"] = handleFollowUp
-  route "POST" ["replay"] = withJournal (replayReport (inspectionMemory =<< inspection))
+  route "POST" ["replay"] = withJournal replayReport
   route "OPTIONS" _ =
     respond (responseLBS status204 (corsHeaders cors <> preflightHeaders) "")
   route "GET" ["config"] = withConfig (respond . ok . configViewGlobal)
@@ -279,8 +276,6 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
   route "GET" ["incarnations", incarnationId, "memory-receipts"] =
     withCognition (memoryReceipts incarnationId)
   route "GET" ["threads", threadId, "context-epochs"] = withCognition (contextEpochs threadId)
-  route "GET" ["memory", "threads", threadId] = withMemory (brief threadId)
-  route "GET" ["memory", "facts"] = withMemory facts
   route "GET" ["threads"] = withSessions sessionList
   route "POST" ["threads"] = withSessions createThread
   route "POST" ["threads", "import"] = withSessions importThread
@@ -302,7 +297,6 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
     respond (jsonResponse cors status405 [("Allow", "POST, OPTIONS")] (message "method not allowed"))
   route _ _ = notFound
   notFound = respond (jsonResponse cors status404 [] (message "not found"))
-  withMemory use = maybe notFound (use >=> respond) (inspectionMemory =<< inspection)
   withStore use = maybe notFound (use >=> respond) (inspectionArtifacts =<< inspection)
   withJournal use =
     maybe
@@ -789,19 +783,8 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
   memoryReceipts identifier cognition =
     longTermReceipts (cognitionLongTerm cognition) identifier >>= respond . ok
   contextEpochs task cognition =
-    maybe legacy (\service -> taskOwnerFor service task >>= listFor) (inspectionSessions =<< inspection)
+    maybe notFound (\service -> taskOwnerFor service task >>= listFor) (inspectionSessions =<< inspection)
    where
-    legacy =
-      maybe
-        (listFor "yuki")
-        ( \view ->
-            threadConfigRead (configViewStore view) task
-              >>= listFor
-                . fromMaybe "yuki"
-                . configIncarnationId
-                . flip resolveThreadConfig (configViewDefaults view)
-        )
-        configs
     listFor identity =
       contextEpochList (cognitionContexts cognition) identity task >>= respond . ok
   sessionList service =
@@ -896,9 +879,7 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
         forkSession service' source' target node title >>= sessionResult
   sleepThread threadId service =
     case inspectionCognition =<< inspection of
-      Nothing ->
-        transcriptLoad (serviceTranscripts service) threadId
-          >>= maybe (respond (missing "thread not found")) legacyCompact
+      Nothing -> respond (missing "sleep requires the cognition service")
       Just cognition ->
         readSleepRequest
           >>= const (incarnationForThread cognition threadId)
@@ -918,34 +899,6 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
       transcriptSave (serviceTranscripts service') threadId' (compactionMessages (sleepResultCompaction result))
         *> (taskOwnerFor service' threadId' >>= ensureSession (serviceSessions service') threadId' Nothing)
         *> respond (ok result)
-    legacyCompact messages =
-      runtimeFor threadId >>= compactWithRuntime messages
-    compactWithRuntime messages runtime =
-      compactHistory runtime True messages >>= compactOutcome messages
-    compactOutcome messages = \case
-      Nothing ->
-        respond
-          ( ok
-              ( object
-                  [ "changed" .= False,
-                    "beforeTokens" .= estimateMessagesTokens messages,
-                    "message" .= ("当前上下文尚未达到手动压缩阈值。" :: Text)
-                  ]
-              )
-          )
-      Just compaction ->
-        transcriptSave (serviceTranscripts service) threadId (compactionMessages compaction)
-          *> (taskOwnerFor service threadId >>= ensureSession (serviceSessions service) threadId Nothing)
-          *> respond (ok (compactValue compaction))
-    compactValue compaction =
-      object
-        [ "changed" .= True,
-          "beforeTokens" .= compactionBeforeTokens compaction,
-          "afterTokens" .= compactionAfterTokens compaction,
-          "budgetTokens" .= compactionBudgetTokens compaction,
-          "droppedMessages" .= length (compactionDropped compaction),
-          "summary" .= compactionSummary compaction
-        ]
     readSleepRequest =
       strictRequestBody request >>= sleepRequestFromBody
     sleepRequestFromBody body
@@ -1025,7 +978,6 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
     persist config =
       threadConfigWrite (configViewStore view) threadId config
         *> respond (responseLBS status204 (corsHeaders cors) "")
-  brief threadId (threads, _) = maybe (missing "thread not found") ok <$> threadBrief threads threadId
   transcript threadId store =
     maybe (missing "transcript not found") (ok . renderTranscript threadId) <$> transcriptLoad store threadId
   tree threadId view =
@@ -1047,24 +999,16 @@ application cors inspection configs runs dispatches telemetry runtimeFor request
       completePaths dir prefix >>= respond . ok . completed prefix
     completed prefix matches =
       object ["prefix" .= prefix, "paths" .= matches]
-  facts (_, factStore) = ok <$> factList factStore
   artifact identifier store = maybe (missing "artifact not found") plain <$> artifactFetch store identifier
   journalRuns = respond . ok . runIds
   summaryFor runId = respond . maybe (missing "run not found") ok . runSummary runId
   traceFor runId = respond . maybe (missing "run not found") ok . runTrace runId
   journalEntries = respond . ok . forRun runParam
-  replayReport memory entries =
+  replayReport entries =
     strictRequestBody request
       >>= either (respond . bad) result . replayWanted
    where
-    result wanted =
-      ( case memory of
-          Just (threads, storeFacts)
-            | memoryInjected entries ->
-                replayWithStores threads storeFacts wanted entries
-          _ -> replayEntries defaultHooks wanted entries
-      )
-        >>= respond . either bad ok
+    result wanted = replayEntries defaultHooks wanted entries >>= respond . either bad ok
   ok :: (ToJSON a) => a -> Response
   ok = jsonResponse cors status200 [] . toJSON
   missing text = jsonResponse cors status404 [] (message text)

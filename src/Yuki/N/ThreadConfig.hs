@@ -35,7 +35,7 @@ import Yuki.N.Config (Settings (..))
 import Yuki.N.Context (ContextConfig (..))
 import Yuki.N.DispatchTool (proposeDispatchTool)
 import Yuki.N.Domain.Diff (unified)
-import Yuki.N.Memory (sanitizeThreadId)
+import Yuki.N.Domain.Thread (sanitizeThreadId)
 import Yuki.N.Provider.OpenAI
 import Yuki.N.Providers (ProviderEntry (..), ProviderRegistry, providerConfig, providerDefaultModel)
 import Yuki.N.Runs (RunKind (..))

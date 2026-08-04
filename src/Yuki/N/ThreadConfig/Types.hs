@@ -10,7 +10,6 @@ where
 
 import Control.Applicative ((<|>))
 import Data.Aeson
-import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Yuki.N.Provider.OpenAI (ReasoningEffort)
@@ -117,12 +116,7 @@ instance FromJSON ThreadConfig where
       <*> fields .:? "contextSummaryTokens"
    where
     parseCwd fields =
-      fields .:? "cwdMode" >>= maybe (legacy fields) (explicit fields)
-    legacy fields =
-      case KeyMap.lookup "cwd" fields of
-        Nothing -> pure CwdInherit
-        Just Null -> pure CwdNone
-        Just value -> CwdPath <$> parseJSON value
+      fields .:? "cwdMode" >>= maybe (pure CwdInherit) (explicit fields)
     explicit _ "inherit" = pure CwdInherit
     explicit _ "none" = pure CwdNone
     explicit fields "path" = CwdPath <$> fields .: "cwd"

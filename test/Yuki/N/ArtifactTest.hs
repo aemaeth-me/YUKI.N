@@ -32,7 +32,7 @@ artifactTests =
     "artifacts"
     [ testCase "elides a duplicate large tool result as a reference stub" elidesDuplicate,
       testCase "keeps small duplicate results inline" keepsSmall,
-      testCase "lists a human preview and accepts legacy metadata" artifactPreview,
+      testCase "lists a human preview and accepts metadata without a title" artifactPreview,
       testCase "does not store a tool-produced artifact guidance twice" guidedArtifactOnce,
       testCase "reads back a stored artifact in full" readsBack,
       testCase "replays a journaled run with duplicates without divergence" replaysClean
@@ -93,8 +93,8 @@ artifactPreview = do
     [meta] -> do
       artifactMetaPreview meta @?= "alpha beta gamma"
       eitherDecode
-        "{\"id\":\"art-legacy\",\"toolName\":\"shell\",\"chars\":3,\"time\":1}"
-        @?= Right (ArtifactMeta "art-legacy" "shell" "" 3 1)
+        "{\"id\":\"art-plain\",\"toolName\":\"shell\",\"chars\":3,\"time\":1}"
+        @?= Right (ArtifactMeta "art-plain" "shell" "" 3 1)
     other -> assertFailure ("expected one artifact, got " <> show (length other))
 
 guidedArtifactOnce :: Assertion

@@ -527,18 +527,9 @@ projectedAguiMessages = project
   decodeCall (segment, content) =
     case eitherDecodeStrict' payload of
       Right call -> Right call
-      Left _ ->
-        either
-          (const (Left (invalid segment "tool call payload cannot be decoded")))
-          (legacyCall segment)
-          (eitherDecodeStrict' payload)
+      Left _ -> Left (invalid segment "tool call payload cannot be decoded")
    where
     payload = TextEncoding.encodeUtf8 content
-  legacyCall segment function =
-    maybe
-      (Left (invalid segment "legacy tool call has no causal group"))
-      (\identifier -> Right (ModelToolCall identifier (AGUI.functionName function) (AGUI.functionArguments function)))
-      (contextSegmentCausalGroup segment)
   projectedMessage (segment, content) =
     case contextSegmentKind segment of
       SegmentInstruction ->

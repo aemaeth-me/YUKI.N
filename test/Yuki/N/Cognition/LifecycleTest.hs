@@ -273,13 +273,13 @@ cognitionRootMigration = withWorkDir $ \dir -> do
   case listToMaybe (reverse (filter ((== PromptActive) . promptStatus) roots)) of
     Nothing -> assertFailure "fresh cognition has no active Root"
     Just active -> do
-      legacy <-
+      draft <-
         promptAppend
           (cognitionIncarnations cognition)
           Nothing
           RootConstitution
           "kernel bootstrap"
-          "# Yuki Root Constitution · v1\nLegacy automatic root."
+          "# Yuki Root Constitution · v1\nAutomatic root."
           "root-constitution/v1"
           Nothing
           (Just (promptRevisionId active))
@@ -288,7 +288,7 @@ cognitionRootMigration = withWorkDir $ \dir -> do
         promptActivateRoot
           (cognitionIncarnations cognition)
           (promptOrdinal active)
-          (promptRevisionId legacy)
+          (promptRevisionId draft)
           >>= expectTextRight
       reopened <- newCognition dir [] Nothing >>= expectTextRight
       migrated <- promptList (cognitionIncarnations reopened) Nothing
@@ -405,7 +405,7 @@ cognitionLifecycleHttp = withWorkDir $ \dir -> do
       inspection =
         withCognition
           cognition
-          (withSessionService service (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service))))
+          (withSessionService service (newInspection Nothing Nothing (Just (serviceTranscripts service))))
       app = application Nothing (Just inspection) (Just view) Nothing Nothing Nothing (const (pure runtime))
       post path body = runSession (srequest (jsonRequest methodPost path body)) app
   taskCreated <-
@@ -475,7 +475,7 @@ cognitionTaskOwnerHttp = withWorkDir $ \dir -> do
       inspection =
         withCognition
           cognition
-          (withSessionService service (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service))))
+          (withSessionService service (newInspection Nothing Nothing (Just (serviceTranscripts service))))
       app = application Nothing (Just inspection) (Just view) Nothing Nothing Nothing (const (pure runtime))
       create =
         jsonRequest
@@ -549,7 +549,7 @@ cognitionArchiveActiveRun = withWorkDir $ \dir -> do
       inspection =
         withCognition
           cognition
-          (withSessionService service (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service))))
+          (withSessionService service (newInspection Nothing Nothing (Just (serviceTranscripts service))))
       app = application Nothing (Just inspection) (Just view) (Just runs) Nothing Nothing (const (pure runtime))
   blocked <-
     runSession
@@ -580,7 +580,7 @@ cognitionLifecycleTests =
       testCase "propagates archive persistence failure without changing state" cognitionDeleteIncarnationArchiveFailure,
       testCase "propagates long-term persistence failure and retains the long-term store" cognitionDeleteIncarnationLongTermFailure,
       testCase "seeds and activates auditable prompt revisions" cognitionPrompts,
-      testCase "upgrades an automatic legacy Root to the Task Archive protocol" cognitionRootMigration,
+      testCase "upgrades an automatic Root to the Task Archive protocol" cognitionRootMigration,
       testCase "generates charters from the active audited Root revision" cognitionPromptRoot,
       testCase "serves incarnation-first inspection endpoints" cognitionHttp,
       testCase "binds, archives and restores incarnation tasks over HTTP" cognitionLifecycleHttp,

@@ -1,10 +1,8 @@
 module Yuki.N.GrowthTest
   ( growthTests,
-    memoryStateBounded,
     journalRetention,
     journalInspectionCache,
     artifactRetention,
-    factRetention,
   )
 where
 
@@ -12,7 +10,6 @@ import Data.Aeson
 import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Foldable (traverse_)
 import Data.Maybe (fromMaybe, listToMaybe)
-import Data.Text qualified as Text
 import Network.HTTP.Types
 import Network.Wai.Test
 import Test.Tasty
@@ -20,10 +17,8 @@ import Test.Tasty.HUnit
 import Yuki.N.AGUI.Types
 import Yuki.N.Agent
 import Yuki.N.Artifact
-import Yuki.N.Facts
 import Yuki.N.Inspect
 import Yuki.N.Journal
-import Yuki.N.Memory
 import Yuki.N.Server
 import Yuki.N.TestSupport
 
@@ -31,33 +26,10 @@ growthTests :: TestTree
 growthTests =
   testGroup
     "bounded local state"
-    [ testCase "run completion clears transient memory and caps thread episodes" memoryStateBounded,
-      testCase "journal keeps complete recent runs and preserves sequence across compaction" journalRetention,
+    [ testCase "journal keeps complete recent runs and preserves sequence across compaction" journalRetention,
       testCase "live journal inspection uses the in-memory index" journalInspectionCache,
-      testCase "artifact retention removes old objects and compacts the index" artifactRetention,
-      testCase "fact retention caps resident state and compacts the file" factRetention
+      testCase "artifact retention removes old objects and compacts the index" artifactRetention
     ]
-
-memoryStateBounded :: Assertion
-memoryStateBounded = do
-  facts <- newMemoryFactStore
-  _ <- factAdd facts "the deploy target is fly.io" FactProject "seed"
-  threads <- newMemoryThreadStore
-  state <- newMemoryState
-  base <- testRuntime okModel [] Parallel
-  let runtime = base {runtimeHooks = memoryHooks retrieveWatcher threads facts Nothing state}
-      run index =
-        collectEvents
-          runtime
-          ((sampleInput []) {runId = "bounded-" <> Text.pack (show index)})
-  traverse_ run [(1 :: Int) .. 80]
-  (briefings, candidates, budgets, cooldowns) <- memoryTransientCounts state
-  brief <- threadBrief threads "thread"
-  briefings @?= 0
-  candidates @?= 0
-  budgets @?= 0
-  assertBool "cooldowns remain bounded by recent queries" (cooldowns <= 1)
-  fmap (length . briefEpisodes) brief @?= Just 64
 
 journalRetention :: Assertion
 journalRetention = withWorkDir $ \dir -> do
@@ -88,7 +60,7 @@ journalInspectionCache = withWorkDir $ \dir -> do
   recordMaybe (Just journal) (IdEntry "cached")
   base <- testRuntime okModel [] Parallel
   let path = journalFilePath dir
-      inspection = withLiveJournal journal (newInspection Nothing Nothing (Just path) Nothing)
+      inspection = withLiveJournal journal (newInspection Nothing (Just path) Nothing)
       app = application Nothing (Just inspection) Nothing Nothing Nothing Nothing (const (pure base))
   LazyByteString.writeFile path "{broken"
   response <- runSession (request (httpGet ["journal"])) app
@@ -107,17 +79,4 @@ artifactRetention = withWorkDir $ \dir -> do
   oldest @?= Nothing
   length afterRestart @?= 2
   bytes <- LazyByteString.readFile (dir ++ "/index.jsonl")
-  length (filter (not . LazyByteString.null) (LazyByteString.split 10 bytes)) @?= 2
-
-factRetention :: Assertion
-factRetention = withWorkDir $ \dir -> do
-  store <- newFactStoreWithLimit 2 dir
-  traverse_ (\content -> factAdd store content FactProject "run") ["first fact", "second fact", "third fact"]
-  listed <- factList store
-  reopened <- newFactStoreWithLimit 2 dir
-  afterRestart <- factList reopened
-  bytes <- LazyByteString.readFile (dir ++ "/facts.jsonl")
-  length listed @?= 2
-  assertBool "newest fact is retained" (any ((== "third fact") . factContent) listed)
-  length afterRestart @?= 2
   length (filter (not . LazyByteString.null) (LazyByteString.split 10 bytes)) @?= 2

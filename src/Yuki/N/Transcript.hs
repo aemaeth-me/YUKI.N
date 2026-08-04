@@ -25,7 +25,7 @@ import Yuki.N.AGUI.Types qualified as AGUI
 import Yuki.N.Agent (AgentHooks (..), defaultHooks)
 import Yuki.N.AtomicFile (atomicEncodeFile)
 import Yuki.N.Context (contextSummaryMarker)
-import Yuki.N.Memory (sanitizeThreadId)
+import Yuki.N.Domain.Thread (sanitizeThreadId)
 import Yuki.N.Memory.Working (wakePacketMarker)
 import Yuki.N.Model (AssistantTurn (..), ChatMessage (..), ModelToolCall (..))
 

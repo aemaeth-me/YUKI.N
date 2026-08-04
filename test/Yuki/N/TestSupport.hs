@@ -16,7 +16,6 @@ module Yuki.N.TestSupport
     promptCaptureModel,
     jsonText,
     expectTextRight,
-    retrieveWatcher,
     httpGet,
     withWorkDir,
     callTool,
@@ -80,6 +79,7 @@ import Yuki.N.Transcript
 
 afterSpy :: IORef [[ChatMessage]] -> AgentHooks
 afterSpy ref = defaultHooks {afterRun = \_ messages -> modifyIORef' ref (messages :)}
+
 waitUntil :: IO Bool -> IO Bool
 waitUntil probe = go (100 :: Int)
  where
@@ -173,14 +173,6 @@ jsonText :: (ToJSON value) => value -> Text
 jsonText = TextEncoding.decodeUtf8 . LazyByteString.toStrict . encode
 expectTextRight :: Either Text value -> IO value
 expectTextRight = either (assertFailure . Text.unpack) pure
-retrieveWatcher :: Model
-retrieveWatcher =
-  fakeModel $ \_ emit ->
-    emit
-      ( ModelTextDelta
-          "{\"summary\":\"s\",\"memorize\":[],\"retrieve\":{\"query\":\"deploy target\",\"reason\":\"need env\"}}"
-      )
-      $> Stop
 httpGet :: [Text] -> Request
 httpGet path = defaultRequest {requestMethod = methodGet, pathInfo = path}
 withWorkDir :: (FilePath -> Assertion) -> Assertion

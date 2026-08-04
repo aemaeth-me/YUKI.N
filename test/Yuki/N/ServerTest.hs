@@ -1,7 +1,5 @@
 module Yuki.N.ServerTest
   ( serverTests,
-    briefOverHttp,
-    factsOverHttp,
     artifactsOverHttp,
     journalOverHttp,
     summaryOverHttp,
@@ -31,10 +29,8 @@ import Test.Tasty.HUnit
 import Yuki.N.AGUI.Types
 import Yuki.N.Agent
 import Yuki.N.Artifact
-import Yuki.N.Facts
 import Yuki.N.Inspect
 import Yuki.N.Journal
-import Yuki.N.Memory
 import Yuki.N.Model
 import Yuki.N.Provider.OpenAI
 import Yuki.N.Server
@@ -45,8 +41,6 @@ serverTests =
   testGroup
     "HTTP server"
     [ testCase "serves AG-UI events as SSE" serverEvents,
-      testCase "serves the thread brief, 404 when the thread is unknown" briefOverHttp,
-      testCase "lists facts" factsOverHttp,
       testCase "lists artifacts and serves raw content" artifactsOverHttp,
       testCase "lists journal runs and filters entries by run" journalOverHttp,
       testCase "serves a run summary and 404s unknown runs" summaryOverHttp,
@@ -57,19 +51,15 @@ serverTests =
     ]
 inspectionFixture :: IO (Application, Text, Int)
 inspectionFixture = do
-  threads <- newMemoryThreadStore
-  facts <- newMemoryFactStore
   artifacts <- newMemoryArtifactStore
   tmp <- getTemporaryDirectory
   identifier <- newId
   let dir = tmp ++ "/" ++ Text.unpack identifier
   createDirectoryIfMissing True dir
   (journal, readEntries) <- newMemoryJournal
-  seed threads facts artifacts dir (journal, readEntries)
+  seed artifacts dir (journal, readEntries)
  where
-  seed threads facts artifacts dir (journal, readEntries) = do
-    threadSaveEpisode threads "thread" (Episode "run-0" "earlier" 1700000000)
-    _ <- factAdd facts "the deploy target is fly.io" FactProject "run-0"
+  seed artifacts dir (journal, readEntries) = do
     _ <- artifactSave artifacts "big" bigContent
     base <- testRuntime echoModel [echoTool] Parallel
     events <- collectEvents base {runtimeJournal = Just journal} (journaledInput "run-1")
@@ -77,13 +67,13 @@ inspectionFixture = do
     recorded <- readEntries
     LazyByteString.writeFile (journalFilePath dir) (renderJournal recorded)
     pure
-      ( application Nothing (Just (inspection threads facts artifacts dir)) Nothing Nothing Nothing Nothing (const (pure base)),
+      ( application Nothing (Just (inspection artifacts dir)) Nothing Nothing Nothing Nothing (const (pure base)),
         artifactIdFor bigContent,
         length events
       )
   renderJournal = LazyByteString.concat . fmap ((<> "\n") . encode)
-  inspection threads facts artifacts dir =
-    newInspection (Just (threads, facts)) (Just artifacts) (Just (journalFilePath dir)) Nothing
+  inspection artifacts dir =
+    newInspection (Just artifacts) (Just (journalFilePath dir)) Nothing
 journaledInput :: Text -> RunAgentInput
 journaledInput run = (sampleInput [tool "echo"]) {runId = run}
 replayRequest :: LazyByteString.ByteString -> SRequest
@@ -97,25 +87,6 @@ replayRequest body =
           },
       simpleRequestBody = body
     }
-
-briefOverHttp :: Assertion
-briefOverHttp = do
-  (app, _, _) <- inspectionFixture
-  found <- runSession (request (httpGet ["memory", "threads", "thread"])) app
-  unknown <- runSession (request (httpGet ["memory", "threads", "unknown"])) app
-  simpleStatus found @?= status200
-  simpleStatus unknown @?= status404
-  either assertFailure ((@?= "earlier") . briefRollingSummary) (eitherDecode (simpleBody found))
-
-factsOverHttp :: Assertion
-factsOverHttp = do
-  (app, _, _) <- inspectionFixture
-  response <- runSession (request (httpGet ["memory", "facts"])) app
-  simpleStatus response @?= status200
-  either
-    assertFailure
-    ((@?= ["the deploy target is fly.io"]) . fmap factContent)
-    (eitherDecode (simpleBody response))
 
 artifactsOverHttp :: Assertion
 artifactsOverHttp = do
@@ -217,19 +188,15 @@ decodeReport body =
 capabilityDegradation :: Assertion
 capabilityDegradation = do
   artifacts <- newMemoryArtifactStore
-  let partial = newInspection Nothing (Just artifacts) Nothing Nothing
+  let partial = newInspection (Just artifacts) Nothing Nothing
   base <- testRuntime echoModel [echoTool] Parallel
   listed <- runSession (request (httpGet ["artifacts"])) (application Nothing (Just partial) Nothing Nothing Nothing Nothing (const (pure base)))
-  facts <- runSession (request (httpGet ["memory", "facts"])) (application Nothing (Just partial) Nothing Nothing Nothing Nothing (const (pure base)))
   simpleStatus listed @?= status200
-  simpleStatus facts @?= status404
 
 inspectionMissing :: Assertion
 inspectionMissing = do
   base <- testRuntime echoModel [echoTool] Parallel
-  facts <- runSession (request (httpGet ["memory", "facts"])) (application Nothing Nothing Nothing Nothing Nothing Nothing (const (pure base)))
   replay <- runSession (srequest (replayRequest "")) (application Nothing Nothing Nothing Nothing Nothing Nothing (const (pure base)))
-  simpleStatus facts @?= status404
   simpleStatus replay @?= status404
 
 serverEvents :: Assertion

@@ -20,11 +20,9 @@ import Yuki.N.ContextTest
 import Yuki.N.DiffTest
 import Yuki.N.DispatchTest
 import Yuki.N.DispatchToolTest
-import Yuki.N.FactsTest
 import Yuki.N.GrowthTest
 import Yuki.N.InvocationTest
 import Yuki.N.JournalTest
-import Yuki.N.MemoryTest
 import Yuki.N.Provider.OpenAITest
 import Yuki.N.ProvidersTest
 import Yuki.N.RunsTest
@@ -64,13 +62,11 @@ main =
         auditTests,
         artifactTests,
         anatomyTests,
-        memoryTests,
         cognitionTests,
         cognitionTaskArchiveTests,
         cognitionMemoryTests,
         cognitionLifecycleTests,
         cognitionSleepTests,
-        factsTests,
         serverTests,
         serverCognitionTests,
         configTests,

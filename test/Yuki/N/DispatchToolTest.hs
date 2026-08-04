@@ -157,7 +157,7 @@ resolvedFrames = withWorkDir $ \dir -> do
       inspection =
         withCognition
           cognition
-          (withSessionService service (newInspection Nothing Nothing Nothing (Just (serviceTranscripts service))))
+          (withSessionService service (newInspection Nothing Nothing (Just (serviceTranscripts service))))
       app = application Nothing (Just inspection) Nothing Nothing (Just dispatchService) (Just telemetry) (const (pure base))
   dispatched <- createDispatch dispatches (NewDispatch DispatchUser "yuki" "input" "Mission" "Do it" emptyThreadConfig GeneratedFallback)
   confirmed <- runSession (srequest (jsonRequest methodPost ["dispatches", dispatchId dispatched, "confirm"] (object []))) app

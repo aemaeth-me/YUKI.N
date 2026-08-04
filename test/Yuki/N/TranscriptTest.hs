@@ -21,7 +21,6 @@ import Test.Tasty.HUnit
 import Yuki.N.AGUI.Types
 import Yuki.N.Agent
 import Yuki.N.Inspect
-import Yuki.N.Memory
 import Yuki.N.Memory.Working
 import Yuki.N.Model
 import Yuki.N.Server
@@ -87,52 +86,40 @@ threadIdPhysicalIsolation :: Assertion
 threadIdPhysicalIsolation = withWorkDir $ \dir -> do
   transcripts <- newTranscriptStore dir
   configs <- newThreadConfigStore dir
-  briefs <- newThreadStore dir
   let dotHistory = [ChatUser "dot transcript"]
       dashHistory = [ChatUser "dash transcript"]
       dotConfig = emptyThreadConfig {configSystemPrompt = Just "dot config"}
       dashConfig = emptyThreadConfig {configSystemPrompt = Just "dash config"}
-      dotBrief = Episode "dot-run" "dot brief" 1
-      dashBrief = Episode "dash-run" "dash brief" 2
   transcriptSave transcripts "a.b" dotHistory
   transcriptSave transcripts "a-b" dashHistory
   threadConfigWrite configs "a.b" dotConfig
   threadConfigWrite configs "a-b" dashConfig
-  threadSaveEpisode briefs "a.b" dotBrief
-  threadSaveEpisode briefs "a-b" dashBrief
   physical <-
     traverse
       doesFileExist
       [ dir ++ "/transcripts/a.b.json",
         dir ++ "/transcripts/a-b.json",
         dir ++ "/threads-config/a.b.json",
-        dir ++ "/threads-config/a-b.json",
-        dir ++ "/threads/a.b.json",
-        dir ++ "/threads/a-b.json"
+        dir ++ "/threads-config/a-b.json"
       ]
   reopenedTranscripts <- newTranscriptStore dir
   reopenedConfigs <- newThreadConfigStore dir
-  reopenedBriefs <- newThreadStore dir
   dotTranscript <- transcriptLoad reopenedTranscripts "a.b"
   dashTranscript <- transcriptLoad reopenedTranscripts "a-b"
   storedDotConfig <- threadConfigRead reopenedConfigs "a.b"
   storedDashConfig <- threadConfigRead reopenedConfigs "a-b"
-  storedDotBrief <- threadBrief reopenedBriefs "a.b"
-  storedDashBrief <- threadBrief reopenedBriefs "a-b"
-  assertBool "thread stores did not create six distinct physical files" (and physical)
+  assertBool "thread stores did not create four distinct physical files" (and physical)
   dotTranscript @?= Just dotHistory
   dashTranscript @?= Just dashHistory
   storedDotConfig @?= dotConfig
   storedDashConfig @?= dashConfig
-  fmap briefRollingSummary storedDotBrief @?= Just "dot brief"
-  fmap briefRollingSummary storedDashBrief @?= Just "dash brief"
 
 transcriptOverHttp :: Assertion
 transcriptOverHttp = do
   store <- newMemoryTranscriptStore
   transcriptSave store "thread" (ChatSystem "injected" : transcriptHistory)
   base <- testRuntime okModel [] Parallel
-  let app = application Nothing (Just (newInspection Nothing Nothing Nothing (Just store))) Nothing Nothing Nothing Nothing (const (pure base))
+  let app = application Nothing (Just (newInspection Nothing Nothing (Just store))) Nothing Nothing Nothing Nothing (const (pure base))
   found <- runSession (request (httpGet ["threads", "thread", "transcript"])) app
   unknown <- runSession (request (httpGet ["threads", "unknown", "transcript"])) app
   simpleStatus found @?= status200

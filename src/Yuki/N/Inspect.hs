@@ -29,16 +29,13 @@ import Yuki.N.AGUI.Event (Event (..))
 import Yuki.N.AGUI.Types qualified as AGUI
 import Yuki.N.Artifact (ArtifactStore)
 import Yuki.N.Cognition (Cognition)
-import Yuki.N.Facts (FactStore)
 import Yuki.N.Journal (Entry (..), EntryKind (..), Journal)
-import Yuki.N.Memory (ThreadStore)
 import Yuki.N.Model (ToolOutcome (..))
 import Yuki.N.Sessions (SessionService)
 import Yuki.N.Transcript (TranscriptStore)
 
 data Inspection = Inspection
-  { inspectionMemory :: Maybe (ThreadStore, FactStore),
-    inspectionArtifacts :: Maybe ArtifactStore,
+  { inspectionArtifacts :: Maybe ArtifactStore,
     inspectionJournal :: Maybe FilePath,
     inspectionLiveJournal :: Maybe Journal,
     inspectionTranscripts :: Maybe TranscriptStore,
@@ -46,11 +43,11 @@ data Inspection = Inspection
     inspectionCognition :: Maybe Cognition
   }
 
-newInspection :: Maybe (ThreadStore, FactStore) -> Maybe ArtifactStore -> Maybe FilePath -> Maybe TranscriptStore -> Inspection
-newInspection memory artifacts journal transcripts = Inspection memory artifacts journal Nothing transcripts Nothing Nothing
+newInspection :: Maybe ArtifactStore -> Maybe FilePath -> Maybe TranscriptStore -> Inspection
+newInspection artifacts journal transcripts = Inspection artifacts journal Nothing transcripts Nothing Nothing
 
 emptyInspection :: Inspection
-emptyInspection = Inspection Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+emptyInspection = Inspection Nothing Nothing Nothing Nothing Nothing Nothing
 
 withLiveJournal :: Journal -> Inspection -> Inspection
 withLiveJournal journal inspection = inspection {inspectionLiveJournal = Just journal}

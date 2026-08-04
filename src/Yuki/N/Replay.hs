@@ -1,16 +1,14 @@
 module Yuki.N.Replay
   ( Divergence (..),
     ReplayReport (..),
-    memoryInjected,
     readJournal,
     replayEntries,
     replayFile,
-    replayWithStores,
   )
 where
 
 import Control.Exception (Exception, throwIO, try)
-import Data.Aeson (Result (Success), ToJSON (..), Value, fromJSON, object, withObject, (.:), (.=))
+import Data.Aeson (ToJSON (..), object, withObject, (.:), (.=))
 import Data.Aeson.Types (parseMaybe)
 import Data.Bool (bool)
 import Data.Foldable (traverse_)
@@ -26,9 +24,7 @@ import Yuki.N.AGUI.Types qualified as AGUI
 import Yuki.N.Agent
 import Yuki.N.Artifact (isArtifactStub, newMemoryArtifactStore)
 import Yuki.N.Background (newBackgroundRegistry)
-import Yuki.N.Facts (Fact, FactStore (..), readOnlyFactStore)
 import Yuki.N.Journal
-import Yuki.N.Memory (ThreadBrief (..), ThreadStore (..), WatcherState (..), briefingMarker, candidatesMarker, memoryHooks, newMemoryState, readOnlyThreadStore, seedWatcher)
 import Yuki.N.Model
 import Yuki.N.Runs (RunCancelled (..))
 
@@ -71,24 +67,7 @@ instance Exception ReplayFailure
 
 replayFile :: AgentHooks -> FilePath -> Maybe Text -> IO (Either Text ReplayReport)
 replayFile hooks path wanted =
-  readJournal path >>= either (pure . Left) check
- where
-  check entries
-    | memoryInjected entries =
-        pure
-          ( Left
-              "journal contains memory-injected requests; CLI replay supports defaultHooks runs only (use replayWithStores for memory-enabled journals)"
-          )
-    | otherwise = replayEntries hooks wanted entries
-
-memoryInjected :: [Entry] -> Bool
-memoryInjected = any marked
- where
-  marked (Entry _ _ _ (ModelRequestEntry request)) = any injected (requestMessages request)
-  marked _ = False
-  injected (ChatSystem text) =
-    briefingMarker `Text.isInfixOf` text || candidatesMarker `Text.isInfixOf` text
-  injected _ = False
+  readJournal path >>= either (pure . Left) (replayEntries hooks wanted)
 
 replayEntries :: AgentHooks -> Maybe Text -> [Entry] -> IO (Either Text ReplayReport)
 replayEntries hooks wanted entries =
@@ -98,99 +77,6 @@ replayEntries hooks wanted entries =
   replayRun (input, settings) =
     replay hooks input settings (AGUI.runId input) (runEntries (AGUI.runId input))
   runEntries runId = filter ((== [runId]) . entryScope) entries
-
-replayWithStores :: ThreadStore -> FactStore -> Maybe Text -> [Entry] -> IO (Either Text ReplayReport)
-replayWithStores threads facts wanted entries =
-  maybe (pure (Left "no matching run.begin in journal")) replayRun (select wanted begins)
- where
-  begins = [(input, settings) | Entry _ scope _ (RunBegin input settings) <- entries, length scope == 1]
-  replayRun (input, settings) =
-    newMemoryState >>= replayWith
-   where
-    runEntries = filter ((== [AGUI.runId input]) . entryScope) entries
-    seed = WatcherState (snapshotRolling runEntries) (priorLastSeen input entries) 0 Map.empty Map.empty
-    replayWith state =
-      seedWatcher (AGUI.runThreadId input) seed state
-        *> watcherReplayModel (AGUI.runId input) entries
-        >>= replayWithModel state
-    replayWithModel state model =
-      newIORef (recordedFacts runEntries)
-        >>= replayWithAll state model
-    replayWithAll state model factCursor =
-      replay
-        (memoryHooks model (snapshotThreads runEntries (readOnlyThreadStore threads)) (snapshotFacts factCursor (readOnlyFactStore facts)) Nothing state)
-        input
-        settings
-        (AGUI.runId input)
-        runEntries
-
-snapshotRolling :: [Entry] -> Text
-snapshotRolling entries =
-  maybe "" briefRollingSummary (listToMaybe recorded)
- where
-  recorded =
-    [brief | Entry _ _ _ (StoreBriefEntry value) <- entries, Just brief <- [fromJSON' value]]
-  fromJSON' value = case fromJSON value of
-    Success brief -> Just brief
-    _ -> Nothing
-
-priorLastSeen :: AGUI.RunAgentInput -> [Entry] -> Int
-priorLastSeen input entries =
-  maybe 0 (length . requestMessages) priorRequest
- where
-  firstSeqs =
-    [seqNo | Entry seqNo _ _ (RunBegin begin _) <- entries, AGUI.runId begin == AGUI.runId input]
-  firstSeq = minimum (maxBound : firstSeqs)
-  priorRunId =
-    listToMaybe
-      ( reverse
-          [ AGUI.runId begin
-          | Entry seqNo _ _ (RunBegin begin _) <- entries,
-            AGUI.runThreadId begin == AGUI.runThreadId input,
-            AGUI.runId begin /= AGUI.runId input,
-            seqNo < firstSeq
-          ]
-      )
-  priorRequest = priorRunId >>= requestOf
-  requestOf rid =
-    listToMaybe (reverse [request | Entry _ _ _ (ModelRequestEntry request) <- filter (entryScopeOf rid) entries])
-  entryScopeOf rid entry = entryScope entry == [rid]
-
-recordedFacts :: [Entry] -> [[Fact]]
-recordedFacts entries =
-  [hits | Entry _ _ _ (StoreFactsEntry value) <- entries, Just hits <- [fromJSON' value]]
- where
-  fromJSON' value = case fromJSON value of
-    Success hits -> Just hits
-    _ -> Nothing
-
-snapshotThreads :: [Entry] -> ThreadStore -> ThreadStore
-snapshotThreads entries store =
-  maybe store (\brief -> store {threadBrief = const (pure brief)}) (listToMaybe recorded)
- where
-  recorded =
-    [brief | Entry _ _ _ (StoreBriefEntry value) <- entries, Just brief <- [fromJSON' value]]
-  fromJSON' :: Value -> Maybe (Maybe ThreadBrief)
-  fromJSON' value = case fromJSON value of
-    Success brief -> Just brief
-    _ -> Nothing
-
-snapshotFacts :: IORef [[Fact]] -> FactStore -> FactStore
-snapshotFacts cursor store =
-  store {factSearch = const nextBatch}
- where
-  nextBatch = readIORef cursor >>= nextFacts
-  nextFacts [] = pure []
-  nextFacts (hits : rest) = hits <$ writeIORef cursor rest
-
-watcherReplayModel :: Text -> [Entry] -> IO Model
-watcherReplayModel runId entries =
-  newIORef memoryEntries <&> memoryModel
- where
-  memoryModel cursor =
-    Model "memory-replay" "memory-replay" Nothing (replayStream exhausted cursor) (const (object []))
-  exhausted = throwIO (ReplayFailure "journal exhausted at memory replay")
-  memoryEntries = [entry | entry <- entries, entryScope entry == [runId, "memory"], isModelKind (entryKind entry)]
 
 select :: Maybe Text -> [(AGUI.RunAgentInput, RunSettings)] -> Maybe (AGUI.RunAgentInput, RunSettings)
 select Nothing = listToMaybe . reverse

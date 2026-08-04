@@ -110,8 +110,6 @@ cwdStateJson :: Assertion
 cwdStateJson =
   sequence_
     [ decodeConfig "{}" @?= Right CwdInherit,
-      decodeConfig "{\"cwd\":null}" @?= Right CwdNone,
-      decodeConfig "{\"cwd\":\"/work\"}" @?= Right (CwdPath "/work"),
       decodeConfig "{\"cwdMode\":\"inherit\",\"cwd\":null}" @?= Right CwdInherit,
       decodeConfig "{\"cwdMode\":\"none\",\"cwd\":\"/ignored\"}" @?= Right CwdNone,
       decodeConfig "{\"cwdMode\":\"path\",\"cwd\":\"/chosen\"}" @?= Right (CwdPath "/chosen"),

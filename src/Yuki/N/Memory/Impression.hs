@@ -317,12 +317,7 @@ newImpressionStore dir =
     >>= traverse (bootstrapStore (storePath dir))
  where
   bootstrapStore path loaded =
-    getPOSIXTime >>= buildStore path loaded
-  buildStore path loaded now =
-    let migrated = migrateKnownFalseImpressions (round now) loaded
-     in bool (pure ()) (atomicEncodeFile path migrated) (migrated /= loaded)
-          *> newMVar migrated
-          <&> mkStore (atomicEncodeFile path)
+    newMVar loaded <&> mkStore (atomicEncodeFile path)
 
 newMemoryImpressionStore :: IO ImpressionStore
 newMemoryImpressionStore = newMVar emptyStoreState <&> mkStore (const (pure ()))
@@ -542,7 +537,7 @@ activationPrompt state intent catalog =
       \\"memoryIds\":[string],\"confidence\":number,\"reason\":string}]}. \
       \Return at most 5 cues. A cue may only suggest a literal fixed-string memory_grep over the \
       \same incarnation's Task Archive; verification requires a subsequent bounded memory_read. \
-      \The legacy field memoryIds may contain only Task or archive identifiers present in the supplied \
+      \The memoryIds field may contain only Task or archive identifiers present in the supplied \
       \catalog. Never claim that a catalog preview was read evidence. Do not quote archive content. \
       \Empty cues are correct when nothing feels relevant.",
     ChatUser
@@ -571,8 +566,8 @@ consolidationPrompt state archiveRefs experienceRefs experience =
       \preferences, salience and interpretive tendencies, but must never encode claims or lessons \
       \about tools, APIs, memory_grep, memory_read, search result counts, excerpts, truncation, \
       \context machinery or other internal system behavior. Such diagnostics belong in run records. \
-      \sourceMemoryIds is a legacy JSON field: preserve grounded Task/archive refs already present, \
-      \or leave it empty; never invent an id. New memoryProposals and voidProposals are forbidden \
+      \sourceMemoryIds may contain only Task or archive identifiers from the supplied catalog, or \
+      \be left empty; never invent an id. New memoryProposals and voidProposals are forbidden \
       \and both arrays must be empty.",
     ChatUser
       ( Text.intercalate
@@ -629,14 +624,12 @@ parseConsolidation :: Set Text -> [ImpressionItem] -> Set Text -> Integer -> Tex
 parseConsolidation allowed previous allowedExperiences now raw =
   decodeStructured raw >>= validate
  where
-  legacyArchives = Set.fromList (previous >>= impressionSourceMemoryIds)
-  legacyExperiences = Set.fromList (previous >>= impressionSourceExperienceRefs)
   validate decision
     | length (decisionItems decision) > 24 = Left "impression state exceeds 24 items"
     | any invalidItem (decisionItems decision) = Left "impression item is missing a label or intuition"
     | any invalidStrength (decisionItems decision) = Left "impression strength is outside 0..1"
-    | any (unknownArchiveRef (Set.union allowed legacyArchives)) (decisionItems decision) = Left "impression references an unknown Task archive catalog id"
-    | any (unknownExperienceRef (Set.union allowedExperiences legacyExperiences)) (decisionItems decision) = Left "impression references an unknown experience id"
+    | any (unknownArchiveRef allowed) (decisionItems decision) = Left "impression references an unknown Task archive catalog id"
+    | any (unknownExperienceRef allowedExperiences) (decisionItems decision) = Left "impression references an unknown experience id"
     | any lacksEvidence (decisionItems decision) = Left "new or changed impression lacks current experience evidence"
     | any operationalDiagnostic (decisionItems decision) = Left "system and tool diagnostics cannot be stored as impressions"
     | not (null (decisionMemoryProposals decision)) = Left "impression consolidation must not emit memory proposals"
@@ -698,51 +691,6 @@ parseConsolidation allowed previous allowedExperiences now raw =
         impressionIntuition = Text.take 1000 (Text.strip (impressionIntuition item)),
         impressionUpdated = now
       }
-
-migrateKnownFalseImpressions :: Integer -> ImpressionStoreState -> ImpressionStoreState
-migrateKnownFalseImpressions now stored =
-  foldl' migrate stored (Map.toList (storeStates stored))
- where
-  migrate state (incarnation, before)
-    | null removed = state
-    | otherwise =
-        state
-          { storeStates = Map.insert incarnation after (storeStates state),
-            storeRevisions = takeEnd 256 (storeRevisions state <> [revision])
-          }
-   where
-    removed = filter knownFalseImpression (impressionItems before)
-    kept = filter (not . knownFalseImpression) (impressionItems before)
-    next = impressionRevision before + 1
-    after =
-      before
-        { impressionRevision = next,
-          impressionItems = kept,
-          impressionGeneratorRevision = consolidationPromptRevision,
-          impressionEffectiveHash = stateHash incarnation next kept,
-          impressionStateUpdated = now
-        }
-    revision =
-      ImpressionRevision
-        ("impression-revision-" <> Text.take 24 (sha256 (TextEncoding.encodeUtf8 (impressionEffectiveHash after))))
-        incarnation
-        "migration/impression-evidence-v3"
-        (impressionRevision before)
-        next
-        "Removed a known false diagnostic impression: journal evidence shows the claimed grep hit never existed in the archived source."
-        []
-        (fmap impressionItemId removed)
-        "migration-impression-evidence-v3"
-        "system/migration"
-        now
-
-knownFalseImpression :: ImpressionItem -> Bool
-knownFalseImpression item =
-  impressionItemId item == "impression-q1r2s3"
-    || Text.toCaseFold (impressionLabel item) == "greptruncationawareness"
-    || all
-      (`Text.isInfixOf` Text.toCaseFold (impressionIntuition item))
-      ["memory_grep", "scannedentries", "改天孙观为婺女观"]
 
 decodeStructured :: (FromJSON value) => Text -> Either Text value
 decodeStructured =
