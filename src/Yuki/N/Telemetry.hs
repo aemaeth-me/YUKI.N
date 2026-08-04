@@ -284,22 +284,6 @@ instance ToJSON LiveStatus where
         "lastActivity" .= liveLastActivity status
       ]
 
-kindName :: RunKind -> Text
-kindName = \case
-  RunHome -> "home"
-  RunTask -> "task"
-  RunWorker -> "worker"
-
-instance ToJSON RunKind where
-  toJSON = String . kindName
-
-instance FromJSON RunKind where
-  parseJSON = withText "RunKind" $ \case
-    "home" -> pure RunHome
-    "task" -> pure RunTask
-    "worker" -> pure RunWorker
-    other -> fail ("unknown run kind: " <> Text.unpack other)
-
 data ActivityFrame
   = FrameStatus LiveStatus
   | FrameRunEnd Text Text

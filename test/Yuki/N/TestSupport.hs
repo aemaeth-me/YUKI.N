@@ -38,11 +38,13 @@ module Yuki.N.TestSupport
     collectEvents,
     takeEnd,
     transcriptHistory,
+    silenceStderr,
   )
 where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.MVar
+import Control.Exception (bracket)
 import Data.Aeson
 import Data.Aeson.Types (parseEither)
 import Data.Bool (bool)
@@ -58,11 +60,13 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as TextEncoding
 import Data.Text.IO qualified as TextIO
+import GHC.IO.Handle (hDuplicate, hDuplicateTo)
 import Network.HTTP.Types
 import Network.Wai (Application, Request, pathInfo, requestHeaders, requestMethod, responseToStream, setRequestBodyChunks)
 import Network.Wai.Internal (ResponseReceived (..))
 import Network.Wai.Test
 import System.Directory (createDirectoryIfMissing, createDirectoryLink, createFileLink, getTemporaryDirectory)
+import System.IO (IOMode (WriteMode), hClose, hFlush, openFile, stderr)
 import Test.Tasty.HUnit
 import Yuki.N.AGUI.Event
 import Yuki.N.AGUI.Types
@@ -79,6 +83,13 @@ import Yuki.N.Transcript
 
 afterSpy :: IORef [[ChatMessage]] -> AgentHooks
 afterSpy ref = defaultHooks {afterRun = \_ messages -> modifyIORef' ref (messages :)}
+
+silenceStderr :: IO a -> IO a
+silenceStderr action = bracket acquire release redirect
+ where
+  acquire = liftA2 (,) (hDuplicate stderr) (openFile "/dev/null" WriteMode)
+  release (original, devNull) = hDuplicateTo original stderr *> hClose original *> hClose devNull
+  redirect (_, devNull) = hFlush stderr *> hDuplicateTo devNull stderr *> action
 
 waitUntil :: IO Bool -> IO Bool
 waitUntil probe = go (100 :: Int)

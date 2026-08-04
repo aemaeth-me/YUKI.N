@@ -137,9 +137,9 @@ resolveRuntime manager provider artifacts base config registry keyMap =
       (pure Nothing)
       (\telemetry -> readIORef (telemetryLedger telemetry) <&> fmap ((,) telemetry))
       (runtimeTelemetry base)
-  wrapFs diffBytes tools (telemetry, ledger) =
-    Map.adjust (fsInterceptor telemetry ledger diffBytes rootDir runKind) "fs_write"
-      . Map.adjust (fsInterceptor telemetry ledger diffBytes rootDir runKind) "fs_edit"
+  wrapFs diffBytes' tools (telemetry, ledger) =
+    Map.adjust (fsInterceptor telemetry ledger diffBytes' rootDir runKind) "fs_write"
+      . Map.adjust (fsInterceptor telemetry ledger diffBytes' rootDir runKind) "fs_edit"
       $ tools
   rootDir = fromMaybe "" (cwdPath (configCwd config))
   runKind = identityKind (runtimeIdentity base)

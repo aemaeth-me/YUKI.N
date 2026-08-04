@@ -469,7 +469,7 @@ freshIncarnationId :: IncarnationStore -> Text -> IO Text
 freshIncarnationId store name =
   firstFree (candidates (slugIncarnation name))
  where
-  candidates base = base : [base <> "-" <> Text.pack (show n) | n <- [2 .. 99]]
+  candidates base = base : [base <> "-" <> Text.pack (show n) | n <- [2 .. 99] :: [Int]]
   firstFree [] = pure (slugIncarnation name <> "-x")
   firstFree (candidate : rest) =
     incarnationRead store candidate >>= maybe (pure candidate) (const (firstFree rest))

@@ -16,6 +16,7 @@ module Yuki.N.Runs
     drainFollowUps,
     drainSteering,
     followUpRun,
+    kindName,
     newRunRegistry,
     noteCompletion,
     steerRun,
@@ -27,6 +28,7 @@ where
 
 import Control.Concurrent (ThreadId, myThreadId, throwTo)
 import Control.Exception (Exception, SomeAsyncException, SomeException, bracket_, displayException, fromException, throwIO, try)
+import Data.Aeson (FromJSON (..), ToJSON (..), Value (String), withText)
 import Data.Functor (($>))
 import Data.IORef
 import Data.Map.Strict (Map)
@@ -41,6 +43,22 @@ import Yuki.N.Model (ChatMessage)
 
 data RunKind = RunHome | RunTask | RunWorker
   deriving stock (Eq, Show)
+
+kindName :: RunKind -> Text
+kindName = \case
+  RunHome -> "home"
+  RunTask -> "task"
+  RunWorker -> "worker"
+
+instance ToJSON RunKind where
+  toJSON = String . kindName
+
+instance FromJSON RunKind where
+  parseJSON = withText "RunKind" $ \case
+    "home" -> pure RunHome
+    "task" -> pure RunTask
+    "worker" -> pure RunWorker
+    other -> fail ("unknown run kind: " <> Text.unpack other)
 
 data RunDescriptor = RunDescriptor
   { descriptorTaskId :: Text,

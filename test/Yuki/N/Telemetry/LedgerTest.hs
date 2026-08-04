@@ -199,7 +199,7 @@ gitEnrichmentOutside = withWorkDir $ \dir -> do
   changes @?= []
 
 failOpenLedger :: Assertion
-failOpenLedger = withWorkDir $ \dir -> do
+failOpenLedger = silenceStderr $ withWorkDir $ \dir -> do
   createDirectoryIfMissing True (dir ++ "/deliveries.jsonl")
   createDirectoryIfMissing True (dir ++ "/fs-changes.jsonl")
   (runtime, _, _) <- wiredRuntime dir

@@ -116,7 +116,7 @@ journalRestartSequence = withWorkDir $ \dir -> do
   fmap entrySeq entries @?= [0, 1]
 
 journalTailRecovery :: Assertion
-journalTailRecovery = withWorkDir $ \dir -> do
+journalTailRecovery = silenceStderr $ withWorkDir $ \dir -> do
   let path = journalFilePath dir
       intact =
         [ Entry 4 ["run-a"] (Just 1) (IdEntry "a"),
@@ -148,7 +148,7 @@ journalMiddleCorruption = withWorkDir $ \dir -> do
     Right _ -> assertFailure "middle corruption was silently accepted"
 
 atomicStoreRecovery :: Assertion
-atomicStoreRecovery = withWorkDir $ \dir -> do
+atomicStoreRecovery = silenceStderr $ withWorkDir $ \dir -> do
   transcripts <- newTranscriptStore dir
   configs <- newThreadConfigStore dir
   journal <- newFileJournal dir
