@@ -25,12 +25,9 @@ data Settings = Settings
     settingsMaxTurns :: Int,
     settingsToolExecution :: ToolExecution,
     settingsSystemPrompt :: Text,
-    settingsJournalDir :: Maybe String,
     settingsArtifactDir :: Maybe String,
     settingsTranscriptDir :: Maybe String,
     settingsWorkDir :: Maybe String,
-    settingsMemoryDir :: Maybe String,
-    settingsMemoryModel :: Maybe Text,
     settingsSubAgentDepth :: Int,
     settingsSubAgentMaxParallel :: Int,
     settingsProviderRetries :: Int,
@@ -39,11 +36,6 @@ data Settings = Settings
     settingsContextReserveTokens :: Int,
     settingsContextKeepUnits :: Int,
     settingsContextSummaryTokens :: Int,
-    settingsDispatchGenerateTimeout :: Int,
-    settingsDispatchConfirmTimeout :: Int,
-    settingsTelemetryGit :: Bool,
-    settingsTelemetryGitTimeout :: Int,
-    settingsTelemetryDiffBytes :: Int,
     settingsProvider :: OpenAIConfig,
     settingsFallbackProviders :: [Text]
   }
@@ -66,15 +58,10 @@ resolveSettings environment =
     <*> positive "YUKI_CONTEXT_RESERVE_TOKENS" (value "YUKI_CONTEXT_RESERVE_TOKENS" `orElse` "16384")
     <*> positive "YUKI_CONTEXT_KEEP_UNITS" (value "YUKI_CONTEXT_KEEP_UNITS" `orElse` "12")
     <*> atLeast "YUKI_CONTEXT_SUMMARY_TOKENS" 96 (value "YUKI_CONTEXT_SUMMARY_TOKENS" `orElse` "2048")
-    <*> positive "YUKI_DISPATCH_GENERATE_TIMEOUT" (value "YUKI_DISPATCH_GENERATE_TIMEOUT" `orElse` "20")
-    <*> positive "YUKI_DISPATCH_CONFIRM_TIMEOUT" (value "YUKI_DISPATCH_CONFIRM_TIMEOUT" `orElse` "600")
-    <*> pure (value "YUKI_TELEMETRY_GIT" /= Just "0")
-    <*> positive "YUKI_TELEMETRY_GIT_TIMEOUT" (value "YUKI_TELEMETRY_GIT_TIMEOUT" `orElse` "3")
-    <*> positive "YUKI_TELEMETRY_DIFF_BYTES" (value "YUKI_TELEMETRY_DIFF_BYTES" `orElse` "8192")
     <*> parseFallbacks (Text.pack <$> Map.lookup "YUKI_FALLBACK_PROVIDERS" environment)
  where
   value key = Map.lookup key environment
-  make provider port maxTurns execution subAgentDepth subAgentMaxParallel providerRetries spliceChars spliceKeep reserveTokens keepUnits summaryTokens dispatchGenerateTimeout dispatchConfirmTimeout telemetryGit telemetryGitTimeout telemetryDiffBytes fallbacks =
+  make provider port maxTurns execution subAgentDepth subAgentMaxParallel providerRetries spliceChars spliceKeep reserveTokens keepUnits summaryTokens fallbacks =
     Settings
       { settingsHost = value "YUKI_HOST" `orElse` "127.0.0.1",
         settingsPort = port,
@@ -83,12 +70,9 @@ resolveSettings environment =
         settingsMaxTurns = maxTurns,
         settingsToolExecution = execution,
         settingsSystemPrompt = Text.pack (value "YUKI_SYSTEM_PROMPT" `orElse` ""),
-        settingsJournalDir = value "YUKI_JOURNAL_DIR",
         settingsArtifactDir = value "YUKI_ARTIFACT_DIR",
         settingsTranscriptDir = value "YUKI_TRANSCRIPT_DIR",
         settingsWorkDir = value "YUKI_WORK_DIR",
-        settingsMemoryDir = value "YUKI_MEMORY_DIR",
-        settingsMemoryModel = Text.pack <$> value "YUKI_MEMORY_MODEL",
         settingsSubAgentDepth = subAgentDepth,
         settingsSubAgentMaxParallel = subAgentMaxParallel,
         settingsProviderRetries = providerRetries,
@@ -97,11 +81,6 @@ resolveSettings environment =
         settingsContextReserveTokens = reserveTokens,
         settingsContextKeepUnits = keepUnits,
         settingsContextSummaryTokens = summaryTokens,
-        settingsDispatchGenerateTimeout = dispatchGenerateTimeout,
-        settingsDispatchConfirmTimeout = dispatchConfirmTimeout,
-        settingsTelemetryGit = telemetryGit,
-        settingsTelemetryGitTimeout = telemetryGitTimeout,
-        settingsTelemetryDiffBytes = telemetryDiffBytes,
         settingsProvider = provider,
         settingsFallbackProviders = fallbacks
       }

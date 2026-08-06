@@ -4,26 +4,21 @@ module Yuki.N.AgentTest
     parallelTools,
     frontendTools,
     turnLimitError,
-    unexpectedError,
     runError,
     retryTests,
     retryRecovers,
     retryExhausted,
     retryAfterDelta,
-    retryReplay,
     fallbackTests,
     fallbackSucceeds,
     fallbackRetries,
     fallbackChainExhausted,
     fallbackEmptyChain,
-    fallbackReplay,
     fallbackConfigParse,
     fallbackConfigRender,
     hooksTests,
     identity,
     ordering,
-    denial,
-    chaining,
     machineTests,
     textLifecycle,
     reasoningThenText,
@@ -53,9 +48,7 @@ import Test.Tasty.HUnit
 import Yuki.N.AGUI.Event
 import Yuki.N.Agent
 import Yuki.N.Config
-import Yuki.N.Journal
 import Yuki.N.Model
-import Yuki.N.Replay
 import Yuki.N.TestSupport
 import Yuki.N.ThreadConfig
 
@@ -67,7 +60,6 @@ agentTests =
       testCase "executes backend tools concurrently and continues the model loop" parallelTools,
       testCase "hands client tools back without another model call" frontendTools,
       testCase "classifies the local model-turn guard distinctly" turnLimitError,
-      testCase "surfaces an unexpected synchronous exception with its detail" unexpectedError,
       testCase "emits RUN_ERROR without a following RUN_FINISHED" runError
     ]
 
@@ -187,17 +179,6 @@ turnLimitError = do
     fakeModel $ \_ emit ->
       emit (ModelToolCallDelta 0 (Just "call-echo") (Just "echo") "{}") $> ToolUse
 
-unexpectedError :: Assertion
-unexpectedError = do
-  base <- testRuntime okModel [] Parallel
-  let hooks = defaultHooks {transformContext = \_ _ -> ioError (userError "context transformer exploded")}
-  events <- collectEvents base {runtimeHooks = hooks} (sampleInput [])
-  case [(message, code) | RunError message code <- events] of
-    [(message, code)] -> do
-      code @?= Just "UNHANDLED_ERROR"
-      assertBool "error retains the original exception detail" ("context transformer exploded" `Text.isInfixOf` message)
-    failures -> assertFailure ("expected one unhandled error, got " <> show failures)
-
 runError :: Assertion
 runError = do
   runtime <-
@@ -214,8 +195,7 @@ retryTests =
     "provider retry"
     [ testCase "retries before the first delta and announces the attempt" retryRecovers,
       testCase "gives up at the attempt cap" retryExhausted,
-      testCase "never retries after a delta was consumed" retryAfterDelta,
-      testCase "replays a journaled run with provider.retry events without divergence" retryReplay
+      testCase "never retries after a delta was consumed" retryAfterDelta
     ]
 flakyModel :: Int -> IORef Int -> Model
 flakyModel failures calls =
@@ -269,23 +249,6 @@ retryAfterDelta = do
     fakeModel $ \_ emit ->
       emit (ModelTextDelta "partial") *> throwIO (ProviderFailure "connection reset")
 
-retryReplay :: Assertion
-retryReplay = do
-  (journal, readEntries) <- newMemoryJournal
-  calls <- newIORef (0 :: Int)
-  base <- testRuntime (flakyModel 1 calls) [] Parallel
-  events <- collectEvents base {runtimeJournal = Just journal, runtimeProviderRetries = 3} (sampleInput [])
-  recorded <- readEntries
-  report <- replayEntries defaultHooks Nothing recorded
-  assertBool "journal records provider.retry" (any journaled recorded)
-  fmap reportDivergence report @?= Right Nothing
-  fmap reportEvents report @?= Right (length (filter (not . isRetry) events))
- where
-  journaled (Entry _ _ _ (AgentEventEntry (Custom "provider.retry" _))) = True
-  journaled _ = False
-  isRetry (Custom "provider.retry" _) = True
-  isRetry _ = False
-
 fallbackTests :: TestTree
 fallbackTests =
   testGroup
@@ -294,7 +257,6 @@ fallbackTests =
       testCase "gives each fallback its own retry budget" fallbackRetries,
       testCase "walks the chain and rethrows the last failure" fallbackChainExhausted,
       testCase "an empty chain keeps the single-provider behavior" fallbackEmptyChain,
-      testCase "replays a journaled fallback run without divergence" fallbackReplay,
       testCase "fallback env var defaults, parses a list and rejects empty names" fallbackConfigParse,
       testCase "global config exposes the fallback roster" fallbackConfigRender
     ]
@@ -386,31 +348,6 @@ fallbackEmptyChain = do
   eventType (last events) @?= "RUN_ERROR"
   [code | RunError _ (Just code) <- events] @?= ["PROVIDER_ERROR"]
 
-fallbackReplay :: Assertion
-fallbackReplay = do
-  (journal, readEntries) <- newMemoryJournal
-  calls <- newIORef (0 :: Int)
-  base <- testRuntime (downModel calls "alpha" "a1" "alpha down") [] Parallel
-  events <-
-    collectEvents
-      base
-        { runtimeJournal = Just journal,
-          runtimeProviderRetries = 2,
-          runtimeFallbacks = [answeringModel calls "beta" "b1" "second wind"]
-        }
-      (sampleInput [])
-  recorded <- readEntries
-  report <- replayEntries defaultHooks Nothing recorded
-  assertBool "journal records provider.fallback" (any journaled recorded)
-  fmap reportDivergence report @?= Right Nothing
-  fmap reportEvents report @?= Right (length (filter (not . transient) events))
- where
-  journaled (Entry _ _ _ (AgentEventEntry (Custom "provider.fallback" _))) = True
-  journaled _ = False
-  transient (Custom "provider.retry" _) = True
-  transient (Custom "provider.fallback" _) = True
-  transient _ = False
-
 fallbackConfigParse :: Assertion
 fallbackConfigParse =
   sequence_
@@ -447,48 +384,24 @@ hooksTests =
   testGroup
     "agent hooks"
     [ testCase "mempty is neutral" identity,
-      testCase "steering appends in order" ordering,
-      testCase "beforeToolCall stops at the first denial" denial,
-      testCase "afterToolCall chains" chaining
+      testCase "afterRun composes in order" ordering
     ]
 
 identity :: Assertion
-identity =
-  (getSteeringMessages (steering "x") (sampleInput []) >>= (@?= [ChatSystem "x"]))
-    *> (getSteeringMessages (steering "x") (sampleInput []) >>= (@?= [ChatSystem "x"]))
+identity = do
+  called <- newIORef False
+  let note = defaultHooks {afterRun = \_ _ -> writeIORef called True}
+  afterRun mempty (sampleInput []) []
+  afterRun note (sampleInput []) []
+  readIORef called >>= (@?= True)
 
 ordering :: Assertion
-ordering =
-  getSteeringMessages (steering "a" <> steering "b") (sampleInput [])
-    >>= (@?= [ChatSystem "a", ChatSystem "b"])
+ordering = do
+  order <- newIORef []
+  let note tag = defaultHooks {afterRun = \_ _ -> modifyIORef' order (<> [tag])}
+  afterRun (note ("a" :: Text) <> note ("b" :: Text)) (sampleInput []) []
+  readIORef order >>= (@?= ["a", "b"])
 
-denial :: Assertion
-denial = do
-  called <- newIORef False
-  result <- beforeToolCall (deny <> spy called) someCall
-  wasCalled <- readIORef called
-  result @?= Left "no"
-  wasCalled @?= False
-
-chaining :: Assertion
-chaining =
-  afterToolCall (mark "a" <> mark "b") someCall (ToolOutcome "x" False False)
-    >>= (@?= ToolOutcome "xab" False False)
-
-steering :: Text -> AgentHooks
-steering text = defaultHooks {getSteeringMessages = const (pure [ChatSystem text])}
-deny :: AgentHooks
-deny = defaultHooks {beforeToolCall = const (pure (Left "no"))}
-spy :: IORef Bool -> AgentHooks
-spy ref = defaultHooks {beforeToolCall = const (writeIORef ref True $> Right ())}
-mark :: Text -> AgentHooks
-mark suffix =
-  defaultHooks
-    { afterToolCall = \_ outcome ->
-        pure outcome {toolOutcomeContent = toolOutcomeContent outcome <> suffix}
-    }
-someCall :: ModelToolCall
-someCall = ModelToolCall "call" "echo" "{}"
 machineTests :: TestTree
 machineTests =
   testGroup

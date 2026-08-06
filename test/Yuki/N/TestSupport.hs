@@ -197,7 +197,7 @@ withWorkDir action = do
 callTool :: [BackendTool] -> Text -> Value -> IO ToolOutcome
 callTool tools name arguments =
   maybe (assertFailure ("missing tool: " <> Text.unpack name)) pure (find (named . backendToolSpec) tools)
-    >>= \backend -> runBackendTool backend (ToolContext "run" "thread" "call" (const (pure ())) Nothing "") arguments
+    >>= \backend -> runBackendTool backend (ToolContext "run" "thread" "call" (const (pure ()))) arguments
  where
   named = (== name) . toolName
 outcomeValue :: ToolOutcome -> IO Value
@@ -315,7 +315,6 @@ testRuntime model tools execution =
           runtimeNewId =
             atomicModifyIORef' counter (\value -> let next = value + 1 in (next, next))
               <&> ("id-" <>) . Text.pack . show,
-          runtimeJournal = Nothing,
           runtimeArtifactStore = Nothing,
           runtimeBackground = background,
           runtimeDepth = 1,
@@ -325,10 +324,6 @@ testRuntime model tools execution =
           runtimeSplice = Nothing,
           runtimeContext = Nothing,
           runtimeRuns = Nothing,
-          runtimeTelemetry = Nothing,
-          runtimeDispatchStore = Nothing,
-          runtimeDispatchConfirmTimeout = 600,
-          runtimeIdentity = defaultIdentity,
           runtimeSteer = const (pure []),
           runtimeFollowUp = const (pure [])
         }

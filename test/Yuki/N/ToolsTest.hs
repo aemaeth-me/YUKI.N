@@ -31,7 +31,6 @@ module Yuki.N.ToolsTest
     planSet,
     planUpdate,
     planClear,
-    planReplay,
   )
 where
 
@@ -68,9 +67,7 @@ import Yuki.N.AGUI.Types
 import Yuki.N.Agent
 import Yuki.N.Artifact
 import Yuki.N.Background
-import Yuki.N.Journal
 import Yuki.N.Model
-import Yuki.N.Replay
 import Yuki.N.Server
 import Yuki.N.TestSupport
 import Yuki.N.ThreadConfig
@@ -84,7 +81,7 @@ callToolContext context tools name arguments =
   named = (== name) . toolName
 callAs :: Text -> [BackendTool] -> Text -> Value -> IO ToolOutcome
 callAs threadId =
-  callToolContext (ToolContext "run" threadId "call" (const (pure ())) Nothing "")
+  callToolContext (ToolContext "run" threadId "call" (const (pure ())))
 
 workToolTests :: TestTree
 workToolTests =
@@ -385,7 +382,7 @@ shellStreams = withWorkDir exercise
     stderr @?= "err\n"
     toolOutcomeContent outcome @?= "exit 0\none\ntwo\nerr\n"
    where
-    streaming events = ToolContext "run" "thread" "call-1" (\event -> modifyIORef' events (event :)) Nothing ""
+    streaming events = ToolContext "run" "thread" "call-1" (\event -> modifyIORef' events (event :))
   parseChunk :: Value -> Parser (Text, Text, Text)
   parseChunk =
     withObject "shell.output" $ \fields ->
@@ -555,7 +552,7 @@ backgroundAcrossRuntimeFor = withWorkDir exercise
               (emptyThreadConfig {configCwd = CwdPath dir})
               Map.empty
               Map.empty
-        app = application Nothing Nothing Nothing Nothing Nothing Nothing runtimeFor
+        app = application Nothing Nothing Nothing Nothing runtimeFor
     responses <- traverse (runBackgroundRound app) (zip [1 ..] ["start", "output", "stdin", "kill"])
     results <- readIORef observed
     resolutions <- readIORef resolved
@@ -638,7 +635,6 @@ planTests =
     [ testCase "set replaces the plan, renders it and announces the full state" planSet,
       testCase "update flips items one by one and rejects unknown ids" planUpdate,
       testCase "clear empties the plan and renders the empty state" planClear,
-      testCase "journaled plan events replay without divergence" planReplay,
       testCase "every tool spec is structurally valid JSON Schema" schemaSanity
     ]
 
@@ -668,7 +664,7 @@ callPlan :: [BackendTool] -> IORef [Event] -> Value -> IO ToolOutcome
 callPlan tools events =
   callToolContext (streaming events) tools "plan"
  where
-  streaming ref = ToolContext "run" "thread" "call" (\event -> modifyIORef' ref (event :)) Nothing ""
+  streaming ref = ToolContext "run" "thread" "call" (\event -> modifyIORef' ref (event :))
 planEvent :: [(Text, Text, Text)] -> Event
 planEvent items = Custom "plan" (object ["items" .= fmap item items])
  where
@@ -736,32 +732,3 @@ planClear = withWorkDir exercise
     toolOutcomeContent cleared @?= "(empty plan)"
     toolOutcomeContent again @?= "(empty plan)"
     last emitted @?= planEvent []
-
-planReplay :: Assertion
-planReplay = withWorkDir exercise
- where
-  exercise dir = do
-    (journal, readEntries) <- newMemoryJournal
-    turns <- newIORef (0 :: Int)
-    tools <- workTools Nothing dir
-    base <- testRuntime (planModel turns) tools Sequential
-    events <- collectEvents base {runtimeJournal = Just journal} (sampleInput [])
-    recorded <- readEntries
-    report <- replayEntries defaultHooks Nothing recorded
-    assertBool "journal records the plan event" (any journaled recorded)
-    [content | ToolCallResult _ "call-plan" content <- events] @?= ["1. [ ] scan\n2. [ ] fix"]
-    fmap reportDivergence report @?= Right Nothing
-    fmap reportEvents report @?= Right (length (filter (not . isPlan) events))
-  journaled (Entry _ _ _ (AgentEventEntry (Custom "plan" _))) = True
-  journaled _ = False
-  isPlan (Custom "plan" _) = True
-  isPlan _ = False
-
-planModel :: IORef Int -> Model
-planModel turns =
-  fakeModel $ \_ emit ->
-    atomicModifyIORef' turns (\count -> let next = count + 1 in (next, next)) >>= \case
-      1 -> emit (ModelToolCallDelta 0 (Just "call-plan") (Just "plan") planArgs) $> ToolUse
-      _ -> emit (ModelTextDelta "planned") $> Stop
- where
-  planArgs = "{\"action\":\"set\",\"items\":[{\"id\":\"1\",\"title\":\"scan\"},{\"id\":\"2\",\"title\":\"fix\"}]}"

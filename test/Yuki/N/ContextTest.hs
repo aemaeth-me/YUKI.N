@@ -6,7 +6,6 @@ module Yuki.N.ContextTest
     inertWithoutStore,
     inertBelowThreshold,
     stubsAgedOnce,
-    spliceReplay,
     spliceConfigParse,
     contextTests,
     contextTokenEstimate,
@@ -14,7 +13,6 @@ module Yuki.N.ContextTest
     compactionUserAnchor,
     keepsToolCausality,
     contextArtifact,
-    contextJournalReplay,
     contextOverflowRetry,
     toolAfterCompaction,
     estimateAppendMonotonic,
@@ -49,9 +47,7 @@ import Yuki.N.Agent
 import Yuki.N.Artifact
 import Yuki.N.Config
 import Yuki.N.Context
-import Yuki.N.Journal
 import Yuki.N.Model
-import Yuki.N.Replay
 import Yuki.N.TestSupport
 import Yuki.N.Transcript
 
@@ -65,7 +61,6 @@ spliceTests =
       testCase "leaves history verbatim without an artifact store" inertWithoutStore,
       testCase "leaves history verbatim below the character threshold" inertBelowThreshold,
       testCase "stubs aged results once each, keeps originals fetchable and reports savings" stubsAgedOnce,
-      testCase "replays a journaled run with a splice without divergence" spliceReplay,
       testCase "splice env vars default, accept valid and reject invalid" spliceConfigParse
     ]
 bigA, bigB, bigC, bigD :: Text
@@ -180,26 +175,6 @@ stubsAgedOnce = do
           ]
       other -> assertFailure ("expected two context.splice events, got " <> show (length other))
 
-spliceReplay :: Assertion
-spliceReplay = do
-  store <- newMemoryArtifactStore
-  (journal, readEntries) <- newMemoryJournal
-  (events, _) <- agedFixture (Just store) (Just (SpliceConfig 400 1)) (wire journal)
-  recorded <- readEntries
-  report <- replayEntries defaultHooks Nothing recorded
-  fmap reportDivergence report @?= Right Nothing
-  fmap reportEvents report @?= Right (length events)
-  assertBool "journaled request carries a stub" (any stubbed recorded)
-  assertBool "journaled settings carry the splice config" (any configured recorded)
- where
-  wire journal runtime = pure runtime {runtimeJournal = Just journal}
-  stubbed (Entry _ _ _ (ModelRequestEntry recorded)) = any stubbedMessage (requestMessages recorded)
-  stubbed _ = False
-  stubbedMessage (ChatToolResult _ content) = isArtifactStub content
-  stubbedMessage _ = False
-  configured (Entry _ _ _ (RunBegin _ settings)) = runSettingsSplice settings == Just (SpliceConfig 400 1)
-  configured _ = False
-
 spliceConfigParse :: Assertion
 spliceConfigParse =
   sequence_
@@ -233,7 +208,6 @@ contextTests =
       testCase "anchors an assistant-only suffix with the latest user request" compactionUserAnchor,
       testCase "keeps a tool call and result as one causal unit" keepsToolCausality,
       testCase "keeps the full dropped payload addressable as an artifact" contextArtifact,
-      testCase "persists the summary and compaction boundary, then replays cleanly" contextJournalReplay,
       testCase "recognizes overflow and retries once with an emergency compaction" contextOverflowRetry,
       testCase "continues calling tools after compacting an oversized result" toolAfterCompaction,
       testProperty "appending a message never lowers the estimate" estimateAppendMonotonic,
@@ -354,96 +328,32 @@ contextArtifact =
             assertBool "full payload is not reduced to the summary" (Text.length (compactionPayload attached) > Text.length (compactionSummary attached))
           ]
 
-contextJournalReplay :: Assertion
-contextJournalReplay = do
-  captured <- newIORef []
-  (journal, readEntries) <- newMemoryJournal
-  artifacts <- newMemoryArtifactStore
-  base <- testRuntime (capturingContextModel captured) [] Sequential
-  events <-
-    collectEvents
-      base
-        { runtimeJournal = Just journal,
-          runtimeArtifactStore = Just artifacts,
-          runtimeContext = Just contextConfig,
-          runtimeSystemPrompt = "local rules"
-        }
-      (conversationInput (drop 1 contextConversation))
-  entries <- readEntries
-  messages <- readIORef captured
-  stored <- artifactList artifacts
-  report <- replayEntries defaultHooks Nothing entries
-  assertBool "model sees persisted summary" (any isContextSummary messages)
-  assertBool "frontend transcript retains summary" (any summaryMessage (toAguiMessages messages))
-  assertBool "frontend sees the impending compaction" (any statusWillCompact events)
-  assertBool "status explains the exact trigger formula" (any statusExplained events)
-  assertBool "event exposes the compaction boundary" (not (null (contextCompactEvents events)))
-  assertBool "journal stores the normal boundary" (any normalBoundary entries)
-  assertBool "journal stores the effective context window" (any configuredWindow entries)
-  assertBool "full dropped context is stored locally" (any ((== "context_compaction") . artifactMetaToolName) stored)
-  fmap reportDivergence report @?= Right Nothing
- where
-  summaryMessage (Developer message) = developerName message == Just "context-summary"
-  summaryMessage _ = False
-  normalBoundary (Entry _ _ _ (ContextCompactEntry _ before afterTokens budget dropped False summary)) =
-    before > afterTokens && afterTokens <= budget && dropped > 0 && Text.isPrefixOf contextSummaryMarker summary
-  normalBoundary _ = False
-  configuredWindow (Entry _ _ _ (RunBegin _ settings)) = runSettingsContextTokens settings == Just 512
-  configuredWindow _ = False
-  statusWillCompact (Custom "context.status" value) =
-    fromMaybe False (parseMaybe (withObject "context.status" (.: "willCompact")) value)
-  statusWillCompact _ = False
-  statusExplained (Custom "context.status" value) =
-    fromMaybe
-      False
-      ( (\window reserve tools budget -> budget == max 256 (window - reserve - tools))
-          <$> (parseMaybe (withObject "context.status" (.: "windowTokens")) value :: Maybe Int)
-          <*> (parseMaybe (withObject "context.status" (.: "reserveTokens")) value :: Maybe Int)
-          <*> (parseMaybe (withObject "context.status" (.: "toolTokens")) value :: Maybe Int)
-          <*> (parseMaybe (withObject "context.status" (.: "budgetTokens")) value :: Maybe Int)
-      )
-  statusExplained _ = False
-
-capturingContextModel :: IORef [ChatMessage] -> Model
-capturingContextModel captured =
-  ( fakeModel
-      (\request emit -> writeIORef captured (requestMessages request) *> emit (ModelTextDelta "done") $> Stop)
-  )
-    { modelContextTokens = Just 512
-    }
-
 contextOverflowRetry :: Assertion
 contextOverflowRetry = do
   calls <- newIORef (0 :: Int)
   requests <- newIORef []
-  (journal, readEntries) <- newMemoryJournal
   base <- testRuntime (overflowContextModel calls requests) [] Sequential
   events <-
     collectEvents
       base
-        { runtimeJournal = Just journal,
-          runtimeContext = Just contextConfig,
+        { runtimeContext = Just contextConfig,
           runtimeProviderRetries = 3,
           runtimeSystemPrompt = "local rules"
         }
       (conversationInput (take 10 (drop 1 contextConversation)))
   seen <- readIORef requests
-  entries <- readEntries
-  report <- replayEntries defaultHooks Nothing entries
-  verifyOverflow seen events entries report
+  verifyOverflow seen events
 
-verifyOverflow :: [ModelRequest] -> [Event] -> [Entry] -> Either Text ReplayReport -> Assertion
-verifyOverflow [first, second] events entries report =
+verifyOverflow :: [ModelRequest] -> [Event] -> Assertion
+verifyOverflow [first, second] events =
   sequence_
     [ assertBool "first request is above emergency budget" (estimateMessagesTokens (requestMessages first) > 256),
       assertBool "retry request is emergency-sized" (estimateMessagesTokens (requestMessages second) <= 256),
       length (contextCompactEvents events) @?= 1,
       assertBool "compaction is marked emergency" (all emergencyEvent (contextCompactEvents events)),
-      assertBool "overflow bypasses ordinary backoff" (not (any providerRetry events)),
-      length (filter emergencyBoundary entries) @?= 1,
-      fmap reportDivergence report @?= Right Nothing
+      assertBool "overflow bypasses ordinary backoff" (not (any providerRetry events))
     ]
-verifyOverflow seen _ _ _ = assertFailure ("expected two model requests, got " <> show (length seen))
+verifyOverflow seen _ = assertFailure ("expected two model requests, got " <> show (length seen))
 overflowContextModel :: IORef Int -> IORef [ModelRequest] -> Model
 overflowContextModel calls requests =
   Model "fake" "overflow-once" (Just 512) stream (const (object []))
@@ -496,9 +406,6 @@ contextCompactEvents :: [Event] -> [Value]
 contextCompactEvents events = [value | Custom "context.compact" value <- events]
 emergencyEvent :: Value -> Bool
 emergencyEvent = fromMaybe False . parseMaybe (withObject "context.compact" (.: "emergency"))
-emergencyBoundary :: Entry -> Bool
-emergencyBoundary (Entry _ _ _ (ContextCompactEntry _ _ _ _ _ True _)) = True
-emergencyBoundary _ = False
 providerRetry :: Event -> Bool
 providerRetry (Custom "provider.retry" _) = True
 providerRetry _ = False

@@ -203,12 +203,9 @@ e2eSettings port workDir retries =
       settingsMaxTurns = 8,
       settingsToolExecution = Parallel,
       settingsSystemPrompt = "",
-      settingsJournalDir = Nothing,
       settingsArtifactDir = Nothing,
       settingsTranscriptDir = Nothing,
       settingsWorkDir = Just workDir,
-      settingsMemoryDir = Nothing,
-      settingsMemoryModel = Nothing,
       settingsSubAgentDepth = 1,
       settingsSubAgentMaxParallel = 4,
       settingsProviderRetries = retries,
@@ -217,11 +214,6 @@ e2eSettings port workDir retries =
       settingsContextReserveTokens = 8192,
       settingsContextKeepUnits = 12,
       settingsContextSummaryTokens = 2048,
-      settingsDispatchGenerateTimeout = 20,
-      settingsDispatchConfirmTimeout = 600,
-      settingsTelemetryGit = True,
-      settingsTelemetryGitTimeout = 3,
-      settingsTelemetryDiffBytes = 8192,
       settingsProvider = fakeConfig port,
       settingsFallbackProviders = []
     }
@@ -244,7 +236,6 @@ wiredRuntime manager artifacts settings = do
         runtimeNewId =
           atomicModifyIORef' counter (\value -> (value + 1, value + 1))
             <&> \next -> "msg-" <> Text.pack (show next),
-        runtimeJournal = Nothing,
         runtimeArtifactStore = Nothing,
         runtimeBackground = background,
         runtimeDepth = settingsSubAgentDepth settings,
@@ -254,10 +245,6 @@ wiredRuntime manager artifacts settings = do
         runtimeSplice = Nothing,
         runtimeContext = Nothing,
         runtimeRuns = Nothing,
-        runtimeTelemetry = Nothing,
-        runtimeDispatchStore = Nothing,
-        runtimeDispatchConfirmTimeout = 600,
-        runtimeIdentity = defaultIdentity,
         runtimeSteer = const (pure []),
         runtimeFollowUp = const (pure [])
       }
@@ -300,7 +287,7 @@ drive workDir retries script assertions = do
   run provider port = do
     manager <- newManager defaultManagerSettings
     runtime <- wiredRuntime manager Nothing (e2eSettings port workDir retries)
-    events <- runSession postAgent (application Nothing Nothing Nothing Nothing Nothing Nothing (const (pure runtime))) >>= decodeEvents
+    events <- runSession postAgent (application Nothing Nothing Nothing Nothing (const (pure runtime))) >>= decodeEvents
     recorded <- reverse <$> readIORef (providerBodies provider)
     assertions events recorded
 
@@ -518,8 +505,6 @@ fallbackAcrossProviders = withSandbox $ \workDir -> do
  where
   serving runtime backupPort manager =
     application
-      Nothing
-      Nothing
       Nothing
       Nothing
       Nothing

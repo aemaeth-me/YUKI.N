@@ -27,14 +27,12 @@ cwdPath (CwdPath path) = Just path
 
 data ThreadConfig = ThreadConfig
   { configCwd :: CwdSetting,
-    configIncarnationId :: Maybe Text,
     configSystemPrompt :: Maybe Text,
     configProvider :: Maybe Text,
     configModel :: Maybe Text,
     configReasoningEffort :: Maybe ReasoningEffort,
     configFs :: Maybe Bool,
     configShell :: Maybe Bool,
-    configMemory :: Maybe Bool,
     configContextReserveTokens :: Maybe Int,
     configContextKeepUnits :: Maybe Int,
     configContextSummaryTokens :: Maybe Int
@@ -42,20 +40,18 @@ data ThreadConfig = ThreadConfig
   deriving stock (Eq, Show)
 
 emptyThreadConfig :: ThreadConfig
-emptyThreadConfig = ThreadConfig CwdInherit Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+emptyThreadConfig = ThreadConfig CwdInherit Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
 
 instance Semigroup ThreadConfig where
   session <> fallback =
     ThreadConfig
       cwd
-      (pick configIncarnationId)
       (pick configSystemPrompt)
       (pick configProvider)
       (pick configModel)
       (pick configReasoningEffort)
       (pick configFs)
       (pick configShell)
-      (pick configMemory)
       (pick configContextReserveTokens)
       (pick configContextKeepUnits)
       (pick configContextSummaryTokens)
@@ -77,14 +73,12 @@ instance ToJSON ThreadConfig where
     object
       ( cwdPairs (configCwd config)
           <> [ "cwdMode" .= cwdMode cwd,
-               "incarnationId" .= configIncarnationId config,
                "systemPrompt" .= configSystemPrompt config,
                "provider" .= configProvider config,
                "model" .= configModel config,
                "reasoningEffort" .= configReasoningEffort config,
                "fs" .= configFs config,
                "shell" .= configShell config,
-               "memory" .= configMemory config,
                "contextReserveTokens" .= configContextReserveTokens config,
                "contextKeepUnits" .= configContextKeepUnits config,
                "contextSummaryTokens" .= configContextSummaryTokens config
@@ -103,14 +97,12 @@ instance FromJSON ThreadConfig where
   parseJSON = withObject "ThreadConfig" $ \fields ->
     ThreadConfig
       <$> parseCwd fields
-      <*> fields .:? "incarnationId"
       <*> fields .:? "systemPrompt"
       <*> fields .:? "provider"
       <*> fields .:? "model"
       <*> fields .:? "reasoningEffort"
       <*> fields .:? "fs"
       <*> fields .:? "shell"
-      <*> fields .:? "memory"
       <*> fields .:? "contextReserveTokens"
       <*> fields .:? "contextKeepUnits"
       <*> fields .:? "contextSummaryTokens"

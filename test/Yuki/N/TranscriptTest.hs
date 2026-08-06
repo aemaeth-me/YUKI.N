@@ -2,7 +2,6 @@ module Yuki.N.TranscriptTest
   ( transcriptTests,
     aguiRoundTrip,
     storeRoundTrip,
-    wakePacketRoundTrip,
     threadIdPhysicalIsolation,
     transcriptOverHttp,
     rootOnlyWrites,
@@ -20,10 +19,9 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import Yuki.N.AGUI.Types
 import Yuki.N.Agent
-import Yuki.N.Inspect
-import Yuki.N.Memory.Working
 import Yuki.N.Model
 import Yuki.N.Server
+import Yuki.N.Sessions (serviceTranscripts)
 import Yuki.N.TestSupport
 import Yuki.N.ThreadConfig
 import Yuki.N.Transcript
@@ -34,7 +32,6 @@ transcriptTests =
     "transcripts"
     [ testCase "maps chat messages to AG-UI messages and back" aguiRoundTrip,
       testCase "file store filters system, persists under a sanitized name and reloads" storeRoundTrip,
-      testCase "file store preserves a Wake Packet across reload" wakePacketRoundTrip,
       testCase "a.b and a-b remain physically isolated across thread stores" threadIdPhysicalIsolation,
       testCase "serves the transcript as AG-UI messages, 404 when unknown" transcriptOverHttp,
       testCase "root runs persist the transcript, sub runs do not overwrite it" rootOnlyWrites
@@ -65,22 +62,6 @@ storeRoundTrip = withWorkDir $ \dir -> do
   reopened <- newTranscriptStore dir
   transcriptLoad reopened "th/read:me" >>= (@?= Just transcriptHistory)
   transcriptLoad store "absent" >>= (@?= Nothing)
-
-wakePacketRoundTrip :: Assertion
-wakePacketRoundTrip = withWorkDir $ \dir -> do
-  let packet = ChatSystem (wakePacketMarker <> "\nContinue from the retained open loop.")
-      retained = [ChatUser "before sleep", packet, ChatAssistant (AssistantTurn "awake" (Just "continued") Nothing [])]
-  store <- newTranscriptStore dir
-  transcriptSave store "sleeping-task" (ChatSystem "ephemeral instruction" : retained)
-  reopened <- newTranscriptStore dir
-  saved <- transcriptLoad reopened "sleeping-task"
-  saved @?= Just retained
-  fmap toAguiMessages saved
-    @?= Just
-      [ User (UserMessage "tr-0" (UserText "before sleep") Nothing),
-        Developer (DeveloperMessage "tr-1" (wakePacketMarker <> "\nContinue from the retained open loop.") (Just "wake-packet")),
-        Assistant (AssistantMessage "awake" (Just "continued") Nothing [])
-      ]
 
 threadIdPhysicalIsolation :: Assertion
 threadIdPhysicalIsolation = withWorkDir $ \dir -> do
@@ -115,11 +96,11 @@ threadIdPhysicalIsolation = withWorkDir $ \dir -> do
   storedDashConfig @?= dashConfig
 
 transcriptOverHttp :: Assertion
-transcriptOverHttp = do
-  store <- newMemoryTranscriptStore
-  transcriptSave store "thread" (ChatSystem "injected" : transcriptHistory)
+transcriptOverHttp = withWorkDir $ \dir -> do
+  service <- sessionServiceAt dir (const (pure ()))
+  transcriptSave (serviceTranscripts service) "thread" (ChatSystem "injected" : transcriptHistory)
   base <- testRuntime okModel [] Parallel
-  let app = application Nothing (Just (newInspection Nothing Nothing (Just store))) Nothing Nothing Nothing Nothing (const (pure base))
+  let app = application Nothing (Just service) Nothing Nothing (const (pure base))
   found <- runSession (request (httpGet ["threads", "thread", "transcript"])) app
   unknown <- runSession (request (httpGet ["threads", "unknown", "transcript"])) app
   simpleStatus found @?= status200

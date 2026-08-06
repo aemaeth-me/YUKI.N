@@ -26,7 +26,6 @@ import Yuki.N.Agent (AgentHooks (..), defaultHooks)
 import Yuki.N.AtomicFile (atomicEncodeFile)
 import Yuki.N.Context (contextSummaryMarker)
 import Yuki.N.Domain.Thread (sanitizeThreadId)
-import Yuki.N.Memory.Working (wakePacketMarker)
 import Yuki.N.Model (AssistantTurn (..), ChatMessage (..), ModelToolCall (..))
 
 data TranscriptStore = TranscriptStore
@@ -81,8 +80,6 @@ toAguiMessages = concatMap (uncurry render) . zip [0 ..] . withoutSystem
     ChatSystem text
       | contextSummaryMarker `Text.isPrefixOf` text ->
           [AGUI.Developer (AGUI.DeveloperMessage (auto index) text (Just "context-summary"))]
-      | wakePacketMarker `Text.isPrefixOf` text ->
-          [AGUI.Developer (AGUI.DeveloperMessage (auto index) text (Just "wake-packet"))]
       | otherwise -> []
     ChatUser text -> [AGUI.User (AGUI.UserMessage (auto index) (AGUI.UserText text) Nothing)]
     ChatAssistant turn -> assistant index turn
@@ -111,11 +108,7 @@ renderTranscript threadId messages =
 withoutSystem :: [ChatMessage] -> [ChatMessage]
 withoutSystem = filter (not . ephemeralSystem)
  where
-  ephemeralSystem (ChatSystem text) =
-    not
-      ( contextSummaryMarker `Text.isPrefixOf` text
-          || wakePacketMarker `Text.isPrefixOf` text
-      )
+  ephemeralSystem (ChatSystem text) = not (contextSummaryMarker `Text.isPrefixOf` text)
   ephemeralSystem _ = False
 
 transcriptsPath :: FilePath -> FilePath

@@ -308,29 +308,17 @@ loadIndex path =
       <$ TextIO.hPutStrLn stderr ("YUKI.N sessions index: " <> Text.pack failure)
 
 migrateSessionOwners :: SessionStore -> ThreadConfigStore -> IO (Either Text ())
-migrateSessionOwners sessions configs =
+migrateSessionOwners sessions _ =
   listSessions sessions True >>= migrateAll
  where
   migrateAll [] = pure (Right ())
-  migrateAll (meta : rest) =
-    threadConfigRead configs identifier >>= migrateOne
+  migrateAll (meta : rest)
+    | Text.null (Text.strip (sessionIncarnationId meta)) =
+        claimSessionOwner sessions (sessionId meta) "yuki" >>= onClaim
+    | otherwise = migrateAll rest
    where
-    identifier = sessionId meta
-    migrateOne config =
-      claimSessionOwner sessions identifier owner >>= onClaim
-     where
-      owner =
-        bool
-          (sessionIncarnationId meta)
-          (fromMaybe "yuki" (nonBlank =<< configIncarnationId config))
-          (Text.null (Text.strip (sessionIncarnationId meta)))
-      onClaim (Left failure) = pure (Left failure)
-      onClaim (Right claimed) = canonicalize claimed *> migrateAll rest
-      canonicalize claimed =
-        bool
-          (pure ())
-          (threadConfigWrite configs identifier (config {configIncarnationId = Just (sessionIncarnationId claimed)}))
-          (configIncarnationId config /= Just (sessionIncarnationId claimed))
+    onClaim (Left failure) = pure (Left failure)
+    onClaim (Right _) = migrateAll rest
 
 archiveSession :: SessionService -> Text -> IO (Either Text SessionMeta)
 archiveSession service threadId =
@@ -377,9 +365,8 @@ forkSession service source target node title
     threadConfigRead (serviceConfigs service) source >>= writeCopy sourceMeta prefix
   writeCopy sourceMeta prefix config =
     let owner = sessionOwner sourceMeta
-        copied = config {configIncarnationId = Just owner}
      in createSession (serviceSessions service) target title owner (Just source) node
-          >>= either (pure . Left) (complete copied)
+          >>= either (pure . Left) (complete config)
    where
     complete copied created =
       transcriptSave (serviceTranscripts service) target prefix
@@ -400,10 +387,8 @@ importSession service request
   owner =
     fromMaybe
       "yuki"
-      ( nonBlank (sessionIncarnationId sourceMeta)
-          <|> (nonBlank =<< configIncarnationId (bundleConfig bundle))
-      )
-  config = (bundleConfig bundle) {configIncarnationId = Just owner}
+      (nonBlank (sessionIncarnationId sourceMeta))
+  config = bundleConfig bundle
   materialize =
     createSession (serviceSessions service) target title owner (sessionParent sourceMeta) (sessionForkNode sourceMeta)
       >>= either (pure . Left) complete

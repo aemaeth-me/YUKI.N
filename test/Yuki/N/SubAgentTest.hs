@@ -3,7 +3,6 @@ module Yuki.N.SubAgentTest
     capabilityDescription,
     inheritedShell,
     registration,
-    delegation,
     depthExhausted,
   )
 where
@@ -29,11 +28,7 @@ import Yuki.N.AGUI.Event
 import Yuki.N.AGUI.Types
 import Yuki.N.AGUI.Types qualified as AGUI
 import Yuki.N.Agent
-import Yuki.N.Cognition (Cognition (..), attachCognition, ensureIncarnation, newCognition)
-import Yuki.N.Experience (ExperienceEvent (..), ExperienceStore (..))
-import Yuki.N.Journal
 import Yuki.N.Model
-import Yuki.N.Replay
 import Yuki.N.Runs
 import Yuki.N.SubAgent
 import Yuki.N.TestSupport
@@ -43,8 +38,7 @@ subAgentTests :: TestTree
 subAgentTests =
   testGroup
     "sub-agents"
-    [ testCase "delegates to a scoped sub-run and replays cleanly" delegation,
-      testCase "refuses delegation at depth zero" depthExhausted,
+    [ testCase "refuses delegation at depth zero" depthExhausted,
       testCase "advertises the child's exact inherited tools" capabilityDescription,
       testCase "a resolved cwd lets the child execute a local shell request" inheritedShell,
       testCase "resolveRuntime registers sub_agent only above depth zero" registration,
@@ -59,8 +53,7 @@ subAgentTests =
           testCase "spawn enforces the per-run parallel limit" parallelLimit,
           testCase "wait returns finished results and times out blocked workers" waitToolTest,
           testCase "send, status, list and cancel are scoped to spawned workers" scopedTools,
-          testCase "cancelling a run cascades to its workers" cascadeCancel,
-          testCase "worker experience events carry the spawn delegation id" delegationIdTest
+          testCase "cancelling a run cascades to its workers" cascadeCancel
         ]
     ]
 
@@ -125,22 +118,9 @@ registration = do
   assertBool "async family registers alongside" (Map.member "sub_agent_spawn" (runtimeTools one))
   runtimeDepth one @?= 1
 
-delegation :: Assertion
-delegation = do
-  (journal, readEntries) <- newMemoryJournal
-  runtime <- delegateRuntime journal 1
-  events <- collectEvents runtime (sampleInput [])
-  recorded <- readEntries
-  report <- replayEntries defaultHooks Nothing recorded
-  [content | ToolCallResult _ "call-delegate" content <- events] @?= ["sub result"]
-  assertBool "sub-run events are scoped" (any isSubEvent events)
-  assertBool "journal nests the sub-run scope" (any ((== 2) . length . entryScope) recorded)
-  fmap reportDivergence report @?= Right Nothing
-
 depthExhausted :: Assertion
 depthExhausted = do
-  (journal, _) <- newMemoryJournal
-  runtime <- delegateRuntime journal 0
+  runtime <- delegateRuntime 0
   events <- collectEvents runtime (sampleInput [])
   [content | ToolCallResult _ "call-delegate" content <- events] @?= ["delegation depth exhausted"]
   assertBool "no sub-run events" (not (any isSubEvent events))
@@ -160,11 +140,11 @@ subShellModel =
       _ ->
         emit (ModelToolCallDelta 0 (Just "call-delegate") (Just "sub_agent") "{\"prompt\":\"run local shell\"}")
           $> ToolUse
-delegateRuntime :: Journal -> Int -> IO Runtime
-delegateRuntime journal depth =
+delegateRuntime :: Int -> IO Runtime
+delegateRuntime depth =
   testRuntime subAgentModel [] Parallel >>= \base ->
     let tools = Map.fromList [("delegate", subAgentTool "delegate" "run a sub-agent" runtime)]
-        runtime = base {runtimeJournal = Just journal, runtimeTools = tools, runtimeDepth = depth}
+        runtime = base {runtimeTools = tools, runtimeDepth = depth}
      in pure runtime
 subAgentModel :: Model
 subAgentModel =
@@ -279,7 +259,7 @@ parallelLimit = do
   gate <- newEmptyMVar
   base <- testRuntime (fakeModel (\_ _ -> takeMVar gate $> Stop)) [] Parallel
   let runtime = registerSubAgent (base {runtimeRuns = Just runs, runtimeSubAgentMaxParallel = 2})
-      context = ToolContext "run" "thread" "call" (const (pure ())) Nothing ""
+      context = ToolContext "run" "thread" "call" (const (pure ()))
   spawnBackend <- requireTool runtime "sub_agent_spawn"
   withRunRegistration runs "run" $ do
     first <- runBackendTool spawnBackend context (spawnArgs "task one")
@@ -309,7 +289,7 @@ waitToolTest = do
   gateB <- newEmptyMVar
   base <- testRuntime (waitModel gateA gateB) [] Parallel
   let runtime = registerSubAgent (base {runtimeRuns = Just runs})
-      context = ToolContext "run" "thread" "call" (const (pure ())) Nothing ""
+      context = ToolContext "run" "thread" "call" (const (pure ()))
   spawnBackend <- requireTool runtime "sub_agent_spawn"
   waitBackend <- requireTool runtime "sub_agent_wait"
   withRunRegistration runs "run" $ do
@@ -342,8 +322,8 @@ scopedTools = do
   gate <- newEmptyMVar
   base <- testRuntime (fakeModel (\_ _ -> takeMVar gate $> Stop)) [] Parallel
   let runtime = registerSubAgent (base {runtimeRuns = Just runs})
-      parentContext = ToolContext "run" "thread" "call" (const (pure ())) Nothing ""
-      otherContext = ToolContext "other" "thread" "call" (const (pure ())) Nothing ""
+      parentContext = ToolContext "run" "thread" "call" (const (pure ()))
+      otherContext = ToolContext "other" "thread" "call" (const (pure ()))
   spawnBackend <- requireTool runtime "sub_agent_spawn"
   sendBackend <- requireTool runtime "sub_agent_send"
   statusBackend <- requireTool runtime "sub_agent_status"
@@ -392,7 +372,7 @@ cascadeCancel = do
   base <- testRuntime (cascadeParentModel turns parentGate workerGate) [] Parallel
   let cascadeHooks =
         defaultHooks
-          { afterRunOutcome = \input _ _ ->
+          { afterRun = \input _ ->
               case AGUI.runParentId input of
                 Just _ -> takeMVar childHookGate
                 Nothing -> pure ()
@@ -413,37 +393,6 @@ cascadeCancel = do
   assertBool "cascaded workers show cancelled" (all ((== Cancelled) . completionOutcome) completions)
   announced <- readIORef events
   assertBool "parent announced its cancellation" (any (\case Custom "run.cancelled" _ -> True; _ -> False) announced)
-
-delegationIdTest :: Assertion
-delegationIdTest = withWorkDir $ \dir -> do
-  runs <- newRunRegistry
-  parentGate <- newEmptyMVar
-  workerGate <- newEmptyMVar
-  captured <- newIORef []
-  events <- newIORef []
-  done <- newEmptyMVar
-  cognition <- newCognition dir [asyncWorkerModel parentGate workerGate captured] Nothing >>= expectTextRight
-  incarnation <- ensureIncarnation cognition "yuki"
-  base <- testRuntime (asyncWorkerModel parentGate workerGate captured) [] Parallel
-  cognitive <- attachCognition cognition incarnation (base {runtimeRuns = Just runs})
-  let runtime = registerSubAgent cognitive
-  _ <- forkIO (runAgent runtime (sampleInput []) (\event -> modifyIORef' events (event :)) *> putMVar done ())
-  spawnedOk <- waitUntil (not . null <$> childrenOf runs "run")
-  unless spawnedOk (assertFailure "worker never spawned")
-  kids <- childrenOf runs "run"
-  workerId <- maybe (assertFailure "worker missing from registry") (pure . runInfoId) (listToMaybe kids)
-  putMVar workerGate ()
-  completedOk <- waitUntil (isJust <$> completionFor runs workerId)
-  unless completedOk (assertFailure "worker never completed")
-  putMVar parentGate ()
-  _ <- timeout 10000000 (takeMVar done) >>= maybe (assertFailure "root run did not finish") pure
-  stream <- experienceEvents (cognitionExperiences cognition) "yuki"
-  let workerEvents = [event | event <- stream, experienceRunId event == Just workerId]
-      rootEvents = [event | event <- stream, experienceRunId event == Just "run"]
-  assertBool "worker wrote experience events" (not (null workerEvents))
-  assertBool "root wrote experience events" (not (null rootEvents))
-  fmap experienceDelegationId workerEvents @?= replicate (length workerEvents) (Just "call-spawn")
-  fmap experienceDelegationId rootEvents @?= replicate (length rootEvents) Nothing
 
 asyncWorkerModel :: MVar () -> MVar () -> IORef [ChatMessage] -> Model
 asyncWorkerModel parentGate workerGate captured =

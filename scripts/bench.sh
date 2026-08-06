@@ -35,7 +35,6 @@ echo "== bench: $TASK" >&2
 # --- YUKI.N 侧 ---
 cd "$REPO_ROOT"
 YUKI_PORT="$PORT" \
-YUKI_JOURNAL_DIR="$WORK/journal" \
 YUKI_ARTIFACT_DIR="$WORK/artifacts" \
 YUKI_WORK_DIR="$REPO_ROOT" \
   cabal run yuki-n > "$WORK/server.log" 2>&1 &

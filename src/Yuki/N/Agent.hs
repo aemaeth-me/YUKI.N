@@ -1,7 +1,6 @@
 module Yuki.N.Agent
   ( AgentHooks (..),
     BackendTool (..),
-    RunIdentity (..),
     RunOutcome (..),
     artifactReadTool,
     ResponseState,
@@ -12,7 +11,6 @@ module Yuki.N.Agent
     closeModelTurn,
     compactHistory,
     defaultHooks,
-    defaultIdentity,
     emptyResponse,
     failAgent,
     forcedCompaction,
@@ -77,8 +75,6 @@ import Yuki.N.Artifact
   )
 import Yuki.N.Background (BackgroundRegistry)
 import Yuki.N.Context
-import Yuki.N.Dispatch.Types (DispatchStore)
-import Yuki.N.Journal
 import Yuki.N.Model
 import Yuki.N.Runs
   ( RunCancelled (..),
@@ -94,17 +90,6 @@ import Yuki.N.Runs
     writeCompletion,
   )
 import Yuki.N.Runs qualified as Runs
-import Yuki.N.Telemetry (DeliveryKind (DeliveryArtifact), DeliveryRecord (..), Telemetry, telemetryLedger, telemetryRunStarting, telemetryRunStopping)
-import Yuki.N.Telemetry.Ledger (recordDelivery)
-
-data RunIdentity = RunIdentity
-  { identityKind :: RunKind,
-    identityIncarnation :: Text
-  }
-  deriving stock (Eq, Show)
-
-defaultIdentity :: RunIdentity
-defaultIdentity = RunIdentity RunTask ""
 
 data Runtime = Runtime
   { runtimeModel :: Model,
@@ -114,7 +99,6 @@ data Runtime = Runtime
     runtimeSystemPrompt :: Text,
     runtimeHooks :: AgentHooks,
     runtimeNewId :: IO Text,
-    runtimeJournal :: Maybe Journal,
     runtimeArtifactStore :: Maybe ArtifactStore,
     runtimeBackground :: BackgroundRegistry,
     runtimeDepth :: Int,
@@ -124,10 +108,6 @@ data Runtime = Runtime
     runtimeSplice :: Maybe SpliceConfig,
     runtimeContext :: Maybe ContextConfig,
     runtimeRuns :: Maybe RunRegistry,
-    runtimeTelemetry :: Maybe Telemetry,
-    runtimeDispatchStore :: Maybe DispatchStore,
-    runtimeDispatchConfirmTimeout :: Int,
-    runtimeIdentity :: RunIdentity,
     runtimeSteer :: Int -> IO [ChatMessage],
     runtimeFollowUp :: Int -> IO [ChatMessage]
   }
@@ -141,22 +121,11 @@ data ToolContext = ToolContext
   { toolContextRunId :: Text,
     toolContextThreadId :: Text,
     toolContextCallId :: Text,
-    toolContextEmit :: Event -> IO (),
-    toolContextJournal :: Maybe Journal,
-    toolContextIncarnation :: Text
+    toolContextEmit :: Event -> IO ()
   }
 
-data AgentHooks = AgentHooks
-  { transformContext :: AGUI.RunAgentInput -> [ChatMessage] -> IO [ChatMessage],
-    observeEvent :: AGUI.RunAgentInput -> Event -> IO (),
-    shouldSleep :: AGUI.RunAgentInput -> IO Bool,
-    afterCompaction :: AGUI.RunAgentInput -> Int -> Bool -> Bool -> [ChatMessage] -> Compaction -> IO Compaction,
-    getSteeringMessages :: AGUI.RunAgentInput -> IO [ChatMessage],
-    getFollowUpMessages :: AGUI.RunAgentInput -> IO [ChatMessage],
-    beforeToolCall :: ModelToolCall -> IO (Either Text ()),
-    afterToolCall :: ModelToolCall -> ToolOutcome -> IO ToolOutcome,
-    afterRunOutcome :: AGUI.RunAgentInput -> RunOutcome -> [ChatMessage] -> IO (),
-    afterRun :: AGUI.RunAgentInput -> [ChatMessage] -> IO ()
+newtype AgentHooks = AgentHooks
+  { afterRun :: AGUI.RunAgentInput -> [ChatMessage] -> IO ()
   }
 
 data RunOutcome
@@ -166,37 +135,12 @@ data RunOutcome
   deriving stock (Eq, Show)
 
 defaultHooks :: AgentHooks
-defaultHooks =
-  AgentHooks
-    { transformContext = const pure,
-      observeEvent = \_ _ -> pure (),
-      shouldSleep = const (pure False),
-      afterCompaction = \_ _ _ _ _ -> pure,
-      getSteeringMessages = const (pure []),
-      getFollowUpMessages = const (pure []),
-      beforeToolCall = const (pure (Right ())),
-      afterToolCall = const pure,
-      afterRunOutcome = \_ _ _ -> pure (),
-      afterRun = \_ _ -> pure ()
-    }
+defaultHooks = AgentHooks {afterRun = \_ _ -> pure ()}
 
 instance Semigroup AgentHooks where
   left <> right =
     AgentHooks
-      { transformContext = \input -> transformContext left input >=> transformContext right input,
-        observeEvent = \input event -> observeEvent left input event *> observeEvent right input event,
-        shouldSleep = \input -> liftA2 (||) (shouldSleep left input) (shouldSleep right input),
-        afterCompaction = \input step emergency forced messages ->
-          afterCompaction left input step emergency forced messages
-            >=> afterCompaction right input step emergency forced messages,
-        getSteeringMessages = \input -> liftA2 (<>) (getSteeringMessages left input) (getSteeringMessages right input),
-        getFollowUpMessages = \input -> liftA2 (<>) (getFollowUpMessages left input) (getFollowUpMessages right input),
-        beforeToolCall = \call ->
-          beforeToolCall left call >>= either (pure . Left) (const (beforeToolCall right call)),
-        afterToolCall = \call -> afterToolCall left call >=> afterToolCall right call,
-        afterRunOutcome = \input outcome messages ->
-          afterRunOutcome left input outcome messages *> afterRunOutcome right input outcome messages,
-        afterRun = \input messages -> afterRun left input messages *> afterRun right input messages
+      { afterRun = \input messages -> afterRun left input messages *> afterRun right input messages
       }
 
 instance Monoid AgentHooks where
@@ -238,58 +182,47 @@ instance FromJSON ArtifactRead where
 
 runAgent :: Runtime -> AGUI.RunAgentInput -> (Event -> IO ()) -> IO ()
 runAgent runtime input emit =
-  newIORef [] >>= registered . tracked . settle
+  newIORef [] >>= registered . settle
  where
   runId = AGUI.runId input
-  descriptor = descriptorOf runtime input
+  descriptor = descriptorOf input
   registered = maybe id (\registry -> withRunRegistrationFor registry runId descriptor) (runtimeRuns runtime)
-  tracked =
-    maybe
-      id
-      (\telemetry -> bracket_ (telemetryRunStarting telemetry runId descriptor (runtimeMaxTurns runtime) (modelName (runtimeModel runtime))) (telemetryRunStopping telemetry runId))
-      (runtimeTelemetry runtime)
-  journal = subJournal runId <$> runtimeJournal runtime
   runtime' =
     runtime
-      { runtimeJournal = journal,
-        runtimeNewId = maybe (runtimeNewId runtime) (`journalNewId` runtimeNewId runtime) journal,
-        runtimeSteer = maybe (runtimeSteer runtime) (\registry _ -> drainSteering registry runId) (runtimeRuns runtime),
+      { runtimeSteer = maybe (runtimeSteer runtime) (\registry _ -> drainSteering registry runId) (runtimeRuns runtime),
         runtimeFollowUp = maybe (runtimeFollowUp runtime) (\registry _ -> drainFollowUps registry runId) (runtimeRuns runtime)
       }
-  emit' event = recordMaybe journal (AgentEventEntry event) *> observeEvent hooks input event *> deliver event
+  emit' = deliver
+  hooks = runtimeHooks runtime
   deliver event = try @SomeException (emit event) >>= either relay pure
   relay exception
     | isJust (fromException exception :: Maybe RunCancelled) = throwIO exception
     | isJust (fromException exception :: Maybe SomeAsyncException) = throwIO exception
     | otherwise = throwIO (DeliveryFailure exception)
-  hooks = runtimeHooks runtime
   settle checkpoint =
     newIORef False >>= settled
    where
     settled accounted =
-      recordMaybe journal (RunBegin input (runSettingsOf runtime))
-        *> emit' (RunStarted (AGUI.runThreadId input) runId (AGUI.runParentId input))
+      emit' (RunStarted (AGUI.runThreadId input) runId (AGUI.runParentId input))
         *> ( (terminal checkpoint >>= conclude accounted)
                `onException` ( readIORef checkpoint
                                  >>= void
-                                   . runAfter
-                                     accounted
-                                     (RunFailed "UNHANDLED_ERROR" "run aborted by an unhandled exception")
+                                   . runAfter accounted
                              )
            )
     conclude accounted = \case
       Completed messages ->
         cascadeChildren
-          *> runAfter accounted RunSucceeded messages
+          *> runAfter accounted messages
           >>= closeCompleted messages
       Failed message code ->
         cascadeChildren
-          *> bestEffortAfter accounted (RunFailed code message) (readIORef checkpoint)
+          *> bestEffortAfter accounted (readIORef checkpoint)
           *> readIORef checkpoint
           >>= closeFailed code message
       Cancelled ->
         cascadeChildren
-          *> bestEffortAfter accounted RunWasCancelled (readIORef checkpoint)
+          *> bestEffortAfter accounted (readIORef checkpoint)
           *> readIORef checkpoint
           >>= closeCancelled
     closeCompleted messages (Left persistenceError) =
@@ -316,14 +249,14 @@ runAgent runtime input emit =
         (pure ())
         (\registry -> writeCompletion registry runId (AGUI.runParentId input) outcome result)
         (runtimeRuns runtime)
-    runAfter accounted outcome messages =
+    runAfter accounted messages =
       trySync
         ( once
             accounted
-            (afterRunOutcome hooks input outcome messages *> afterRun hooks input messages)
+            (afterRun hooks input messages)
         )
-    bestEffortAfter accounted outcome load =
-      load >>= runAfter accounted outcome >>= reportPersistence
+    bestEffortAfter accounted load =
+      load >>= runAfter accounted >>= reportPersistence
     reportPersistence (Left persistenceError) =
       emit'
         ( Custom
@@ -394,16 +327,14 @@ workerNotice text =
           then Nothing
           else Just (worker, outcome, Text.drop 2 summary)
 
-descriptorOf :: Runtime -> AGUI.RunAgentInput -> RunDescriptor
-descriptorOf runtime input =
+descriptorOf :: AGUI.RunAgentInput -> RunDescriptor
+descriptorOf input =
   RunDescriptor
     (AGUI.runThreadId input)
-    (identityIncarnation identity)
+    ""
     (AGUI.runParentId input)
-    (maybe (identityKind identity) (const RunWorker) (AGUI.runParentId input))
+    (maybe RunTask (const RunWorker) (AGUI.runParentId input))
     (objectiveOf input)
- where
-  identity = runtimeIdentity runtime
 
 objectiveOf :: AGUI.RunAgentInput -> Maybe Text
 objectiveOf input =
@@ -419,18 +350,6 @@ instance Exception ContextOverflow
 
 once :: IORef Bool -> IO () -> IO ()
 once ref action = atomicModifyIORef' ref (True,) >>= bool action (pure ())
-
-runSettingsOf :: Runtime -> RunSettings
-runSettingsOf runtime =
-  RunSettings
-    { runSettingsMaxTurns = runtimeMaxTurns runtime,
-      runSettingsToolExecution = runtimeToolExecution runtime,
-      runSettingsSystemPrompt = runtimeSystemPrompt runtime,
-      runSettingsDepth = runtimeDepth runtime,
-      runSettingsSplice = runtimeSplice runtime,
-      runSettingsContext = runtimeContext runtime,
-      runSettingsContextTokens = runtimeContextWindow runtime
-    }
 
 newId :: IO Text
 newId = liftA2 renderId timestamp (hashUnique <$> newUnique)
@@ -459,11 +378,10 @@ runCore :: Runtime -> AGUI.RunAgentInput -> (Event -> IO ()) -> IORef [ChatMessa
 runCore runtime input emit checkpoint =
   mkContext >>= start
  where
-  hooks = runtimeHooks runtime
   tools = availableTools runtime input
   clientTools = Set.fromList (AGUI.toolName <$> AGUI.runTools input)
   mkContext =
-    RunContext (AGUI.runId input) (AGUI.runThreadId input) (runtimeJournal runtime)
+    RunContext (AGUI.runId input) (AGUI.runThreadId input)
       <$> newIORef Map.empty
       <*> newIORef Map.empty
 
@@ -488,14 +406,10 @@ runCore runtime input emit checkpoint =
     afterSplice step (spliced, events) =
       traverse_ emit events
         *> emitContextStatus runtime tools False spliced emit
-        *> compactContext runtime input runContext step tools False emit spliced
+        *> compactContext runtime step tools False emit spliced
         >>= afterCompact step
     afterCompact step compacted =
-      writeIORef checkpoint compacted
-        *> transformContext hooks input compacted
-        >>= afterTransform step compacted
-    afterTransform step compacted transformed =
-      traverse_ emit (injected compacted transformed) *> modelTurn step compacted transformed
+      writeIORef checkpoint compacted *> modelTurn step compacted compacted
 
     modelTurn turn messages transformed =
       emit (StepStarted "model")
@@ -506,14 +420,11 @@ runCore runtime input emit checkpoint =
         ((,) base <$> streamTurn runtime context tools emit) `catch` recover base
       recover base (ContextOverflow cause) =
         emitContextStatus runtime tools True base emit
-          *> compactContext runtime input runContext turn tools True emit base
-          >>= recompact
+          *> compactContext runtime turn tools True emit base
+          >>= restream
        where
-        recompact compacted =
-          transformContext hooks input compacted >>= restream compacted
-        restream compacted transformed' =
-          traverse_ emit (injected compacted transformed')
-            *> ((,) compacted <$> (streamTurn runtime transformed' tools emit `catch` unwrap))
+        restream compacted =
+          (,) compacted <$> (streamTurn runtime compacted tools emit `catch` unwrap)
         unwrap (ContextOverflow _) = throwIO cause
 
     finishTurn turn messages (finishReason, assistant) =
@@ -540,21 +451,20 @@ runCore runtime input emit checkpoint =
       final = messages <> results
 
     continueAfterAnswer turn messages =
-      liftA2 (<>) (runtimeSteer runtime next) (getSteeringMessages hooks input) >>= continueSteering
+      runtimeSteer runtime next >>= continueSteering
      where
       next = turn + 1
       continueSteering [] =
-        liftA2 (<>) (runtimeFollowUp runtime next) (getFollowUpMessages hooks input) >>= continueFollowUp
+        runtimeFollowUp runtime next >>= continueFollowUp
       continueSteering extra = appendSteering next messages extra >>= loop runContext next
       continueFollowUp [] = pure messages
       continueFollowUp extra = appendFollowUp next messages extra >>= loop runContext next
 
-    appendSteering = appendQueued "steering.inject" SteeringEntry
-    appendFollowUp = appendQueued "followup.inject" FollowUpEntry
-    appendQueued _ _ _ base [] = pure base
-    appendQueued kind entry step base extra =
-      recordMaybe (runtimeJournal runtime) (entry step extra)
-        *> emit (Custom kind (object ["step" .= step, "count" .= length extra]))
+    appendSteering = appendQueued "steering.inject"
+    appendFollowUp = appendQueued "followup.inject"
+    appendQueued _ _ base [] = pure base
+    appendQueued kind step base extra =
+      emit (Custom kind (object ["step" .= step, "count" .= length extra]))
         *> traverse_ (emit . workerNoticeEvent) (workerNotices kind)
         $> base <> extra
      where
@@ -570,13 +480,6 @@ runCore runtime input emit checkpoint =
                 "summary" .= summary
               ]
           )
-
-injected :: [ChatMessage] -> [ChatMessage] -> [Event]
-injected before after =
-  [ Custom "context.inject" (object ["content" .= text])
-  | ChatSystem text <- after,
-    ChatSystem text `notElem` before
-  ]
 
 historyChars :: [ChatMessage] -> Int
 historyChars = sum . fmap messageChars
@@ -628,65 +531,27 @@ spliceContext runtime runContext messages =
     replaced = Map.fromList (fmap fst done)
     saved = sum (fmap snd done)
 
-compactContext :: Runtime -> AGUI.RunAgentInput -> RunContext -> Int -> [AGUI.ToolSpec] -> Bool -> (Event -> IO ()) -> [ChatMessage] -> IO [ChatMessage]
-compactContext runtime input runContext step tools emergency emit messages =
-  shouldSleep hooks input >>= decide
+compactContext :: Runtime -> Int -> [AGUI.ToolSpec] -> Bool -> (Event -> IO ()) -> [ChatMessage] -> IO [ChatMessage]
+compactContext runtime step tools emergency emit messages =
+  maybe (pure messages) materialize (planCompaction runtime emergency tools messages)
  where
-  hooks = runtimeHooks runtime
-  decide forced =
-    maybe (pure messages) (materialize forced) (planned forced)
-  planned forced =
-    planCompaction runtime emergency tools messages
-      <|> if forced then forcedCompaction runtime tools messages else Nothing
-  materialize forced =
-    materializeCompaction runtime
-      >=> afterCompaction hooks input step emergency forced messages
-      >=> record forced
-  record forced compaction =
-    recordMaybe
-      (runContextJournal runContext)
-      ( ContextCompactEntry
-          step
-          (compactionBeforeTokens compaction)
-          (compactionAfterTokens compaction)
-          (compactionBudgetTokens compaction)
-          (length (compactionDropped compaction))
-          emergency
-          (compactionSummary compaction)
+  materialize =
+    materializeCompaction runtime >=> record
+  record compaction =
+    emit
+      ( Custom
+          "context.compact"
+          ( object
+              [ "step" .= step,
+                "beforeTokens" .= compactionBeforeTokens compaction,
+                "afterTokens" .= compactionAfterTokens compaction,
+                "budgetTokens" .= compactionBudgetTokens compaction,
+                "droppedMessages" .= length (compactionDropped compaction),
+                "keptUnits" .= compactionKeptUnits compaction,
+                "emergency" .= emergency
+              ]
+          )
       )
-      *> emit
-        ( Custom
-            "context.compact"
-            ( object
-                [ "step" .= step,
-                  "beforeTokens" .= compactionBeforeTokens compaction,
-                  "afterTokens" .= compactionAfterTokens compaction,
-                  "budgetTokens" .= compactionBudgetTokens compaction,
-                  "droppedMessages" .= length (compactionDropped compaction),
-                  "keptUnits" .= compactionKeptUnits compaction,
-                  "emergency" .= emergency,
-                  "sleep" .= isWakePacket compaction,
-                  "selfRequested" .= forced
-                ]
-            )
-        )
-      *> traverse_
-        ( const
-            ( emit
-                ( Custom
-                    "context.sleep"
-                    ( object
-                        [ "step" .= step,
-                          "emergency" .= emergency,
-                          "selfRequested" .= forced,
-                          "beforeTokens" .= compactionBeforeTokens compaction,
-                          "afterTokens" .= compactionAfterTokens compaction
-                        ]
-                    )
-                )
-            )
-        )
-        [() | isWakePacket compaction]
       $> compactionMessages compaction
 
 forcedCompaction :: Runtime -> [AGUI.ToolSpec] -> [ChatMessage] -> Maybe Compaction
@@ -711,16 +576,13 @@ syntheticCompaction budget messages =
       compactionBudgetTokens = budget,
       compactionKeptUnits = length body,
       compactionSummary = contextSummaryMarker,
-      compactionPayload = "self-requested sleep without token-pressure compaction"
+      compactionPayload = "synthetic compaction without token pressure"
     }
  where
   before = estimateMessagesTokens messages
   (leading, body) = span systemMessage messages
   systemMessage ChatSystem {} = True
   systemMessage _ = False
-
-isWakePacket :: Compaction -> Bool
-isWakePacket = Text.isPrefixOf "[wake packet" . compactionSummary
 
 compactHistory :: Runtime -> Bool -> [ChatMessage] -> IO (Maybe Compaction)
 compactHistory runtime emergency messages =
@@ -894,17 +756,14 @@ streamTurn runtime messages tools emit =
   liftA2 (,) (runtimeNewId runtime) (runtimeNewId runtime) >>= begin
  where
   request = ModelRequest {requestMessages = messages, requestTools = tools}
-  journal = runtimeJournal runtime
   maxAttempts = max 1 (runtimeProviderRetries runtime)
   models = runtimeModel runtime : runtimeFallbacks runtime
   begin (messageId, reasoningId) =
-    recordMaybe journal (ModelRequestEntry request)
-      *> newIORef emptyResponse
+    newIORef emptyResponse
       >>= chain messageId reasoningId models
   chain _ _ [] _ = throwIO (ProviderFailure "provider chain exhausted")
   chain messageId reasoningId (model : rest) stateRef =
-    recordMaybe journal (ApiRequestEntry (modelRender model request))
-      *> attempt messageId reasoningId model rest 1 stateRef
+    attempt messageId reasoningId model rest 1 stateRef
   attempt messageId reasoningId model rest trial stateRef =
     try (streamModel model request (consume messageId reasoningId stateRef))
       >>= either (retry messageId reasoningId model rest trial stateRef) (finish messageId reasoningId stateRef)
@@ -950,15 +809,13 @@ streamTurn runtime messages tools emit =
           )
       )
   consume messageId reasoningId stateRef event =
-    recordMaybe journal (ModelEventEntry event)
-      *> (readIORef stateRef >>= accept)
+    readIORef stateRef >>= accept
    where
     accept state =
       either throwIO commit (stepModelEvent messageId reasoningId state event)
     commit (state', events) = writeIORef stateRef state' *> traverse_ emit events
   finish messageId reasoningId stateRef reason =
-    recordMaybe journal (ModelFinishEntry reason)
-      *> (readIORef stateRef >>= either throwIO commit . closeModelTurn messageId reasoningId)
+    readIORef stateRef >>= either throwIO commit . closeModelTurn messageId reasoningId
    where
     commit (events, turn) = traverse_ emit events $> (reason, turn)
 
@@ -1101,7 +958,6 @@ data ResolvedTool
 data RunContext = RunContext
   { runContextRunId :: Text,
     runContextThreadId :: Text,
-    runContextJournal :: Maybe Journal,
     runContextSeen :: IORef (Map Text (Text, Text)),
     runContextNames :: IORef (Map Text Text)
   }
@@ -1116,19 +972,11 @@ executeTools ::
 executeTools runtime runContext clientTools calls emit =
   traverse prepare calls >>= resolveAll (runtimeToolExecution runtime) >>= conclude
  where
-  hooks = runtimeHooks runtime
-
   prepare call =
     either
       (pure . Resolve call . failure)
-      (authorize call)
+      (pure . dispatch call)
       (decodeArguments call)
-
-  authorize call arguments =
-    beforeToolCall hooks call
-      >>= either
-        (pure . Resolve call . failure)
-        (const (pure (dispatch call arguments)))
 
   dispatch call arguments =
     maybe
@@ -1141,9 +989,7 @@ executeTools runtime runContext clientTools calls emit =
       { toolContextRunId = runContextRunId runContext,
         toolContextThreadId = runContextThreadId runContext,
         toolContextCallId = modelToolCallId call,
-        toolContextEmit = emit,
-        toolContextJournal = runContextJournal runContext,
-        toolContextIncarnation = identityIncarnation (runtimeIdentity runtime)
+        toolContextEmit = emit
       }
 
   missing call
@@ -1155,7 +1001,7 @@ executeTools runtime runContext clientTools calls emit =
 
   resolve = \case
     Execute call tool arguments toolContext ->
-      Resolved call <$> (safely (runBackendTool tool toolContext arguments) >>= afterToolCall hooks call)
+      Resolved call <$> safely (runBackendTool tool toolContext arguments)
     Resolve call outcome -> pure (Resolved call outcome)
     Defer _ -> pure Deferred
 
@@ -1170,9 +1016,6 @@ executeTools runtime runContext clientTools calls emit =
     announce content =
       Just (ChatToolResult (modelToolCallId call) content)
         <$ modifyIORef' (runContextNames runContext) (Map.insert (modelToolCallId call) (modelToolName call))
-        <* recordMaybe
-          (runContextJournal runContext)
-          (ToolCallEntry (modelToolCallId call) (modelToolName call) (modelToolArguments call) outcome)
         <* emit (ToolCallResult messageId (modelToolCallId call) (toolOutcomeContent outcome))
 
   present name content =
@@ -1192,30 +1035,7 @@ executeTools runtime runContext clientTools calls emit =
       retain =
         artifactSave store name content >>= storeResult
       storeResult identifier =
-        recordSpill identifier
-          *> (content <$ modifyIORef' (runContextSeen runContext) (Map.insert key (identifier, content)))
-      recordSpill identifier =
-        maybe (pure ()) (spillThrough identifier) (runtimeTelemetry runtime)
-      spillThrough identifier telemetry =
-        readIORef (telemetryLedger telemetry) >>= recordLedger
-       where
-        recordLedger Nothing = pure ()
-        recordLedger (Just ledger) = recordDelivery ledger telemetry (delivery identifier)
-      delivery identifier =
-        DeliveryRecord
-          { deliveryId = "",
-            deliveryRunId = runContextRunId runContext,
-            deliveryThreadId = runContextThreadId runContext,
-            deliveryIncarnation = identityIncarnation identity,
-            deliveryRunKind = identityKind identity,
-            deliveryKind = DeliveryArtifact,
-            deliveryTitle = name,
-            deliveryRef = identifier,
-            deliveryBytes = Just (Text.length content),
-            deliveryAt = 0
-          }
-       where
-        identity = runtimeIdentity runtime
+        content <$ modifyIORef' (runContextSeen runContext) (Map.insert key (identifier, content))
 
   conclude resolved =
     traverse emitResult resolved <&> summarize

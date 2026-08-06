@@ -5,7 +5,6 @@ module Yuki.N.ArtifactTest
     artifactPreview,
     guidedArtifactOnce,
     readsBack,
-    replaysClean,
   )
 where
 
@@ -21,9 +20,7 @@ import Test.Tasty.HUnit
 import Yuki.N.AGUI.Event
 import Yuki.N.Agent
 import Yuki.N.Artifact
-import Yuki.N.Journal
 import Yuki.N.Model
-import Yuki.N.Replay
 import Yuki.N.TestSupport
 
 artifactTests :: TestTree
@@ -34,8 +31,7 @@ artifactTests =
       testCase "keeps small duplicate results inline" keepsSmall,
       testCase "lists a human preview and accepts metadata without a title" artifactPreview,
       testCase "does not store a tool-produced artifact guidance twice" guidedArtifactOnce,
-      testCase "reads back a stored artifact in full" readsBack,
-      testCase "replays a journaled run with duplicates without divergence" replaysClean
+      testCase "reads back a stored artifact in full" readsBack
     ]
 withArtifactStore :: (ArtifactStore -> Assertion) -> Assertion
 withArtifactStore action = do
@@ -132,15 +128,3 @@ readBackModel identifier captured =
       _ ->
         emit (ModelToolCallDelta 0 (Just "call-read") (Just artifactReadToolName) ("{\"id\":\"" <> identifier <> "\"}"))
           $> ToolUse
-
-replaysClean :: Assertion
-replaysClean = withArtifactStore $ \store -> do
-  (journal, readEntries) <- newMemoryJournal
-  turns <- newIORef (0 :: Int)
-  captured <- newIORef []
-  base <- testRuntime (dupCalls "big" turns captured) [staticTool "big" bigContent] Sequential
-  events <- collectEvents base {runtimeJournal = Just journal, runtimeArtifactStore = Just store} (sampleInput [])
-  recorded <- readEntries
-  report <- replayEntries defaultHooks Nothing recorded
-  fmap reportDivergence report @?= Right Nothing
-  fmap reportEvents report @?= Right (length events)

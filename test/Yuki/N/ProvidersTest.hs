@@ -179,7 +179,7 @@ providersEndpoint = do
               ]
           ]
       view = ConfigView (renderGlobalConfig testSettings (globalThreadConfig testSettings)) store (globalThreadConfig testSettings) (pure (Right [])) staticListing
-      app = application Nothing Nothing (Just view) Nothing Nothing Nothing (const (pure base))
+      app = application Nothing Nothing (Just view) Nothing (const (pure base))
   response <- runSession (request (httpGet ["providers"])) app
   let decoded = eitherDecode (simpleBody response) :: Either String [Value]
   case decoded of

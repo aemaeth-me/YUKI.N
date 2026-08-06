@@ -23,7 +23,6 @@ extra-source-files:
     docs/memory/*.md
     frontend/test/backend-control-e2e.mjs
     frontend/web/control.js
-    test/golden/*.jsonl
 
 source-repository head
     type:     git
@@ -45,44 +44,20 @@ library
         Yuki.N.AGUI.Event
         Yuki.N.AGUI.Types
         Yuki.N.AgentsMd
-        Yuki.N.Anatomy
         Yuki.N.Artifact
         Yuki.N.AtomicFile
         Yuki.N.Background
-        Yuki.N.Blob
         Yuki.N.Config
-        Yuki.N.Cognition
-        Yuki.N.Cognition.Experience
-        Yuki.N.Cognition.Prompt
-        Yuki.N.Cognition.Sleep
-        Yuki.N.Cognition.Tools
-        Yuki.N.Cognition.Types
         Yuki.N.Context
-        Yuki.N.ContextEpoch
         Yuki.N.Diff
-        Yuki.N.Dispatch
-        Yuki.N.Dispatch.Types
-        Yuki.N.DispatchTool
         Yuki.N.Domain.Context
         Yuki.N.Domain.Diff
         Yuki.N.Domain.Model
         Yuki.N.Domain.Thread
-        Yuki.N.Experience
-        Yuki.N.Inspect
-        Yuki.N.Incarnation
-        Yuki.N.Invocation
-        Yuki.N.Journal
-        Yuki.N.Memory.Archive
-        Yuki.N.Memory.Impression
-        Yuki.N.Memory.LongTerm
-        Yuki.N.Memory.Working
         Yuki.N.Model
         Yuki.N.Provider.OpenAI
         Yuki.N.Providers
-        Yuki.N.Replay
         Yuki.N.Runs
-        Yuki.N.Telemetry
-        Yuki.N.Telemetry.Ledger
         Yuki.N.Server
         Yuki.N.Sessions
         Yuki.N.SubAgent
@@ -119,34 +94,18 @@ test-suite yuki-n-test
     type:           exitcode-stdio-1.0
     main-is:        Main.hs
     other-modules:  E2E,
-        Golden,
         Yuki.N.AGUITest,
         Yuki.N.AdversarialTest,
         Yuki.N.AgentTest,
         Yuki.N.AgentsMdTest,
-        Yuki.N.AnatomyTest,
         Yuki.N.ArtifactTest,
-        Yuki.N.Cognition.ArchiveTest,
-        Yuki.N.Cognition.LifecycleTest,
-        Yuki.N.Cognition.MemoryTest,
-        Yuki.N.Cognition.SleepTest,
-        Yuki.N.CognitionTest,
         Yuki.N.ConfigTest,
         Yuki.N.ContextTest,
         Yuki.N.DiffTest,
-        Yuki.N.DispatchTest,
-        Yuki.N.DispatchToolTest,
-        Yuki.N.GrowthTest,
-        Yuki.N.InvocationTest,
-        Yuki.N.JournalTest,
         Yuki.N.Provider.OpenAITest,
         Yuki.N.ProvidersTest,
         Yuki.N.RunsTest,
-        Yuki.N.TelemetryTest,
-        Yuki.N.ActivityTest,
-        Yuki.N.Telemetry.LedgerTest,
         Yuki.N.ServerTest,
-        Yuki.N.ServerCognitionTest,
         Yuki.N.SessionTest,
         Yuki.N.SubAgentTest,
         Yuki.N.TestSupport,

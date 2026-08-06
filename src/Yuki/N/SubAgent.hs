@@ -8,6 +8,7 @@ where
 
 import Control.Applicative (liftA3)
 import Control.Concurrent (forkIO, threadDelay)
+import Control.Exception (SomeAsyncException, SomeException, displayException, fromException, throwIO, try)
 import Control.Monad (void)
 import Data.Aeson
 import Data.Bool (bool)
@@ -20,13 +21,24 @@ import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as TextEncoding
+import Data.Text.IO qualified as TextIO
 import Data.Time.Clock.POSIX (getPOSIXTime)
+import System.IO (stderr)
 import Yuki.N.AGUI.Event (Event (..))
 import Yuki.N.AGUI.Types qualified as AGUI
 import Yuki.N.Agent
 import Yuki.N.Model (ChatMessage (..))
 import Yuki.N.Runs
-import Yuki.N.Telemetry.Ledger (quietly)
+
+quietly :: IO () -> IO ()
+quietly action =
+  try @SomeException action >>= either rethrowAsync (const (pure ()))
+ where
+  rethrowAsync exception =
+    maybe
+      (TextIO.hPutStrLn stderr ("yuki.subagent: " <> Text.pack (displayException exception)))
+      throwIO
+      (fromException exception :: Maybe SomeAsyncException)
 
 registerSubAgent :: Runtime -> Runtime
 registerSubAgent parent
@@ -91,7 +103,7 @@ subAgentTool name description parent =
       >>= runDelegation
    where
     runDelegation (subRunId, failed, text) =
-      runAgent (childRuntime parent context) (workerInput context subRunId prompt Nothing) (consume context subRunId failed text)
+      runAgent (childRuntime parent) (workerInput context subRunId prompt Nothing) (consume context subRunId failed text)
         *> outcome failed text
 
   consume context subRunId failed text event =
@@ -162,7 +174,7 @@ spawnTool parent =
     runSpawned subRunId =
       void
         ( forkIO
-            ( runAgent (childRuntime parent context) (workerInput context subRunId prompt objective) (const (pure ()))
+            ( runAgent (childRuntime parent) (workerInput context subRunId prompt objective) (const (pure ()))
                 *> notify registry context subRunId prompt objective
             )
         )
@@ -189,7 +201,6 @@ spawnTool parent =
             )
             $> ()
         )
-
 sendTool :: Runtime -> (Text, BackendTool)
 sendTool parent =
   (name, BackendTool (AGUI.ToolSpec name description schema) execute)
@@ -359,12 +370,11 @@ scopedCompletion registry parentRunId agentId =
     | completionParent completion == Just parentRunId = pure (Just completion)
   scopedToParent _ = pure Nothing
 
-childRuntime :: Runtime -> ToolContext -> Runtime
-childRuntime parent context =
+childRuntime :: Runtime -> Runtime
+childRuntime parent =
   parent
     { runtimeDepth = runtimeDepth parent - 1,
-      runtimeTools = delegableTools parent,
-      runtimeJournal = toolContextJournal context
+      runtimeTools = delegableTools parent
     }
 
 workerInput :: ToolContext -> Text -> Text -> Maybe Text -> AGUI.RunAgentInput

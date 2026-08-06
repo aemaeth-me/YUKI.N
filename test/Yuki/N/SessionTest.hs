@@ -24,7 +24,6 @@ import Test.Tasty
 import Test.Tasty.HUnit
 import Yuki.N.AGUI.Types
 import Yuki.N.Agent
-import Yuki.N.Inspect
 import Yuki.N.Model
 import Yuki.N.Server
 import Yuki.N.Sessions
@@ -86,21 +85,16 @@ sessionOwnerMigration = withWorkDir $ \dir -> do
   LazyByteString.writeFile path (encode [priorMeta "old-art", priorMeta "old-yuki"])
   sessions <- newSessionStore dir
   configs <- newThreadConfigStore dir
-  threadConfigWrite configs "old-art" emptyThreadConfig {configIncarnationId = Just "art"}
   _ <- migrateSessionOwners sessions configs >>= expectTextRight
   art <- findSession sessions "old-art"
   yuki <- findSession sessions "old-yuki"
-  artConfig <- threadConfigRead configs "old-art"
-  yukiConfig <- threadConfigRead configs "old-yuki"
-  reassigned <- claimSessionOwner sessions "old-art" "yuki"
+  reassigned <- claimSessionOwner sessions "old-art" "zen"
   reopened <- newSessionStore dir
   stored <- findSession reopened "old-art"
-  fmap sessionIncarnationId art @?= Just "art"
+  fmap sessionIncarnationId art @?= Just "yuki"
   fmap sessionIncarnationId yuki @?= Just "yuki"
-  configIncarnationId artConfig @?= Just "art"
-  configIncarnationId yukiConfig @?= Just "yuki"
   assertLeft reassigned
-  fmap sessionIncarnationId stored @?= Just "art"
+  fmap sessionIncarnationId stored @?= Just "yuki"
 
 sessionForks :: Assertion
 sessionForks = withWorkDir $ \dir -> do
@@ -108,7 +102,7 @@ sessionForks = withWorkDir $ \dir -> do
   let sessions = serviceSessions service
       transcripts = serviceTranscripts service
       configs = serviceConfigs service
-      config = emptyThreadConfig {configIncarnationId = Just "art", configSystemPrompt = Just "forked"}
+      config = emptyThreadConfig {configSystemPrompt = Just "forked"}
   _ <- createSession sessions "source" (Just "Source") "art" Nothing Nothing
   transcriptSave transcripts "source" transcriptHistory
   threadConfigWrite configs "source" config
@@ -139,7 +133,7 @@ sessionTransfers = withWorkDir $ \dir -> do
   let sessions = serviceSessions service
       transcripts = serviceTranscripts service
       configs = serviceConfigs service
-      config = emptyThreadConfig {configCwd = CwdNone, configIncarnationId = Just "art", configMemory = Just False}
+      config = emptyThreadConfig {configCwd = CwdNone}
   _ <- createSession sessions "source" (Just "Portable") "art" Nothing Nothing >>= expectTextRight
   transcriptSave transcripts "source" transcriptHistory
   threadConfigWrite configs "source" config
@@ -165,9 +159,7 @@ sessionTransfers = withWorkDir $ \dir -> do
             Nothing
         )
         >>= expectTextRight
-    sessionIncarnationId ownerless @?= "art"
-    stored <- threadConfigRead (serviceConfigs service) "ownerless-imported"
-    configIncarnationId stored @?= Just "art"
+    sessionIncarnationId ownerless @?= "yuki"
     transcriptSave (serviceTranscripts service) "imported" [ChatUser "keep"]
     assertLeft =<< importSession service (ImportRequest bundle (Just "imported") Nothing)
     transcriptLoad (serviceTranscripts service) "imported" >>= (@?= Just [ChatUser "keep"])
@@ -185,8 +177,7 @@ sessionRoutes :: Assertion
 sessionRoutes = withWorkDir $ \dir -> do
   service <- sessionServiceAt dir (const (pure ()))
   base <- testRuntime okModel [] Parallel
-  let inspection = withSessionService service (newInspection Nothing Nothing (Just (serviceTranscripts service)))
-      app = application Nothing (Just inspection) Nothing Nothing Nothing Nothing (const (pure base))
+  let app = application Nothing (Just service) Nothing Nothing (const (pure base))
   created <- runSession (srequest (jsonRequest methodPost ["threads"] (object ["threadId" .= ("route" :: Text), "title" .= ("Route" :: Text)]))) app
   renamed <- runSession (srequest (jsonRequest methodPatch ["threads", "route"] (object ["title" .= ("Named" :: Text)]))) app
   archived <- runSession (srequest (jsonRequest methodPost ["threads", "route", "archive"] (object []))) app
@@ -206,8 +197,7 @@ sessionAgentIndex :: Assertion
 sessionAgentIndex = withWorkDir $ \dir -> do
   service <- sessionServiceAt dir (const (pure ()))
   base <- testRuntime okModel [] Parallel
-  let inspection = withSessionService service (newInspection Nothing Nothing (Just (serviceTranscripts service)))
-      app = application Nothing (Just inspection) Nothing Nothing Nothing Nothing (const (pure base))
+  let app = application Nothing (Just service) Nothing Nothing (const (pure base))
       input = (sampleInput []) {runThreadId = "auto", runId = "auto-run"}
   first <- runSession (srequest (jsonRequest methodPost ["agent"] input)) app
   created <- findSession (serviceSessions service) "auto"
@@ -283,8 +273,7 @@ sessionKindFilterOverHttp :: Assertion
 sessionKindFilterOverHttp = withWorkDir $ \dir -> do
   service <- sessionServiceAt dir (const (pure ()))
   base <- testRuntime okModel [] Parallel
-  let inspection = withSessionService service (newInspection Nothing Nothing (Just (serviceTranscripts service)))
-      app = application Nothing (Just inspection) Nothing Nothing Nothing Nothing (const (pure base))
+  let app = application Nothing (Just service) Nothing Nothing (const (pure base))
   _ <- createSession (serviceSessions service) "task-a" (Just "Task A") "yuki" Nothing Nothing >>= expectTextRight
   _ <- ensureHomeSession (serviceSessions service) "yuki" (Just "Yuki")
   allThreads <- runSession (request (httpGet ["threads"])) app

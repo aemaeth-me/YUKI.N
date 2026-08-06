@@ -67,7 +67,6 @@ threadConfigTests =
       testCase "resolveRuntime overrides the prompt and rebuilds the model by name" promptAndModel,
       testCase "resolveRuntime applies per-thread reasoning effort" reasoningEffortResolution,
       testCase "resolveRuntime applies per-thread context policy" contextPolicyResolution,
-      testCase "resolveRuntime strips the hooks when memory is off" memoryStripped,
       testCase "PUT then GET returns the saved config, unknown threads are all null" configEndpoints,
       testCase "capabilities endpoint reports the resolved backend tools" configCapabilities,
       testCase "context endpoint explains the exact compaction threshold" configContextPolicy,
@@ -91,8 +90,7 @@ resolveFields =
             configSystemPrompt = Just "session",
             configModel = Just "global-model",
             configReasoningEffort = Just Max,
-            configFs = Just False,
-            configMemory = Just True
+            configFs = Just False
           }
     ]
  where
@@ -102,8 +100,7 @@ resolveFields =
       { configCwd = CwdPath "/global",
         configSystemPrompt = Just "global",
         configModel = Just "global-model",
-        configReasoningEffort = Just Max,
-        configMemory = Just True
+        configReasoningEffort = Just Max
       }
 
 cwdStateJson :: Assertion
@@ -154,7 +151,7 @@ cwdOverridesGlobal = withWorkDir $ \globalDir -> do
   callRuntimeList runtime =
     maybe (assertFailure "missing fs_list") pure (Map.lookup "fs_list" (runtimeTools runtime))
       >>= \backend ->
-        runBackendTool backend (ToolContext "run" "thread" "call" (const (pure ())) Nothing "") (object [])
+        runBackendTool backend (ToolContext "run" "thread" "call" (const (pure ()))) (object [])
           <&> toolOutcomeContent
 
 fileStoreRoundTrip :: Assertion
@@ -175,7 +172,6 @@ fileStoreRoundTrip = withWorkDir $ \dir -> do
         configReasoningEffort = Just Low,
         configFs = Just False,
         configShell = Just True,
-        configMemory = Just False,
         configContextReserveTokens = Just 4096,
         configContextKeepUnits = Just 8,
         configContextSummaryTokens = Just 1024
@@ -266,18 +262,8 @@ memoryStripped = do
   manager <- newTlsManager
   base <- testRuntime okModel [] Parallel
   let hooks config = runtimeHooks <$> resolveRuntime manager testProvider Nothing base {runtimeHooks = business} config Map.empty Map.empty
-      business =
-        defaultHooks
-          { afterRun = \_ _ -> writeIORef called True,
-            getSteeringMessages = const (pure [ChatSystem "steer"])
-          }
-  stripped <- hooks emptyThreadConfig {configMemory = Just False}
+      business = defaultHooks {afterRun = \_ _ -> writeIORef called True}
   kept <- hooks emptyThreadConfig
-  afterRun stripped (sampleInput []) []
-  stripCalled <- readIORef called
-  stripCalled @?= False
-  steering <- getSteeringMessages stripped (sampleInput [])
-  steering @?= []
   afterRun kept (sampleInput []) []
   keptCalled <- readIORef called
   keptCalled @?= True
@@ -294,7 +280,7 @@ configApp = do
           (settingsContextSummaryTokens testSettings)
           (settingsSpliceChars testSettings)
   pure
-    ( application Nothing Nothing (Just (testView store)) Nothing Nothing Nothing (configResolver store manager base {runtimeContext = Just context}),
+    ( application Nothing Nothing (Just (testView store)) Nothing (configResolver store manager base {runtimeContext = Just context}),
       store
     )
 configResolver :: ThreadConfigStore -> Manager -> Runtime -> Text -> IO Runtime
@@ -461,7 +447,7 @@ perThreadPrompts = do
   captured <- newIORef []
   manager <- newTlsManager
   base <- testRuntime (capturePrompts captured) [] Parallel
-  let app = application Nothing Nothing (Just (testView store)) Nothing Nothing Nothing (configResolver store manager base)
+  let app = application Nothing Nothing (Just (testView store)) Nothing (configResolver store manager base)
   _ <- runSession (srequest (putConfig "thread-a" (encode (emptyThreadConfig {configSystemPrompt = Just "prompt-a"})))) app
   _ <- runSession (srequest (putConfig "thread-b" (encode (emptyThreadConfig {configSystemPrompt = Just "prompt-b"})))) app
   _ <- runSession (srequest (agentPost "thread-a")) app
