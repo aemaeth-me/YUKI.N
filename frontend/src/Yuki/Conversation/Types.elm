@@ -1,7 +1,6 @@
 module Yuki.Conversation.Types exposing (AgentEvent(..), Gauge, Item(..), Msg(..), NoteKind(..), Phase(..), SubState, ToolStage(..), ToolState)
 
 import Json.Decode as Decode
-import Yuki.Dispatch.Types exposing (DraftEditor)
 
 
 type Phase
@@ -62,7 +61,6 @@ type Item
     | ToolItem ToolState
     | ToolResultItem { id : String, callId : String, content : String }
     | SubItem SubState
-    | DraftCardItem DraftEditor
     | NoteItem { id : String, text : String, kind : NoteKind }
 
 
@@ -88,22 +86,12 @@ type AgentEvent
 
 
 type Msg
-    = Enter String (Maybe String)
+    = Enter String
     | ChatResult String Int Decode.Value
     | AgentEvent Decode.Value
     | TransportEvent Decode.Value
     | ComposerChanged String
     | Send
-    | SteerChanged String
-    | SteerSubmitted
-    | CancelRun
     | Retry
     | Reload
-    | ResolveConfirm String Bool
-    | CardTitleChanged String String
-    | CardPromptChanged String String
-    | CardConfirm String
-    | CardCancel String
-    | CardResult String String Int Decode.Value
-    | RequestDispatch
     | Tick

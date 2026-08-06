@@ -1,7 +1,5 @@
-import { contextualizeAgentEvent, postAgentControl } from "./control.js";
 import { copyToClipboard } from "./clipboard.js";
 import { createTranscriptScrollController } from "./scroll.js";
-import { startActivityStream } from "./activity.js";
 
 const node = document.getElementById("app");
 const query = new URLSearchParams(window.location.search);
@@ -51,11 +49,6 @@ const app = Elm.Main.init({
     runStamp: Date.now().toString(36),
   },
 });
-startActivityStream({
-  onFrame: (frame) => app.ports.activityEvent.send(frame),
-  onConnection: (state) =>
-    app.ports.activityEvent.send({ kind: "__conn", data: state }),
-});
 
 const transcriptScroll = createTranscriptScrollController({
   root: document,
@@ -72,12 +65,17 @@ const transport = (kind, extra = {}) =>
   app.ports.transportEvent.send({ kind, ...extra });
 
 const decodeEvent = (payload, context) => {
-  const event = JSON.parse(payload);
+  let event;
   try {
-    app.ports.agentEvent.send(contextualizeAgentEvent(payload, context));
+    event = JSON.parse(payload);
   } catch (error) {
     throw new Error(`invalid AG-UI event: ${error.message}`);
   }
+  app.ports.agentEvent.send({
+    ...event,
+    threadId: event.threadId ?? context.threadId,
+    runId: event.runId ?? context.runId,
+  });
   return (
     event.type === "RUN_FINISHED" ||
     event.type === "RUN_ERROR" ||
@@ -186,25 +184,7 @@ const run = async (command) => {
   }
 };
 
-const cancel = async (command) => {
-  const current = active;
-  if (!current || current.runId !== command.runId) return;
-
-  const abort = () => {
-    if (active?.token === current.token) active.controller.abort();
-  };
-  current.cancelTimer = setTimeout(abort, 1500);
-
-  try {
-    await postAgentControl(command, "cancel");
-  } catch {
-    clearTimeout(current.cancelTimer);
-    abort();
-  }
-};
-
 app.ports.runAgent.subscribe((command) => void run(command));
-app.ports.cancelAgent.subscribe((command) => void cancel(command));
 app.ports.persistThreadId?.subscribe(persistThreadId);
 app.ports.persistIncarnationId?.subscribe(persistIncarnationId);
 app.ports.copyText?.subscribe((text) => void copyToClipboard(text));

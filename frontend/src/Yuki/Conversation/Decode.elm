@@ -181,9 +181,6 @@ developerNote id name content =
                 "context-summary" ->
                     "上下文摘要已整理"
 
-                "wake-packet" ->
-                    "唤醒包"
-
                 _ ->
                     "系统说明"
             )

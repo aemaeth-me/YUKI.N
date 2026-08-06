@@ -31,9 +31,7 @@ await Promise.all(
   [
     "index.html",
     "app.js",
-    "activity.js",
     "clipboard.js",
-    "control.js",
     "scroll.js",
     "styles.css",
   ].map((file) => copyFile(path.join(root, "web", file), path.join(dist, file))),

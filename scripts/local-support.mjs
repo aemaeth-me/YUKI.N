@@ -4,19 +4,11 @@ export const defaultBackendPort = 18080;
 export const defaultFrontendPort = 15173;
 const backendPrefixes = [
   "/agent",
-  "/activity",
-  "/fleet",
-  "/dispatches",
-  "/memory",
-  "/artifacts",
-  "/journal",
-  "/replay",
   "/config",
   "/providers",
   "/models",
   "/threads",
-  "/incarnations",
-  "/prompts",
+  "/artifacts",
 ];
 
 export const loopbackHost = (host) =>

@@ -134,7 +134,6 @@ const frontendOutputs = [
   "index.html",
   "app.js",
   "clipboard.js",
-  "control.js",
   "scroll.js",
   "styles.css",
 ].map((file) => path.join(frontend, "dist", file));

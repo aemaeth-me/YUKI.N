@@ -26,12 +26,10 @@ test("validates local ports", () => {
 
 test("proxies every backend-owned product route", () => {
   assert.equal(proxyBackendPath("/agent"), true);
-  assert.equal(proxyBackendPath("/incarnations/yuki/memories"), true);
-  assert.equal(
-    proxyBackendPath("/incarnations/yuki/task-records/search"),
-    true,
-  );
-  assert.equal(proxyBackendPath("/prompts/root"), true);
+  assert.equal(proxyBackendPath("/agent/run"), true);
+  assert.equal(proxyBackendPath("/threads/abc"), true);
+  assert.equal(proxyBackendPath("/config/threads"), true);
+  assert.equal(proxyBackendPath("/artifacts/xyz"), true);
   assert.equal(proxyBackendPath("/incarnations-archive"), false);
   assert.equal(proxyBackendPath("/styles.css"), false);
 });

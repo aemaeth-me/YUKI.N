@@ -1,8 +1,7 @@
-module Yuki.Conversation.Encode exposing (cancelRunRequest, confirmationDecision, confirmationTool, draftCancelRequest, draftConfirmRequest, draftPatchRequest, encodeItems, request, runCommand, steerRequest)
+module Yuki.Conversation.Encode exposing (confirmationDecision, confirmationTool, encodeItems, request, runCommand)
 
 import Json.Encode as Encode
 import Yuki.Conversation.Types exposing (Item(..), ToolState)
-import Yuki.Dispatch.Types exposing (DraftEditor)
 
 
 runCommand : String -> String -> String -> List Item -> Encode.Value
@@ -27,36 +26,6 @@ runCommand endpoint runId threadId items =
                 ]
           )
         ]
-
-
-cancelRunRequest : String -> String -> Encode.Value
-cancelRunRequest endpoint runId =
-    Encode.object
-        [ ( "endpoint", Encode.string endpoint )
-        , ( "runId", Encode.string runId )
-        ]
-
-
-steerRequest : String -> String -> String -> String -> Encode.Value
-steerRequest endpoint runId text kind =
-    request kind "POST" "/agent/steer" (Just (Encode.object [ ( "runId", Encode.string runId ), ( "text", Encode.string text ) ])) endpoint
-
-
-draftPatchRequest : String -> DraftEditor -> String -> Encode.Value
-draftPatchRequest endpoint editor kind =
-    request kind "PATCH" ("/dispatches/" ++ editor.draft.dispatchId)
-        (Just (Encode.object [ ( "title", Encode.string editor.title ), ( "prompt", Encode.string editor.prompt ) ]))
-        endpoint
-
-
-draftConfirmRequest : String -> String -> String -> Encode.Value
-draftConfirmRequest endpoint dispatchId kind =
-    request kind "POST" ("/dispatches/" ++ dispatchId ++ "/confirm") Nothing endpoint
-
-
-draftCancelRequest : String -> String -> String -> Encode.Value
-draftCancelRequest endpoint dispatchId kind =
-    request kind "POST" ("/dispatches/" ++ dispatchId ++ "/cancel") Nothing endpoint
 
 
 request : String -> String -> String -> Maybe Encode.Value -> String -> Encode.Value
@@ -191,9 +160,6 @@ step item acc =
                     ]
                 )
                 :: acc
-
-        DraftCardItem _ ->
-            acc
 
         NoteItem _ ->
             acc

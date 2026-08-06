@@ -1,30 +1,25 @@
 module Yuki.Conversation.View exposing (view)
 
 import Html exposing (..)
-import Html.Attributes exposing (class, classList, disabled, placeholder, rows, style, type_, value)
+import Html.Attributes exposing (class, classList, disabled, placeholder, rows, style, value)
 import Html.Events exposing (onClick, onInput, onSubmit)
 import Json.Decode as Decode
 import Markdown
 import Yuki.Conversation.State as State
 import Yuki.Conversation.Types exposing (..)
 import Yuki.Conversation.Types as Types
-import Yuki.Dispatch.Types as Dispatch
-import Yuki.Dispatch.View as DispatchView
-import Yuki.Telemetry.State exposing (TelemetryState)
 
 
-view : TelemetryState -> State.Model -> String -> Html Types.Msg
-view telemetry model yuki =
+view : State.Model -> String -> Html Types.Msg
+view model yuki =
     div [ class "chat-panel" ]
         [ header [ class "chat-head" ]
             [ span [ class "chat-title" ] [ text (chatTitle model) ]
-            , button [ class "chat-dispatch-button", onClick Types.RequestDispatch ] [ text "派发任务" ]
             ]
-        , otherSessionNote telemetry model
         , loadingNote model
         , statusLine model
         , transcriptView model
-        , composer telemetry model
+        , composer model
         ]
 
 
@@ -40,15 +35,6 @@ chatTitle model =
 
         Nothing ->
             "主对话"
-
-
-otherSessionNote : TelemetryState -> State.Model -> Html Types.Msg
-otherSessionNote telemetry model =
-    if model.activeRun == Nothing && State.hasRunForThread telemetry model.threadId then
-        div [ class "chat-other-session" ] [ text "该对话正在另一会话中执行" ]
-
-    else
-        text ""
 
 
 loadingNote : State.Model -> Html Types.Msg
@@ -123,7 +109,7 @@ transcriptView model =
         (if List.isEmpty model.items then
             [ div [ class "chat-empty" ]
                 [ text
-                    (if model.loading || model.resolvingHome then
+                    (if model.loading then
                         "加载中…"
 
                      else
@@ -166,27 +152,23 @@ itemView item =
                 ]
 
         ToolItem tool ->
-            if tool.name == "request_confirmation" then
-                confirmationCard tool
-
-            else
-                details [ class "chat-tool" ]
-                    [ summary []
-                        [ span [ class "chat-tool-name" ] [ text tool.name ]
-                        , span [ class "chat-tool-state" ] [ text (toolStateLabel tool.stage) ]
-                        ]
-                    , if String.isEmpty tool.arguments then
-                        text ""
-
-                      else
-                        pre [ class "chat-tool-args" ] [ text (clip 600 tool.arguments) ]
-                    , case tool.result of
-                        Just content ->
-                            pre [ class "chat-tool-result" ] [ text (clip 800 content) ]
-
-                        Nothing ->
-                            text ""
+            details [ class "chat-tool" ]
+                [ summary []
+                    [ span [ class "chat-tool-name" ] [ text tool.name ]
+                    , span [ class "chat-tool-state" ] [ text (toolStateLabel tool.stage) ]
                     ]
+                , if String.isEmpty tool.arguments then
+                    text ""
+
+                  else
+                    pre [ class "chat-tool-args" ] [ text (clip 600 tool.arguments) ]
+                , case tool.result of
+                    Just content ->
+                        pre [ class "chat-tool-result" ] [ text (clip 800 content) ]
+
+                    Nothing ->
+                        text ""
+                ]
 
         ToolResultItem _ ->
             text ""
@@ -194,76 +176,12 @@ itemView item =
         SubItem sub ->
             subCard sub
 
-        DraftCardItem editor ->
-            div [ class "chat-draft-card" ]
-                [ Html.map (cardMsg editor.draft.dispatchId) (DispatchView.draftEditor identity editor)
-                ]
-
         NoteItem noteItem ->
             div
                 [ class "chat-note"
                 , classList [ ( "chat-note-warn", noteItem.kind == NoteWarn ) ]
                 ]
                 [ text noteItem.text ]
-
-
-cardMsg : String -> Dispatch.EditorMsg -> Types.Msg
-cardMsg dispatchId edit =
-    case edit of
-        Dispatch.TitleChanged text ->
-            Types.CardTitleChanged dispatchId text
-
-        Dispatch.PromptChanged text ->
-            Types.CardPromptChanged dispatchId text
-
-        Dispatch.ConfirmClicked ->
-            Types.CardConfirm dispatchId
-
-        Dispatch.CancelClicked ->
-            Types.CardCancel dispatchId
-
-
-confirmationCard : ToolState -> Html Types.Msg
-confirmationCard tool =
-    let
-        args =
-            decodeConfirmationArgs tool.arguments
-    in
-    div
-        [ class "chat-confirm"
-        , classList [ ( "chat-confirm-done", tool.stage /= ToolWaiting ) ]
-        ]
-        [ div [ class "chat-confirm-title" ] [ text (Maybe.withDefault "请求确认" args.title) ]
-        , div [ class "chat-confirm-details" ] [ text (Maybe.withDefault "" args.details) ]
-        , if tool.stage == ToolWaiting then
-            div [ class "chat-confirm-actions" ]
-                [ button [ class "chat-action chat-action-approve", onClick (Types.ResolveConfirm tool.callId True) ] [ text "确认" ]
-                , button [ class "chat-action chat-action-reject", onClick (Types.ResolveConfirm tool.callId False) ] [ text "取消" ]
-                ]
-
-          else if tool.stage == ToolDone then
-            div [ class "chat-confirm-done-note" ] [ text "已处理" ]
-
-          else
-            text ""
-        ]
-
-
-decodeConfirmationArgs : String -> { title : Maybe String, details : Maybe String }
-decodeConfirmationArgs raw =
-    case Decode.decodeString
-        (Decode.map2
-            (\title details -> { title = title, details = details })
-            (Decode.maybe (Decode.field "title" Decode.string))
-            (Decode.maybe (Decode.field "details" Decode.string))
-        )
-        raw
-    of
-        Ok args ->
-            args
-
-        Err _ ->
-            { title = Nothing, details = Nothing }
 
 
 toolStateLabel : ToolStage -> String
@@ -311,38 +229,11 @@ subCard sub =
         ]
 
 
-composer : TelemetryState -> State.Model -> Html Types.Msg
-composer telemetry model =
-    let
-        running =
-            model.activeRun /= Nothing
-
-        waitingConfirm =
-            State.hasWaitingTool model.items
-
-        blockedByOther =
-            not running && State.hasRunForThread telemetry model.threadId
-    in
+composer : State.Model -> Html Types.Msg
+composer model =
     div [ class "chat-composer" ]
-        [ if running then
-            form [ class "chat-steer", onSubmit Types.SteerSubmitted ]
-                [ input
-                    [ class "chat-steer-input"
-                    , type_ "text"
-                    , value model.steerDraft
-                    , onInput Types.SteerChanged
-                    , placeholder "运行中 — 输入将作为指令（steer）"
-                    ]
-                    []
-                , button [ class "chat-action chat-action-send" ] [ text "发送" ]
-                , button [ class "chat-action chat-action-cancel", type_ "button", onClick Types.CancelRun ] [ text "取消运行" ]
-                ]
-
-          else if waitingConfirm then
-            div [ class "chat-waiting" ] [ text "等待你确认上方的请求" ]
-
-          else if blockedByOther then
-            div [ class "chat-waiting" ] [ text "该对话正在另一会话中执行" ]
+        [ if model.activeRun /= Nothing then
+            div [ class "chat-waiting" ] [ text "运行中…" ]
 
           else
             form [ class "chat-write", onSubmit Types.Send ]
