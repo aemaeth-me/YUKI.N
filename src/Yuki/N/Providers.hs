@@ -1,21 +1,17 @@
 module Yuki.N.Providers
   ( ProviderEntry (..),
     ProviderRegistry,
-    defaultProviders,
-    listEntry,
-    loadProviders,
     loadAuthJson,
-    resolveApiKey,
+    loadProviders,
     providerConfig,
     providerKeyMap,
-    providerListing,
   )
 where
 
 import Control.Applicative ((<|>))
 import Control.Exception (IOException, try)
 import Control.Monad ((>=>))
-import Data.Aeson
+import Data.Aeson (FromJSON (..), Value, eitherDecode, withObject, (.!=), (.:), (.:?))
 import Data.Aeson.Key (fromText)
 import Data.Aeson.Types (parseMaybe)
 import Data.Bool (bool)
@@ -24,13 +20,18 @@ import Data.Either (fromRight)
 import Data.Functor ((<&>))
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromMaybe, isJust, mapMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
-import Network.HTTP.Client (Manager)
 import System.Directory (doesFileExist, getHomeDirectory)
 import System.FilePath ((</>))
 import Yuki.N.Provider.OpenAI
+  ( ApiDialect (..),
+    OpenAIConfig (..),
+    ReasoningEffort (..),
+    ThinkingMode (..),
+    parseDialectText,
+  )
 
 data ProviderEntry = ProviderEntry
   { providerName :: Text,
@@ -45,37 +46,16 @@ data ProviderEntry = ProviderEntry
 
 type ProviderRegistry = Map Text ProviderEntry
 
-instance ToJSON ProviderEntry where
-  toJSON entry =
-    object
-      [ "name" .= providerName entry,
-        "baseUrl" .= providerBaseUrl entry,
-        "dialect" .= dialectToText (providerDialect entry),
-        "defaultModel" .= providerDefaultModel entry,
-        "apiKeyEnv" .= providerApiKeyEnv entry,
-        "piAuth" .= providerPiAuth entry,
-        "contextTokens" .= providerContextTokens entry
-      ]
-
 instance FromJSON ProviderEntry where
   parseJSON = withObject "ProviderEntry" $ \fields ->
     ProviderEntry
       <$> fields .: "name"
       <*> fields .: "baseUrl"
-      <*> (fields .: "dialect" >>= either (fail . Text.unpack) pure . dialectFromText)
+      <*> (fields .: "dialect" >>= either (fail . Text.unpack) pure . parseDialectText)
       <*> fields .: "defaultModel"
       <*> fields .:? "apiKeyEnv"
       <*> fields .:? "piAuth"
       <*> fields .:? "contextTokens" .!= 1000000
-
-dialectToText :: ApiDialect -> Text
-dialectToText DeepSeek = "deepseek"
-dialectToText OpenAICompatible = "openai-compatible"
-
-dialectFromText :: Text -> Either Text ApiDialect
-dialectFromText "deepseek" = Right DeepSeek
-dialectFromText "openai-compatible" = Right OpenAICompatible
-dialectFromText other = Left ("unknown dialect: " <> other)
 
 defaultProviders :: ProviderRegistry
 defaultProviders =
@@ -130,7 +110,7 @@ providerConfig entry apiKey model =
       openAIDialect = dialect,
       openAIThinking = providerThinking entry,
       openAIMaxTokens = Nothing,
-      openAIContextTokens = Just (providerContextTokens entry)
+      openAIContextTokens = providerContextTokens entry
     }
  where
   dialect = providerDialect entry
@@ -147,23 +127,3 @@ providerKeyMap env auth =
   Map.fromList . mapMaybe keep . Map.toList
  where
   keep (name, entry) = resolveApiKey env auth entry <&> (Text.unpack name,)
-
-providerListing :: Manager -> ProviderRegistry -> Map String Text -> IO [Value]
-providerListing manager registry keyMap =
-  traverse (listEntry manager keyMap) (Map.toList registry)
-
-listEntry :: Manager -> Map String Text -> (Text, ProviderEntry) -> IO Value
-listEntry _ keyMap (name, entry) =
-  pure
-    ( object
-        [ "name" .= name,
-          "baseUrl" .= providerBaseUrl entry,
-          "dialect" .= dialectToText (providerDialect entry),
-          "defaultModel" .= providerDefaultModel entry,
-          "contextTokens" .= providerContextTokens entry,
-          "keyReady" .= isJust key,
-          "models" .= ([providerDefaultModel entry] :: [Text])
-        ]
-    )
- where
-  key = Map.lookup (Text.unpack name) keyMap

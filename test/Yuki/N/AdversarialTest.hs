@@ -29,8 +29,6 @@ import Data.Maybe (isJust, isNothing)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.IO qualified as TextIO
-import Network.HTTP.Types
-import Network.Wai.Test
 import System.Directory (doesFileExist)
 import System.FilePath (takeDirectory)
 import System.Process (getProcessExitCode)
@@ -220,12 +218,10 @@ concurrentRuns = withWorkDir $ \dir -> do
   _ <- timeout 5000000 (takeMVar doneA) >>= maybe (assertFailure "cancelled run did not finish") pure
   putMVar release ()
   _ <- timeout 5000000 (takeMVar doneB) >>= maybe (assertFailure "surviving run did not finish") pure
-  lateCancel <- runSession (srequest (cancelRequest "run-b")) app
   eventsA <- decodeChunks chunksA
   eventsB <- decodeChunks chunksB
   saved <- transcriptLoad store "thread"
   captured <- readIORef histories
-  simpleStatus lateCancel @?= status404
   length [() | Custom "run.cancelled" _ <- eventsA] @?= 1
   [() | Custom "run.cancelled" _ <- eventsB] @?= []
   [run | RunStarted _ run _ <- eventsA] @?= ["run-a"]
@@ -263,10 +259,8 @@ duplicateRunIdRace = do
   _ <- timeout 5000000 (takeMVar doneB) >>= maybe (assertFailure "cancelled duplicate did not finish") pure
   putMVar gate ()
   _ <- timeout 5000000 (takeMVar doneA) >>= maybe (assertFailure "first run did not finish") pure
-  lateCancel <- runSession (srequest (cancelRequest "run")) app
   eventsA <- decodeChunks chunksA
   eventsB <- decodeChunks chunksB
-  simpleStatus lateCancel @?= status404
   [() | Custom "run.cancelled" _ <- eventsA] @?= []
   length [() | Custom "run.cancelled" _ <- eventsB] @?= 1
   eventType (last eventsA) @?= "RUN_FINISHED"

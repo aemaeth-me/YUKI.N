@@ -1,28 +1,22 @@
 module Yuki.N.Transcript
   ( TranscriptStore (..),
-    newMemoryTranscriptStore,
     newTranscriptStore,
     renderTranscript,
     toAguiMessages,
-    transcriptHooks,
+    transcriptHook,
   )
 where
 
-import Control.Applicative (liftA3)
 import Control.Concurrent.MVar (newMVar, withMVar)
 import Control.Exception (IOException, try)
-import Control.Monad (when)
 import Data.Aeson (Value, decodeFileStrict, object, (.=))
 import Data.Either (fromRight)
 import Data.Functor ((<&>))
-import Data.IORef (modifyIORef', newIORef, readIORef)
-import Data.Map.Strict qualified as Map
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as Text
-import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
+import System.Directory (createDirectoryIfMissing)
 import Yuki.N.AGUI.Types qualified as AGUI
-import Yuki.N.Agent (AgentHooks (..), defaultHooks)
 import Yuki.N.AtomicFile (atomicEncodeFile)
 import Yuki.N.Context (contextSummaryMarker)
 import Yuki.N.Domain.Thread (sanitizeThreadId)
@@ -30,75 +24,50 @@ import Yuki.N.Model (AssistantTurn (..), ChatMessage (..), ModelToolCall (..))
 
 data TranscriptStore = TranscriptStore
   { transcriptSave :: Text -> [ChatMessage] -> IO (),
-    transcriptLoad :: Text -> IO (Maybe [ChatMessage]),
-    transcriptDelete :: Text -> IO ()
+    transcriptLoad :: Text -> IO (Maybe [ChatMessage])
   }
 
 newTranscriptStore :: FilePath -> IO TranscriptStore
 newTranscriptStore dir =
   createDirectoryIfMissing True (transcriptsPath dir)
     *> newMVar ()
-    <&> liftA3 TranscriptStore save (const load) delete
+    <&> store
  where
+  store lock = TranscriptStore (save lock) load
   save lock threadId messages =
     withMVar lock (const (atomicEncodeFile (transcriptPath dir threadId) (withoutSystem messages)))
   load threadId =
     fromRight Nothing
       <$> (try (decodeFileStrict (transcriptPath dir threadId)) :: IO (Either IOException (Maybe [ChatMessage])))
-  delete lock threadId =
-    withMVar lock (const (removeIfExists (transcriptPath dir threadId)))
 
-removeIfExists :: FilePath -> IO ()
-removeIfExists path = doesFileExist path >>= flip when (removeFile path)
-
-newMemoryTranscriptStore :: IO TranscriptStore
-newMemoryTranscriptStore =
-  newIORef Map.empty
-    <&> liftA3 TranscriptStore save load delete
- where
-  save transcripts threadId =
-    modifyIORef' transcripts . Map.insert threadId . withoutSystem
-  load transcripts threadId =
-    Map.lookup threadId <$> readIORef transcripts
-  delete transcripts threadId =
-    modifyIORef' transcripts (Map.delete threadId)
-
-transcriptHooks :: TranscriptStore -> AgentHooks
-transcriptHooks store = defaultHooks {afterRun = persist}
- where
-  persist input messages
-    | isJust (AGUI.runParentId input) = pure ()
-    | otherwise = ignoringIO (transcriptSave store (AGUI.runThreadId input) messages)
-
-ignoringIO :: IO () -> IO ()
-ignoringIO action = fromRight () <$> (try action :: IO (Either IOException ()))
+transcriptHook :: TranscriptStore -> AGUI.RunAgentInput -> [ChatMessage] -> IO ()
+transcriptHook store input messages
+  | isJust (AGUI.runParentId input) = pure ()
+  | otherwise = transcriptSave store (AGUI.runThreadId input) messages
 
 toAguiMessages :: [ChatMessage] -> [AGUI.Message]
 toAguiMessages = concatMap (uncurry render) . zip [0 ..] . withoutSystem
  where
   render index = \case
-    ChatSystem text
-      | contextSummaryMarker `Text.isPrefixOf` text ->
-          [AGUI.Developer (AGUI.DeveloperMessage (auto index) text (Just "context-summary"))]
-      | otherwise -> []
-    ChatUser text -> [AGUI.User (AGUI.UserMessage (auto index) (AGUI.UserText text) Nothing)]
+    ChatSystem text ->
+      [AGUI.System (AGUI.SystemMessage (auto index) text)]
+    ChatUser text -> [AGUI.User (AGUI.UserMessage (auto index) text)]
     ChatAssistant turn -> assistant index turn
     ChatToolResult callId content ->
-      [AGUI.Tool (AGUI.ToolMessage (auto index) content callId Nothing Nothing)]
+      [AGUI.Tool (AGUI.ToolMessage (auto index) content callId)]
   assistant index turn =
-    [ AGUI.Reasoning (AGUI.ReasoningMessage (auto index <> "-reasoning") thought Nothing)
+    [ AGUI.Reasoning (AGUI.ReasoningMessage (auto index <> "-reasoning") thought)
     | Just thought <- [turnReasoning turn]
     ]
       <> [ AGUI.Assistant
              ( AGUI.AssistantMessage
                  (turnMessageId turn)
                  (turnText turn)
-                 Nothing
                  (fmap toolCall (turnToolCalls turn))
              )
          ]
   toolCall (ModelToolCall identifier name arguments) =
-    AGUI.ToolCall identifier (AGUI.FunctionCall name arguments) Nothing
+    AGUI.ToolCall identifier (AGUI.FunctionCall name arguments)
   auto index = "tr-" <> Text.pack (show (index :: Int))
 
 renderTranscript :: Text -> [ChatMessage] -> Value

@@ -1,4 +1,4 @@
-module Yuki.N.Tools (workTools, backgroundTools, completePaths, listTree) where
+module Yuki.N.Tools (backgroundTools, workTools) where
 
 import Control.Concurrent.Async (waitCatch, withAsync)
 import Control.Exception (IOException, displayException, try)
@@ -42,7 +42,6 @@ import System.Exit (ExitCode (..))
 import System.FilePath
   ( addTrailingPathSeparator,
     dropTrailingPathSeparator,
-    hasTrailingPathSeparator,
     isDrive,
     joinPath,
     splitDirectories,
@@ -53,9 +52,8 @@ import System.FilePath
 import System.IO (Handle)
 import System.Process
 import System.Timeout (timeout)
-import Yuki.N.AGUI.Event (Event (Custom))
 import Yuki.N.AGUI.Types (ToolSpec (..))
-import Yuki.N.Agent (BackendTool (..), ToolContext (..), ToolOutcome (..), newId)
+import Yuki.N.Agent (BackendTool (..), ToolContext (..), newId)
 import Yuki.N.Artifact (ArtifactStore (..), stubThreshold)
 import Yuki.N.Background
   ( BackgroundRegistry,
@@ -65,7 +63,7 @@ import Yuki.N.Background
     snapshotBackground,
     spawnBackground,
   )
-import Yuki.N.Diff (unified)
+import Yuki.N.Domain.Diff (unified)
 
 workTools :: Maybe ArtifactStore -> FilePath -> IO [BackendTool]
 workTools store root =
@@ -87,7 +85,7 @@ workTools store root =
             (object ["path" .= stringSchema, "content" .= stringSchema])
             ["path", "content"]
         )
-        (runWrite store ledger root),
+        (runWrite ledger root),
       textTool
         ( spec
             "fs_edit"
@@ -95,7 +93,7 @@ workTools store root =
             (object ["path" .= stringSchema, "old" .= stringSchema, "new" .= stringSchema])
             ["path", "old", "new"]
         )
-        (runEdit store ledger root),
+        (runEdit ledger root),
       textTool
         ( spec
             "fs_list"
@@ -120,7 +118,7 @@ workTools store root =
             ["pattern"]
         )
         (runGrep store root),
-      contextTool
+      textTool
         ( spec
             "plan"
             "track your own progress on a longer task: set replaces the plan with pending items, update marks one item pending/doing/done, clear empties the plan"
@@ -133,15 +131,15 @@ workTools store root =
             )
             ["action"]
         )
-        (\context -> runPlan context plan),
-      contextTool
+        (runPlan plan),
+      textTool
         ( spec
             "shell"
             "run a command with sh -c in the work directory"
             (object ["command" .= stringSchema, "timeoutSeconds" .= integerSchema])
             ["command"]
         )
-        (\context -> runShell context store root)
+        (runShell store root)
     ]
 
 backgroundTools :: BackgroundRegistry -> FilePath -> [BackendTool]
@@ -218,29 +216,17 @@ itemSchema =
     ]
 
 textTool :: (FromJSON input) => ToolSpec -> (input -> IO (Either Text Text)) -> BackendTool
-textTool toolSpec execute = contextTool toolSpec (const execute)
-
-contextTool :: (FromJSON input) => ToolSpec -> (ToolContext -> input -> IO (Either Text Text)) -> BackendTool
-contextTool toolSpec execute = BackendTool toolSpec decode
- where
-  decode context arguments = case fromJSON arguments of
-    Error message -> pure (failure ("invalid tool arguments: " <> Text.pack message))
-    Success input -> execute context input <&> either failure success
+textTool toolSpec execute = toolWith id toolSpec (const execute)
 
 contextJsonTool :: (FromJSON input, ToJSON output) => ToolSpec -> (ToolContext -> input -> IO (Either Text output)) -> BackendTool
-contextJsonTool toolSpec execute = BackendTool toolSpec decode
+contextJsonTool = toolWith (TextEncoding.decodeUtf8 . LazyByteString.toStrict . encode)
+
+toolWith :: (FromJSON input) => (output -> Text) -> ToolSpec -> (ToolContext -> input -> IO (Either Text output)) -> BackendTool
+toolWith render toolSpec execute = BackendTool toolSpec decode
  where
   decode context arguments = case fromJSON arguments of
-    Error message -> pure (failure ("invalid tool arguments: " <> Text.pack message))
-    Success input ->
-      execute context input
-        <&> either failure (success . TextEncoding.decodeUtf8 . LazyByteString.toStrict . encode)
-
-failure :: Text -> ToolOutcome
-failure content = ToolOutcome content True False
-
-success :: Text -> ToolOutcome
-success content = ToolOutcome content False False
+    Error message -> pure ("invalid tool arguments: " <> Text.pack message)
+    Success input -> execute context input <&> either id render
 
 data FsRead = FsRead FilePath (Maybe Int) (Maybe Int)
 
@@ -362,8 +348,8 @@ paginate path offset limit content
   window = take count (drop (begin - 1) ls)
   end = begin + length window - 1
 
-runWrite :: Maybe ArtifactStore -> Ledger -> FilePath -> FsWrite -> IO (Either Text Text)
-runWrite store ledger root (FsWrite path content) =
+runWrite :: Ledger -> FilePath -> FsWrite -> IO (Either Text Text)
+runWrite ledger root (FsWrite path content) =
   resolvePath root path >>=? write
  where
   write target = readMaybe target >>= commit
@@ -371,12 +357,11 @@ runWrite store ledger root (FsWrite path content) =
     commit old =
       createDirectoryIfMissing True (takeDirectory target)
         *> TextIO.writeFile target content
-        *> stash store "fs_write" content
         *> remember ledger target
         $> Right (unified path (fromMaybe "" old) content)
 
-runEdit :: Maybe ArtifactStore -> Ledger -> FilePath -> FsEdit -> IO (Either Text Text)
-runEdit store ledger root (FsEdit path old new)
+runEdit :: Ledger -> FilePath -> FsEdit -> IO (Either Text Text)
+runEdit ledger root (FsEdit path old new)
   | Text.null old = pure (Left "old must not be empty")
   | otherwise = resolvePath root path >>=? edit
  where
@@ -395,7 +380,6 @@ runEdit store ledger root (FsEdit path old new)
         0 -> pure (Left ("old text not found in " <> Text.pack path))
         1 ->
           TextIO.writeFile target updated
-            *> stash store "fs_edit" updated
             *> remember ledger target
             $> Right (unified path content updated)
          where
@@ -443,35 +427,6 @@ listTree target depth =
     (<> note (length entries)) . concat
       <$> traverse (entry target depth) (take listingLimit entries)
   note total = ["... " <> int (total - listingLimit) <> " more entries" | total > listingLimit]
-
-completePaths :: FilePath -> Text -> IO [Text]
-completePaths root raw
-  | Text.any (`elem` ['\0', '\n', '\r']) raw = pure []
-  | otherwise =
-      pathContainsSymlink root directory
-        >>= bool suggestions (pure [])
- where
-  query = Text.unpack raw
-  trailing = hasTrailingPathSeparator query
-  directory
-    | trailing = query
-    | otherwise = takeDirectory query
-  prefixName
-    | trailing = ""
-    | otherwise = takeFileName query
-  renderedPrefix
-    | directory == "." || null directory = ""
-    | otherwise = addTrailingPathSeparator directory
-  suggestions = resolvePath root directory >>= either (const (pure [])) entries
-  entries base =
-    (try (sort <$> listDirectory base) :: IO (Either IOException [FilePath]))
-      >>= either (const (pure [])) (fmap (take 40 . concat) . traverse (candidate base) . filter (prefixName `isPrefixOf`))
-  candidate base name =
-    pathIsSymbolicLink (base </> name) >>= bool plain (pure [])
-   where
-    plain = doesDirectoryExist (base </> name) <&> directoryText
-    directoryText isDirectory = [Text.pack (renderedPrefix <> name <> [pathSeparator | isDirectory])]
-    pathSeparator = '/'
 
 listingLimit :: Int
 listingLimit = 100
@@ -593,33 +548,15 @@ matchLimit = 200
 fileLimit :: Integer
 fileLimit = 1024 * 1024
 
-runShell :: ToolContext -> Maybe ArtifactStore -> FilePath -> ShellCall -> IO (Either Text Text)
-runShell context store root (ShellCall command timeoutSeconds) =
-  runShellCommand (streamChunk context) root (clamp timeoutSeconds) (Text.unpack command)
+runShell :: Maybe ArtifactStore -> FilePath -> ShellCall -> IO (Either Text Text)
+runShell store root (ShellCall command timeoutSeconds) =
+  runShellCommand root (clamp timeoutSeconds) (Text.unpack command)
     >>= fmap Right . present store "shell" clip
  where
   clip content = Text.take 200 content <> "\n...\n" <> Text.takeEnd 200 content
 
-streamChunk :: ToolContext -> Text -> Text -> IO ()
-streamChunk context stream delta =
-  toolContextEmit
-    context
-    ( Custom
-        "shell.output"
-        ( object
-            [ "callId" .= toolContextCallId context,
-              "stream" .= stream,
-              "delta" .= delta
-            ]
-        )
-    )
-
-runPlan :: ToolContext -> IORef [PlanItem] -> PlanCall -> IO (Either Text Text)
-runPlan context plan call =
-  atomicModifyIORef' plan (apply call) >>= traverse announce
- where
-  announce items =
-    toolContextEmit context (Custom "plan" (planValue items)) $> renderPlan items
+runPlan :: IORef [PlanItem] -> PlanCall -> IO (Either Text Text)
+runPlan plan call = atomicModifyIORef' plan (apply call) <&> fmap renderPlan
 
 apply :: PlanCall -> [PlanItem] -> ([PlanItem], Either Text [PlanItem])
 apply (PlanSet seeds) _ = changed [PlanItem identifier title Pending | PlanSeed identifier title <- seeds]
@@ -642,16 +579,6 @@ renderPlan items = Text.intercalate "\n" (fmap line items)
 marker :: PlanStatus -> Text
 marker Pending = " "
 marker status = statusName status
-
-planValue :: [PlanItem] -> Value
-planValue items = object ["items" .= fmap itemValue items]
- where
-  itemValue item =
-    object
-      [ "id" .= planId item,
-        "title" .= planTitle item,
-        "status" .= statusName (planStatus item)
-      ]
 
 statusName :: PlanStatus -> Text
 statusName Pending = "pending"
@@ -699,16 +626,16 @@ killTask registry threadId (ShellKill taskId) =
 clamp :: Maybe Int -> Int
 clamp = maybe 30 (max 1 . min 120)
 
-runShellCommand :: (Text -> Text -> IO ()) -> FilePath -> Int -> String -> IO Text
-runShellCommand announce root seconds command =
+runShellCommand :: FilePath -> Int -> String -> IO Text
+runShellCommand root seconds command =
   createProcess sh >>= runProc
  where
   runProc setup@(Nothing, Just out, Just err, process) =
     (,) <$> newIORef "" <*> newIORef "" >>= runPipes setup out err process
   runProc setup = cleanupProcess setup $> renderShell "" (Just 127)
   runPipes setup out err process (outAcc, errAcc) =
-    withAsync (pump (announce "stdout") out outAcc) $ \outAsync ->
-      withAsync (pump (announce "stderr") err errAcc) $ \errAsync ->
+    withAsync (pump out outAcc) $ \outAsync ->
+      withAsync (pump err errAcc) $ \errAsync ->
         raceTimeout (seconds * 1000000) (waitForProcess process)
           >>= finish setup process outAcc errAcc outAsync errAsync
   finish setup process outAcc errAcc outAsync errAsync code =
@@ -724,12 +651,12 @@ runShellCommand announce root seconds command =
         create_group = True
       }
 
-pump :: (Text -> IO ()) -> Handle -> IORef Text -> IO ()
-pump announce handle sink = loop
+pump :: Handle -> IORef Text -> IO ()
+pump handle sink = loop
  where
   loop = TextIO.hGetChunk handle >>= pumpChunk
   pumpChunk chunk =
-    bool (announce chunk *> modifyIORef' sink (<> chunk) *> loop) (pure ()) (Text.null chunk)
+    bool (modifyIORef' sink (<> chunk) *> loop) (pure ()) (Text.null chunk)
 
 raceTimeout :: Int -> IO ExitCode -> IO (Maybe Int)
 raceTimeout micros action =
@@ -785,14 +712,10 @@ canonicalizeLenient path =
 readMaybe :: FilePath -> IO (Maybe Text)
 readMaybe path = either (const Nothing) Just <$> (try (TextIO.readFile path) :: IO (Either IOException Text))
 
-stash :: Maybe ArtifactStore -> Text -> Text -> IO ()
-stash store name content =
-  bool (pure ()) (traverse_ (\s -> artifactSave s name content) store) (Text.length content >= stubThreshold)
-
 present :: Maybe ArtifactStore -> Text -> (Text -> Text) -> Text -> IO Text
 present store name clip content
   | Text.length content < stubThreshold = pure content
-  | otherwise = maybe (pure content) (\s -> guided <$> artifactSave s name content) store
+  | otherwise = maybe (pure content) (\s -> guided <$> artifactSave s content) store
  where
   guided identifier =
     clip content

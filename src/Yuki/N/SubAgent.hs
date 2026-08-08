@@ -1,14 +1,11 @@
 module Yuki.N.SubAgent
-  ( childRuntime,
-    delegableTools,
-    subAgentTool,
-    registerSubAgent,
+  ( registerSubAgent,
   )
 where
 
 import Control.Applicative (liftA3)
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Exception (SomeAsyncException, SomeException, displayException, fromException, throwIO, try)
+import Control.Exception (SomeAsyncException, SomeException, displayException, fromException, mask, onException, throwIO, try)
 import Control.Monad (void)
 import Data.Aeson
 import Data.Bool (bool)
@@ -17,7 +14,6 @@ import Data.Functor (($>), (<&>))
 import Data.IORef
 import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe, isJust, listToMaybe)
-import Data.Set qualified as Set
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as TextEncoding
@@ -41,17 +37,15 @@ quietly action =
       (fromException exception :: Maybe SomeAsyncException)
 
 registerSubAgent :: Runtime -> Runtime
-registerSubAgent parent
-  | runtimeDepth parent <= 0 = parent
-  | otherwise = registered
+registerSubAgent parent = registered
  where
   registered =
     parent
       { runtimeTools =
           Map.insert
             syncName
-            (subAgentTool syncName description registered)
-            (Map.union (asyncToolSet registered) (runtimeTools parent))
+            (subAgentTool syncName description parent)
+            (Map.union (asyncToolSet parent) (runtimeTools parent))
       }
   syncName = "sub_agent"
   description =
@@ -59,7 +53,7 @@ registerSubAgent parent
       <> "The child inherits exactly these backend tools: "
       <> capabilities
       <> ". Do not delegate work that requires an unavailable capability."
-  capabilities = renderCapabilities (delegableTools registered)
+  capabilities = renderCapabilities (delegableTools parent)
 
 asyncToolSet :: Runtime -> Map.Map Text BackendTool
 asyncToolSet parent =
@@ -89,22 +83,28 @@ subAgentTool name description parent =
         "additionalProperties" .= False
       ]
 
-  execute context arguments
-    | runtimeDepth parent <= 0 =
-        pure (ToolOutcome "delegation depth exhausted" True False)
-    | otherwise =
-        case fromJSON arguments of
-          Error message ->
-            pure (ToolOutcome ("invalid delegation arguments: " <> Text.pack message) True False)
-          Success (Delegation prompt) -> delegate context prompt
+  execute context arguments = case fromJSON arguments of
+    Error message ->
+      pure ("invalid delegation arguments: " <> Text.pack message)
+    Success (Delegation prompt) -> delegate context prompt
 
   delegate context prompt =
     liftA3 (,,) (runtimeNewId parent) (newIORef Nothing) (newIORef "")
       >>= runDelegation
    where
     runDelegation (subRunId, failed, text) =
+      mask $ \restore ->
+        reserveChildRun registry limit subRunId (workerDescriptor context prompt Nothing)
+          >>= bool
+            (pure "sub-agent parallel limit reached")
+            ( restore (runChild subRunId failed text)
+                `onException` releaseReservation registry subRunId
+            )
+    runChild subRunId failed text =
       runAgent (childRuntime parent) (workerInput context subRunId prompt Nothing) (consume context subRunId failed text)
         *> outcome failed text
+    registry = runtimeRuns parent
+    limit = runtimeSubAgentMaxParallel parent
 
   consume context subRunId failed text event =
     collect failed text event
@@ -127,11 +127,11 @@ subAgentTool name description parent =
   outcome failed text =
     readIORef failed
       >>= maybe
-        (ToolOutcome <$> readIORef text <*> pure False <*> pure False)
+        (readIORef text)
         failedOutcome
    where
     failedOutcome message =
-      pure (ToolOutcome ("sub-agent failed: " <> message) True False)
+      pure ("sub-agent failed: " <> message)
 
 spawnTool :: Runtime -> (Text, BackendTool)
 spawnTool parent =
@@ -153,30 +153,29 @@ spawnTool parent =
         "required" .= (["prompt"] :: [Text]),
         "additionalProperties" .= False
       ]
-  execute context arguments
-    | runtimeDepth parent <= 0 =
-        pure (ToolOutcome "delegation depth exhausted" True False)
-    | otherwise =
-        case (runtimeRuns parent, fromJSON arguments) of
-          (Nothing, _) -> pure (ToolOutcome "worker orchestration unavailable" True False)
-          (_, Error message) ->
-            pure (ToolOutcome ("invalid tool arguments: " <> Text.pack message) True False)
-          (Just registry, Success (SpawnCall prompt objective)) ->
-            countActive registry context
-              >>= spawnCheck registry context prompt objective
-  countActive registry context = length <$> childrenOf registry (toolContextRunId context)
-  spawnCheck registry context prompt objective active
-    | active >= limit = pure (ToolOutcome "worker parallel limit reached" True False)
-    | otherwise = spawn registry context prompt objective
+  execute context arguments = case fromJSON arguments of
+    Error message ->
+      pure ("invalid tool arguments: " <> Text.pack message)
+    Success (SpawnCall prompt objective) ->
+      spawn (runtimeRuns parent) context prompt objective
   spawn registry context prompt objective =
     runtimeNewId parent >>= runSpawned
    where
     runSpawned subRunId =
+      mask $ \restore ->
+        reserveChildRun registry limit subRunId (workerDescriptor context prompt objective)
+          >>= bool
+            (pure "worker parallel limit reached")
+            (launch restore subRunId)
+    launch restore subRunId =
       void
         ( forkIO
-            ( runAgent (childRuntime parent) (workerInput context subRunId prompt objective) (const (pure ()))
-                *> notify registry context subRunId prompt objective
+            ( ( restore (runAgent (childRuntime parent) (workerInput context subRunId prompt objective) (const (pure ())))
+                  `onException` releaseReservation registry subRunId
+              )
+                *> restore (notify registry context subRunId prompt objective)
             )
+            `onException` releaseReservation registry subRunId
         )
         $> jsonOutcome (object ["agentId" .= subRunId, "status" .= ("running" :: Text)])
   notify registry context subRunId prompt objective =
@@ -209,16 +208,16 @@ sendTool parent =
   description =
     "Send a steering message to a running worker you spawned in this run. The worker receives it at its next turn boundary, like a user steering note. Use to narrow scope, add missing context, or redirect — not to change what it must deliver."
   schema = objectSchema ["agentId", "text"] (object ["agentId" .= stringSchema, "text" .= stringSchema])
-  execute context arguments =
-    case (runtimeRuns parent, fromJSON arguments) of
-      (Nothing, _) -> pure (ToolOutcome "worker orchestration unavailable" True False)
-      (_, Error message) ->
-        pure (ToolOutcome ("invalid tool arguments: " <> Text.pack message) True False)
-      (Just registry, Success (SendCall agentId text)) ->
-        childOf registry (toolContextRunId context) agentId
-          >>= sendToChild registry agentId text
+  execute context arguments = case fromJSON arguments of
+    Error message ->
+      pure ("invalid tool arguments: " <> Text.pack message)
+    Success (SendCall agentId text) ->
+      childOf registry (toolContextRunId context) agentId
+        >>= sendToChild registry agentId text
+   where
+    registry = runtimeRuns parent
   sendToChild registry agentId text isChild
-    | not isChild = pure (ToolOutcome "unknown worker" True False)
+    | not isChild = pure "unknown worker"
     | otherwise =
         steerRun registry agentId (ChatUser text) $> jsonOutcome (object ["delivered" .= True])
 
@@ -230,31 +229,30 @@ statusTool parent =
   description =
     "Check one of your workers: returns running, or the terminal outcome (completed, failed or cancelled) with its result. Only workers spawned in this run are visible."
   schema = objectSchema ["agentId"] (object ["agentId" .= stringSchema])
-  execute context arguments =
-    case (runtimeRuns parent, fromJSON arguments) of
-      (Nothing, _) -> pure (ToolOutcome "worker orchestration unavailable" True False)
-      (_, Error message) ->
-        pure (ToolOutcome ("invalid tool arguments: " <> Text.pack message) True False)
-      (Just registry, Success (StatusCall agentId)) ->
-        childOf registry (toolContextRunId context) agentId
-          >>= statusCheck registry context agentId
+  execute context arguments = case fromJSON arguments of
+    Error message ->
+      pure ("invalid tool arguments: " <> Text.pack message)
+    Success (StatusCall agentId) ->
+      childOf registry (toolContextRunId context) agentId
+        >>= statusCheck registry context agentId
+   where
+    registry = runtimeRuns parent
   statusCheck registry context agentId running
     | running =
         pure (jsonOutcome (object ["status" .= ("running" :: Text)]))
     | otherwise =
         completionFor registry agentId >>= completionStatus context
   completionStatus context (Just completion)
-    | completionParent completion == Just (toolContextRunId context) =
+    | completionParent completion == toolContextRunId context =
         pure
           ( jsonOutcome
               ( object
                   [ "status" .= statusName (completionOutcome completion),
-                    "outcome" .= statusName (completionOutcome completion),
                     "result" .= completionResult completion
                   ]
               )
           )
-  completionStatus _ _ = pure (ToolOutcome "unknown worker" True False)
+  completionStatus _ _ = pure "unknown worker"
 
 listTool :: Runtime -> (Text, BackendTool)
 listTool parent =
@@ -264,12 +262,10 @@ listTool parent =
   description = "List all workers spawned in this run with their status and objective."
   schema = objectSchema [] (object [])
   execute context _ =
-    case runtimeRuns parent of
-      Nothing -> pure (ToolOutcome "worker orchestration unavailable" True False)
-      Just registry ->
-        liftA2 (,) (childrenOf registry parentRunId) (completionsOf registry parentRunId)
-          <&> jsonOutcome . object . pure . ("workers" .=) . render
+    liftA2 (,) (childrenOf registry parentRunId) (completionsOf registry parentRunId)
+      <&> jsonOutcome . object . pure . ("workers" .=) . render
    where
+    registry = runtimeRuns parent
     parentRunId = toolContextRunId context
     render (active, completed) = fmap running active <> fmap terminal completed
     running info =
@@ -302,14 +298,12 @@ waitTool parent =
             "timeoutSeconds" .= integerSchema
           ]
       )
-  execute context arguments =
-    case (runtimeRuns parent, fromJSON arguments) of
-      (Nothing, _) -> pure (ToolOutcome "worker orchestration unavailable" True False)
-      (_, Error message) ->
-        pure (ToolOutcome ("invalid tool arguments: " <> Text.pack message) True False)
-      (Just registry, Success (WaitCall agentIds timeoutSeconds)) ->
-        getPOSIXTime
-          >>= waitPhase registry context agentIds timeoutSeconds
+  execute context arguments = case fromJSON arguments of
+    Error message ->
+      pure ("invalid tool arguments: " <> Text.pack message)
+    Success (WaitCall agentIds timeoutSeconds) ->
+      getPOSIXTime
+        >>= waitPhase (runtimeRuns parent) context agentIds timeoutSeconds
   waitPhase registry context agentIds timeoutSeconds start =
     poll registry (toolContextRunId context) (deadline start timeoutSeconds) agentIds
       <&> jsonOutcome . render
@@ -345,16 +339,16 @@ cancelTool parent =
   name = "sub_agent_cancel"
   description = "Cancel a running worker you spawned in this run. Its partial work is discarded."
   schema = objectSchema ["agentId"] (object ["agentId" .= stringSchema])
-  execute context arguments =
-    case (runtimeRuns parent, fromJSON arguments) of
-      (Nothing, _) -> pure (ToolOutcome "worker orchestration unavailable" True False)
-      (_, Error message) ->
-        pure (ToolOutcome ("invalid tool arguments: " <> Text.pack message) True False)
-      (Just registry, Success (CancelCall agentId)) ->
-        childOf registry (toolContextRunId context) agentId
-          >>= cancelChild registry agentId
+  execute context arguments = case fromJSON arguments of
+    Error message ->
+      pure ("invalid tool arguments: " <> Text.pack message)
+    Success (CancelCall agentId) ->
+      childOf registry (toolContextRunId context) agentId
+        >>= cancelChild registry agentId
+   where
+    registry = runtimeRuns parent
   cancelChild registry agentId isChild
-    | not isChild = pure (ToolOutcome "unknown worker" True False)
+    | not isChild = pure "unknown worker"
     | otherwise = cancelRun registry agentId $> jsonOutcome (object ["cancelled" .= True])
 
 childOf :: RunRegistry -> Text -> Text -> IO Bool
@@ -367,15 +361,20 @@ scopedCompletion registry parentRunId agentId =
     >>= scopedToParent
  where
   scopedToParent (Just completion)
-    | completionParent completion == Just parentRunId = pure (Just completion)
+    | completionParent completion == parentRunId = pure (Just completion)
   scopedToParent _ = pure Nothing
 
 childRuntime :: Runtime -> Runtime
 childRuntime parent =
   parent
-    { runtimeDepth = runtimeDepth parent - 1,
-      runtimeTools = delegableTools parent
+    { runtimeTools = delegableTools parent
     }
+
+workerDescriptor :: ToolContext -> Text -> Maybe Text -> RunDescriptor
+workerDescriptor context prompt objective =
+  RunDescriptor
+    (Just (toolContextRunId context))
+    (Just (Text.take 120 (fromMaybe prompt objective)))
 
 workerInput :: ToolContext -> Text -> Text -> Maybe Text -> AGUI.RunAgentInput
 workerInput context subRunId prompt objective =
@@ -383,35 +382,17 @@ workerInput context subRunId prompt objective =
     { AGUI.runThreadId = toolContextThreadId context,
       AGUI.runId = subRunId,
       AGUI.runParentId = Just (toolContextRunId context),
-      AGUI.runState = object [],
       AGUI.runMessages =
-        [ AGUI.User (AGUI.UserMessage (subRunId <> "-objective") (AGUI.UserText label) Nothing)
+        [ AGUI.User (AGUI.UserMessage (subRunId <> "-objective") label)
         | Just label <- [objective]
         ]
-          <> [ AGUI.User (AGUI.UserMessage (subRunId <> "-prompt") (AGUI.UserText prompt) Nothing)
-             ],
-      AGUI.runTools = [],
-      AGUI.runContext = [],
-      AGUI.runForwardedProps = object ["delegationId" .= toolContextCallId context]
+          <> [AGUI.User (AGUI.UserMessage (subRunId <> "-prompt") prompt)]
     }
-
-workerDeniedTools :: Set.Set Text
-workerDeniedTools =
-  Set.fromList
-    [ "memory_remember",
-      "memory_void",
-      "self_update",
-      "sleep",
-      "propose_dispatch"
-    ]
 
 delegableTools :: Runtime -> Map.Map Text BackendTool
 delegableTools =
   Map.filterWithKey
-    ( \toolName _ ->
-        toolName `Set.notMember` workerDeniedTools
-          && not ("sub_agent" `Text.isPrefixOf` toolName)
-    )
+    (\toolName _ -> not ("sub_agent" `Text.isPrefixOf` toolName))
     . runtimeTools
 
 outcomeText :: CompletionOutcome -> Text
@@ -427,9 +408,8 @@ statusName Cancelled = "cancelled"
 firstLine :: Text -> Text
 firstLine = fromMaybe "" . listToMaybe . Text.lines
 
-jsonOutcome :: (ToJSON value) => value -> ToolOutcome
-jsonOutcome value =
-  ToolOutcome (TextEncoding.decodeUtf8 (LazyByteString.toStrict (encode value))) False False
+jsonOutcome :: (ToJSON value) => value -> Text
+jsonOutcome = TextEncoding.decodeUtf8 . LazyByteString.toStrict . encode
 
 stringSchema, integerSchema :: Value
 stringSchema = object ["type" .= ("string" :: Text)]
@@ -447,53 +427,32 @@ objectSchema required properties =
       "additionalProperties" .= False
     ]
 
-newtype Delegation = Delegation
-  { delegationPrompt :: Text
-  }
-  deriving stock (Eq, Show)
+newtype Delegation = Delegation Text
 
 instance FromJSON Delegation where
   parseJSON = withObject "Delegation" $ \fields -> Delegation <$> fields .: "prompt"
 
-data SpawnCall = SpawnCall
-  { spawnPrompt :: Text,
-    spawnObjective :: Maybe Text
-  }
-  deriving stock (Eq, Show)
+data SpawnCall = SpawnCall Text (Maybe Text)
 
 instance FromJSON SpawnCall where
   parseJSON = withObject "SpawnCall" $ \fields -> SpawnCall <$> fields .: "prompt" <*> fields .:? "objective"
 
-data SendCall = SendCall
-  { sendAgentId :: Text,
-    sendText :: Text
-  }
-  deriving stock (Eq, Show)
+data SendCall = SendCall Text Text
 
 instance FromJSON SendCall where
   parseJSON = withObject "SendCall" $ \fields -> SendCall <$> fields .: "agentId" <*> fields .: "text"
 
-newtype StatusCall = StatusCall
-  { statusAgentId :: Text
-  }
-  deriving stock (Eq, Show)
+newtype StatusCall = StatusCall Text
 
 instance FromJSON StatusCall where
   parseJSON = withObject "StatusCall" $ \fields -> StatusCall <$> fields .: "agentId"
 
-data WaitCall = WaitCall
-  { waitAgentIds :: [Text],
-    waitTimeoutSeconds :: Maybe Int
-  }
-  deriving stock (Eq, Show)
+data WaitCall = WaitCall [Text] (Maybe Int)
 
 instance FromJSON WaitCall where
   parseJSON = withObject "WaitCall" $ \fields -> WaitCall <$> fields .: "agentIds" <*> fields .:? "timeoutSeconds"
 
-newtype CancelCall = CancelCall
-  { cancelAgentId :: Text
-  }
-  deriving stock (Eq, Show)
+newtype CancelCall = CancelCall Text
 
 instance FromJSON CancelCall where
   parseJSON = withObject "CancelCall" $ \fields -> CancelCall <$> fields .: "agentId"

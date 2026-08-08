@@ -3,14 +3,10 @@ module Yuki.N.Domain.Context
     ContextConfig (..),
     attachCompactionArtifact,
     compactMessages,
-    compactToBudget,
     contextBudget,
     contextSummaryMarker,
-    contextWindow,
     emergencyCompactMessages,
-    estimateMessageTokens,
     estimateMessagesTokens,
-    estimateTextTokens,
   )
 where
 
@@ -20,25 +16,20 @@ import Data.List (mapAccumL)
 import Data.Maybe (fromMaybe, listToMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
-import GHC.Generics (Generic)
 import Yuki.N.Domain.Model
 
 data ContextConfig = ContextConfig
   { contextReserveTokens :: Int,
     contextKeepUnits :: Int,
-    contextSummaryTokens :: Int,
-    contextFallbackChars :: Int
+    contextSummaryTokens :: Int
   }
   deriving stock (Eq, Show)
-  deriving Generic
 
 data Compaction = Compaction
   { compactionMessages :: [ChatMessage],
-    compactionDropped :: [ChatMessage],
     compactionBeforeTokens :: Int,
     compactionAfterTokens :: Int,
     compactionBudgetTokens :: Int,
-    compactionKeptUnits :: Int,
     compactionSummary :: Text,
     compactionPayload :: Text
   }
@@ -47,13 +38,11 @@ data Compaction = Compaction
 contextSummaryMarker :: Text
 contextSummaryMarker = "[context summary]"
 
--- | 压缩入口。`toolTokens` 是调用方预先算好的工具规格 token 代价（协议相关估计
--- 由外层 `Yuki.N.Context` 负责），Domain 只消费该标量。
-compactMessages :: ContextConfig -> Maybe Int -> Int -> [ChatMessage] -> Maybe Compaction
+compactMessages :: ContextConfig -> Int -> Int -> [ChatMessage] -> Maybe Compaction
 compactMessages config window toolTokens =
   compactToBudget config (contextBudget config window toolTokens)
 
-emergencyCompactMessages :: ContextConfig -> Maybe Int -> Int -> [ChatMessage] -> Maybe Compaction
+emergencyCompactMessages :: ContextConfig -> Int -> Int -> [ChatMessage] -> Maybe Compaction
 emergencyCompactMessages config window toolTokens =
   compactToBudget emergency (max 256 (contextBudget config window toolTokens `div` 2))
  where
@@ -63,12 +52,9 @@ emergencyCompactMessages config window toolTokens =
         contextSummaryTokens = min 384 (contextSummaryTokens config)
       }
 
-contextBudget :: ContextConfig -> Maybe Int -> Int -> Int
+contextBudget :: ContextConfig -> Int -> Int -> Int
 contextBudget config window toolTokens =
-  max 256 (contextWindow config window - contextReserveTokens config - toolTokens)
-
-contextWindow :: ContextConfig -> Maybe Int -> Int
-contextWindow config = fromMaybe (max 1024 (contextFallbackChars config `div` 3))
+  max 256 (window - contextReserveTokens config - toolTokens)
 
 compactToBudget :: ContextConfig -> Int -> [ChatMessage] -> Maybe Compaction
 compactToBudget config budget messages
@@ -78,11 +64,9 @@ compactToBudget config budget messages
       Just
         Compaction
           { compactionMessages = final,
-            compactionDropped = concat dropped,
             compactionBeforeTokens = before,
             compactionAfterTokens = estimateMessagesTokens final,
             compactionBudgetTokens = budget,
-            compactionKeptUnits = length kept,
             compactionSummary = summary,
             compactionPayload = payload
           }
@@ -244,7 +228,7 @@ estimateTextTokens text = max 1 (nonAscii + asciiTokens)
  where
   (ascii, nonAscii) =
     Text.foldl'
-      (\(a, n) char -> if Char.isAscii char then (a + 1, n) else (a, n + 1))
+      (\(a, n) char -> bool (a, n + 1) (a + 1, n) (Char.isAscii char))
       (0, 0)
       text
   asciiTokens = (ascii + 2) `div` 3

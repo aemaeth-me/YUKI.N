@@ -1,6 +1,5 @@
 module Yuki.N.AtomicFile
   ( atomicEncodeFile,
-    atomicWriteLazy,
     atomicWriteText,
   )
 where

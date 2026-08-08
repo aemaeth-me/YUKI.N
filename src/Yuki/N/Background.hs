@@ -1,16 +1,10 @@
 module Yuki.N.Background
-  ( BackgroundProc (..),
-    BackgroundRegistry,
+  ( BackgroundRegistry,
     BackgroundSnapshot (..),
-    backgroundTaskCount,
-    completedRetentionLimit,
     feedBackground,
     killBackground,
-    lookupBackground,
     newBackgroundRegistry,
-    newBackgroundRegistryWithLimit,
     shutdownBackground,
-    shutdownBackgroundThread,
     snapshotBackground,
     spawnBackground,
   )
@@ -36,9 +30,8 @@ import System.IO (Handle, hClose, hFlush)
 import System.Process
 import System.Timeout (timeout)
 
-data BackgroundRegistry = BackgroundRegistry
-  { registryProcesses :: IORef (Map Text BackgroundProc),
-    registryCompletedLimit :: Int
+newtype BackgroundRegistry = BackgroundRegistry
+  { registryProcesses :: IORef (Map Text BackgroundProc)
   }
 
 data BackgroundProc = BackgroundProc
@@ -58,21 +51,8 @@ data BackgroundSnapshot = BackgroundSnapshot
     snapshotTruncated :: Bool
   }
 
-completedRetentionLimit :: Int
-completedRetentionLimit = 32
-
 newBackgroundRegistry :: IO BackgroundRegistry
-newBackgroundRegistry = newBackgroundRegistryWithLimit completedRetentionLimit
-
-newBackgroundRegistryWithLimit :: Int -> IO BackgroundRegistry
-newBackgroundRegistryWithLimit limit =
-  newIORef Map.empty <&> flip BackgroundRegistry (max 0 limit)
-
-backgroundTaskCount :: BackgroundRegistry -> IO Int
-backgroundTaskCount = fmap Map.size . readIORef . registryProcesses
-
-lookupBackground :: BackgroundRegistry -> Text -> IO (Maybe BackgroundProc)
-lookupBackground registry taskId = Map.lookup taskId <$> readIORef (registryProcesses registry)
+newBackgroundRegistry = BackgroundRegistry <$> newIORef Map.empty
 
 ringLimit :: Int
 ringLimit = 64 * 1024
@@ -193,14 +173,6 @@ killBackground registry threadId taskId =
         | backgroundThreadId task == threadId -> (Map.delete taskId procs, Just task)
       _ -> (procs, Nothing)
 
-shutdownBackgroundThread :: BackgroundRegistry -> Text -> IO ()
-shutdownBackgroundThread registry threadId =
-  atomicModifyIORef' (registryProcesses registry) detach >>= traverse_ stopTask
- where
-  detach processes =
-    let (ownedTasks, remaining) = Map.partition ((== threadId) . backgroundThreadId) processes
-     in (remaining, Map.elems ownedTasks)
-
 shutdownBackground :: BackgroundRegistry -> IO ()
 shutdownBackground registry =
   atomicModifyIORef' (registryProcesses registry) (\processes -> (Map.empty, Map.elems processes))
@@ -244,7 +216,7 @@ pruneCompleted registry =
  where
   trimExpired registry' states =
     let done = sortOn (backgroundStarted . snd) (catMaybes states)
-        excess = max 0 (length done - registryCompletedLimit registry')
+        excess = max 0 (length done - 32)
         expired = Map.fromList [(taskId, ()) | (taskId, _) <- take excess done]
      in atomicModifyIORef'
           (registryProcesses registry')

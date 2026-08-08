@@ -1,95 +1,124 @@
 module Yuki.N.ThreadConfig
-  ( module Yuki.N.ThreadConfig.Types,
-    globalThreadConfig,
-    newMemoryThreadConfigStore,
-    newThreadConfigStore,
-    renderGlobalConfig,
+  ( CwdSetting (..),
+    ThreadConfig (..),
+    cwdPath,
+    loadThreadConfig,
     resolveRuntime,
   )
 where
 
 import Control.Applicative ((<|>))
-import Control.Concurrent.MVar (newMVar, withMVar)
 import Control.Exception (IOException, try)
-import Control.Monad (when)
-import Data.Aeson
+import Data.Aeson (FromJSON (..), decodeFileStrict, withObject, (.:), (.:?))
 import Data.Bool (bool)
-import Data.Functor ((<&>))
-import Data.IORef (modifyIORef', newIORef, readIORef)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (fromMaybe, isNothing)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Network.HTTP.Client (Manager)
-import System.Directory (createDirectoryIfMissing, doesFileExist, removeFile)
 import Yuki.N.AGUI.Types (toolName)
 import Yuki.N.Agent
 import Yuki.N.Artifact (ArtifactStore, artifactReadToolName)
-import Yuki.N.AtomicFile (atomicEncodeFile)
-import Yuki.N.Config (Settings (..))
 import Yuki.N.Context (ContextConfig (..))
 import Yuki.N.Domain.Thread (sanitizeThreadId)
 import Yuki.N.Provider.OpenAI
-import Yuki.N.Providers (ProviderEntry (..), ProviderRegistry, providerConfig, providerDefaultModel)
-import Yuki.N.SubAgent (registerSubAgent)
-import Yuki.N.ThreadConfig.Types
+import Yuki.N.Providers (ProviderRegistry, providerConfig)
 import Yuki.N.Tools (backgroundTools, workTools)
 
-newThreadConfigStore :: FilePath -> IO ThreadConfigStore
-newThreadConfigStore dir =
-  createDirectoryIfMissing True (configsPath dir)
-    *> newMVar ()
-    <&> mkStore
- where
-  mkStore lock = ThreadConfigStore (load dir) (save lock) (delete lock)
-  save lock threadId config =
-    withMVar lock (const (atomicEncodeFile (configPath dir threadId) config))
-  delete lock threadId =
-    withMVar lock $ \_ ->
-      doesFileExist target >>= flip when (removeFile target)
-   where
-    target = configPath dir threadId
+data CwdSetting
+  = CwdInherit
+  | CwdNone
+  | CwdPath FilePath
+  deriving stock (Eq, Show)
 
-load :: FilePath -> Text -> IO ThreadConfig
-load dir threadId =
-  either (const emptyThreadConfig) (fromMaybe emptyThreadConfig)
+cwdPath :: CwdSetting -> Maybe FilePath
+cwdPath CwdInherit = Nothing
+cwdPath CwdNone = Nothing
+cwdPath (CwdPath path) = Just path
+
+data ThreadConfig = ThreadConfig
+  { configCwd :: CwdSetting,
+    configSystemPrompt :: Maybe Text,
+    configProvider :: Maybe Text,
+    configModel :: Maybe Text,
+    configReasoningEffort :: Maybe ReasoningEffort,
+    configFs :: Maybe Bool,
+    configShell :: Maybe Bool,
+    configContextReserveTokens :: Maybe Int,
+    configContextKeepUnits :: Maybe Int,
+    configContextSummaryTokens :: Maybe Int
+  }
+  deriving stock (Eq, Show)
+
+instance Semigroup ThreadConfig where
+  session <> fallback =
+    ThreadConfig
+      cwd
+      (pick configSystemPrompt)
+      (pick configProvider)
+      (pick configModel)
+      (pick configReasoningEffort)
+      (pick configFs)
+      (pick configShell)
+      (pick configContextReserveTokens)
+      (pick configContextKeepUnits)
+      (pick configContextSummaryTokens)
+   where
+    cwd = case configCwd session of
+      CwdInherit -> configCwd fallback
+      explicit -> explicit
+    pick :: (ThreadConfig -> Maybe field) -> Maybe field
+    pick field = field session <|> field fallback
+
+instance Monoid ThreadConfig where
+  mempty = ThreadConfig CwdInherit Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+
+instance FromJSON ThreadConfig where
+  parseJSON = withObject "ThreadConfig" $ \fields ->
+    ThreadConfig
+      <$> parseCwd fields
+      <*> fields .:? "systemPrompt"
+      <*> fields .:? "provider"
+      <*> fields .:? "model"
+      <*> fields .:? "reasoningEffort"
+      <*> fields .:? "fs"
+      <*> fields .:? "shell"
+      <*> fields .:? "contextReserveTokens"
+      <*> fields .:? "contextKeepUnits"
+      <*> fields .:? "contextSummaryTokens"
+   where
+    parseCwd fields = fields .:? "cwdMode" >>= maybe (pure CwdInherit) (explicit fields)
+    explicit _ "inherit" = pure CwdInherit
+    explicit _ "none" = pure CwdNone
+    explicit fields "path" = CwdPath <$> fields .: "cwd"
+    explicit _ mode = fail ("unknown cwdMode: " <> Text.unpack mode)
+
+loadThreadConfig :: FilePath -> Text -> IO ThreadConfig
+loadThreadConfig dir threadId =
+  either (const mempty) (fromMaybe mempty)
     <$> (try (decodeFileStrict (configPath dir threadId)) :: IO (Either IOException (Maybe ThreadConfig)))
 
-configsPath :: FilePath -> FilePath
-configsPath dir = dir ++ "/threads-config"
-
 configPath :: FilePath -> Text -> FilePath
-configPath dir threadId = configsPath dir ++ "/" ++ Text.unpack (sanitizeThreadId threadId) ++ ".json"
-
-newMemoryThreadConfigStore :: IO ThreadConfigStore
-newMemoryThreadConfigStore =
-  newIORef Map.empty
-    <&> mkStore
- where
-  mkStore configs =
-    ThreadConfigStore
-      ((<$> readIORef configs) . Map.findWithDefault emptyThreadConfig)
-      ((modifyIORef' configs .) . Map.insert)
-      (modifyIORef' configs . Map.delete)
+configPath dir threadId = dir ++ "/threads-config/" ++ Text.unpack (sanitizeThreadId threadId) ++ ".json"
 
 resolveRuntime :: Manager -> OpenAIConfig -> Maybe ArtifactStore -> Runtime -> ThreadConfig -> ProviderRegistry -> Map.Map String Text -> IO Runtime
 resolveRuntime manager provider artifacts base config registry keyMap =
   fmap build workToolSet
  where
   build tools =
-    registerSubAgent
-      base
-        { runtimeModel = maybe (fallbackModel base) (openAIModel manager) chosenConfig,
-          runtimeTools = artifactTools <> gated tools,
-          runtimeSystemPrompt = fromMaybe (runtimeSystemPrompt base) (configSystemPrompt config),
-          runtimeContext = applyContext <$> runtimeContext base
-        }
+    base
+      { runtimeModel = maybe (fallbackModel base) (openAIModel manager) chosenConfig,
+        runtimeTools = artifactTools <> gated tools,
+        runtimeSystemPrompt = fromMaybe (runtimeSystemPrompt base) (configSystemPrompt config),
+        runtimeContext = applyContext (runtimeContext base)
+      }
   chosenConfig = configProvider config >>= pick
   pick name =
     liftA2 resolve (Map.lookup name registry) (Map.lookup (Text.unpack name) keyMap)
   resolve entry key =
-    applyEffort (providerConfig entry key (configModel config <|> Just (providerDefaultModel entry)))
+    applyEffort (providerConfig entry key (configModel config))
   fallbackModel source
+    | isJust (configProvider config) = runtimeModel source
     | isNothing (configModel config) && isNothing (configReasoningEffort config) = runtimeModel source
     | otherwise = openAIModel manager (applyEffort provider) {openAIModelName = fromMaybe (openAIModelName provider) (configModel config)}
   applyEffort cfg = maybe cfg (\effort -> cfg {openAIThinking = ThinkingEnabled effort}) (configReasoningEffort config)
@@ -106,72 +135,3 @@ resolveRuntime manager provider artifacts base config registry keyMap =
         contextKeepUnits = fromMaybe (contextKeepUnits context) (configContextKeepUnits config),
         contextSummaryTokens = fromMaybe (contextSummaryTokens context) (configContextSummaryTokens config)
       }
-
-globalThreadConfig :: Settings -> ThreadConfig
-globalThreadConfig settings =
-  ThreadConfig
-    { configCwd = maybe CwdNone CwdPath (settingsWorkDir settings),
-      configSystemPrompt = bool (Just prompt) Nothing (Text.null prompt),
-      configProvider = Nothing,
-      configModel = Nothing,
-      configReasoningEffort = Nothing,
-      configFs = Nothing,
-      configShell = Nothing,
-      configContextReserveTokens = Just (settingsContextReserveTokens settings),
-      configContextKeepUnits = Just (settingsContextKeepUnits settings),
-      configContextSummaryTokens = Just (settingsContextSummaryTokens settings)
-    }
- where
-  prompt = settingsSystemPrompt settings
-
-renderGlobalConfig :: Settings -> ThreadConfig -> Value
-renderGlobalConfig settings defaults =
-  object
-    [ "provider"
-        .= object
-          [ "name" .= openAIProvider provider,
-            "model" .= openAIModelName provider,
-            "baseUrl" .= openAIBaseUrl provider,
-            "apiKey" .= ("＊＊＊" :: Text),
-            "dialect" .= dialectName (openAIDialect provider),
-            "thinking" .= thinkingName (openAIThinking provider),
-            "maxTokens" .= openAIMaxTokens provider,
-            "contextTokens" .= openAIContextTokens provider
-          ],
-      "settings"
-        .= object
-          [ "host" .= settingsHost settings,
-            "port" .= settingsPort settings,
-            "corsOrigin" .= settingsCorsOrigin settings,
-            "maxTurns" .= settingsMaxTurns settings,
-            "providerRetries" .= settingsProviderRetries settings,
-            "fallbackProviders" .= settingsFallbackProviders settings,
-            "toolExecution" .= executionName (settingsToolExecution settings),
-            "systemPrompt" .= settingsSystemPrompt settings,
-            "workDir" .= settingsWorkDir settings,
-            "artifactDir" .= settingsArtifactDir settings,
-            "transcriptDir" .= settingsTranscriptDir settings,
-            "spliceChars" .= settingsSpliceChars settings,
-            "spliceKeep" .= settingsSpliceKeep settings,
-            "contextReserveTokens" .= settingsContextReserveTokens settings,
-            "contextKeepUnits" .= settingsContextKeepUnits settings,
-            "contextSummaryTokens" .= settingsContextSummaryTokens settings
-          ],
-      "defaults" .= defaults
-    ]
- where
-  provider = settingsProvider settings
-
-dialectName :: ApiDialect -> Text
-dialectName DeepSeek = "deepseek"
-dialectName OpenAICompatible = "openai-compatible"
-
-thinkingName :: ThinkingMode -> Text
-thinkingName ThinkingDisabled = "disabled"
-thinkingName (ThinkingEnabled Low) = "low"
-thinkingName (ThinkingEnabled High) = "high"
-thinkingName (ThinkingEnabled Max) = "max"
-
-executionName :: ToolExecution -> Text
-executionName Parallel = "parallel"
-executionName Sequential = "sequential"

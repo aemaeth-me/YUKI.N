@@ -1,29 +1,18 @@
 module Yuki.N.Provider.OpenAI
   ( ApiDialect (..),
-    ChatChunk (..),
-    ChatChoice (..),
-    ChatDelta (..),
-    DeltaFunction (..),
-    DeltaToolCall (..),
     OpenAIConfig (..),
     ReasoningEffort (..),
-    SseDecoder,
     ThinkingMode (..),
-    chunkEvents,
-    emptySseDecoder,
-    feedSse,
-    fetchModelIds,
-    finishSse,
     openAIModel,
-    requestValue,
+    parseDialectText,
   )
 where
 
 import Control.Applicative ((<|>))
-import Control.Exception (catch, throwIO, try)
+import Control.Exception (catch, throwIO)
 import Control.Monad (foldM, join, mfilter)
 import Data.Aeson
-import Data.Aeson.Types (Pair, parseMaybe)
+import Data.Aeson.Types (Pair, Parser, parseMaybe)
 import Data.Bifunctor (first)
 import Data.Bool (bool)
 import Data.ByteString (ByteString)
@@ -40,7 +29,7 @@ import Data.Text.Encoding.Error (lenientDecode)
 import Network.HTTP.Client
 import Network.HTTP.Types.Header (hAccept, hAuthorization, hContentType)
 import Network.HTTP.Types.Status (Status, statusCode, statusMessage)
-import Yuki.N.AGUI.Types (ToolSpec (..), firstPresent, pair)
+import Yuki.N.AGUI.Types (ToolSpec (..))
 import Yuki.N.Model
 
 data OpenAIConfig = OpenAIConfig
@@ -51,13 +40,18 @@ data OpenAIConfig = OpenAIConfig
     openAIDialect :: ApiDialect,
     openAIThinking :: ThinkingMode,
     openAIMaxTokens :: Maybe Int,
-    openAIContextTokens :: Maybe Int
+    openAIContextTokens :: Int
   }
 
 data ApiDialect
   = DeepSeek
   | OpenAICompatible
   deriving stock (Eq, Show)
+
+parseDialectText :: Text -> Either Text ApiDialect
+parseDialectText "deepseek" = Right DeepSeek
+parseDialectText "openai-compatible" = Right OpenAICompatible
+parseDialectText value = Left ("dialect must be deepseek or openai-compatible; got " <> value)
 
 data ThinkingMode
   = ThinkingDisabled
@@ -79,11 +73,8 @@ instance FromJSON ReasoningEffort where
 openAIModel :: Manager -> OpenAIConfig -> Model
 openAIModel manager config =
   Model
-    { modelProvider = openAIProvider config,
-      modelName = openAIModelName config,
-      modelContextTokens = openAIContextTokens config,
-      streamModel = streamProvider manager config,
-      modelRender = requestValue config
+    { modelContextTokens = openAIContextTokens config,
+      streamModel = streamProvider manager config
     }
 
 streamProvider ::
@@ -124,28 +115,9 @@ apiEndpoint config =
 
 apiRoot :: Text -> Text
 apiRoot base =
-  fromMaybe trimmed (Text.stripSuffix "/chat/completions" trimmed <|> Text.stripSuffix "/responses" trimmed <|> Text.stripSuffix "/models" trimmed)
+  fromMaybe trimmed (Text.stripSuffix "/chat/completions" trimmed <|> Text.stripSuffix "/responses" trimmed)
  where
   trimmed = Text.dropWhileEnd (== '/') base
-
-fetchModelIds :: Manager -> OpenAIConfig -> IO (Either Text [Text])
-fetchModelIds manager config =
-  try request >>= either (pure . Left . Text.pack . showHttp) inspect
- where
-  request =
-    parseRequest (Text.unpack (modelsEndpoint (openAIBaseUrl config)))
-      >>= flip httpLbs manager . withAuthHeaders
-  withAuthHeaders req = req {requestHeaders = [(hAuthorization, "Bearer " <> TextEncoding.encodeUtf8 (openAIApiKey config))]}
-  showHttp (exception :: HttpException) = show exception
-  inspect response
-    | statusCode (responseStatus response) > 299 =
-        pure (Left ("provider returned HTTP " <> Text.pack (show (statusCode (responseStatus response)))))
-    | otherwise =
-        pure (maybe (Left "models payload unrecognized") Right (decode (responseBody response) >>= parseMaybe modelList))
-  modelList = withObject "ModelList" (\body -> body .: "data" >>= mapM (withObject "model" (.: "id")))
-
-modelsEndpoint :: Text -> Text
-modelsEndpoint = (<> "/models") . apiRoot
 
 requestValue :: OpenAIConfig -> ModelRequest -> Value
 requestValue config =
@@ -158,8 +130,7 @@ chatRequestValue config modelRequest =
   object $
     [ "model" .= openAIModelName config,
       "messages" .= fmap (chatMessageValue config) (requestMessages modelRequest),
-      "stream" .= True,
-      "stream_options" .= object ["include_usage" .= True]
+      "stream" .= True
     ]
       <> pair "tools" tools
       <> pair "max_tokens" (openAIMaxTokens config)
@@ -369,8 +340,8 @@ responseEvent event =
     "response.reasoning_text.delta" -> Right (textDelta ModelReasoningDelta, Nothing, False)
     "response.function_call_arguments.delta" -> Right (argumentDelta, Nothing, False)
     "response.output_item.added" -> Right (itemEvents, itemFinish, False)
-    "response.completed" -> Right (usage, Nothing, True)
-    "response.incomplete" -> Right (usage, Just Length, True)
+    "response.completed" -> Right ([], Nothing, True)
+    "response.incomplete" -> Right ([], Just Length, True)
     "response.failed" -> Left (ProviderFailure ("provider response failed: " <> failure))
     "error" -> Left (ProviderFailure ("provider stream error: " <> failure))
     _ -> Right ([], Nothing, False)
@@ -379,7 +350,6 @@ responseEvent event =
   argumentDelta = maybeToList (ModelToolCallDelta (responsesEventOutputIndex event) Nothing Nothing <$> responsesEventDelta event)
   itemEvents = maybe [] (responseItemEvents (responsesEventOutputIndex event)) (responsesEventItem event)
   itemFinish = bool Nothing (Just ToolUse) (maybe False ((== "function_call") . responseItemType) (responsesEventItem event))
-  usage = maybeToList (ModelUsage . responseUsageValue <$> responseUsage event)
   failure = maybe "unknown response failure" compactValue (responseFailure event)
 
 responseItemEvents :: Int -> ResponseItem -> [ModelEvent]
@@ -393,22 +363,10 @@ responseItemEvents index item
           (fromMaybe "" (responseItemArguments item))
       ]
 
-responseUsage :: ResponsesEvent -> Maybe ResponseUsage
-responseUsage event =
-  join (parseMaybe (withObject "response" (.:? "usage")) =<< responsesEventResponse event)
-
 responseFailure :: ResponsesEvent -> Maybe Value
 responseFailure event =
   responsesEventError event
     <|> join (parseMaybe (withObject "response" (.:? "error")) =<< responsesEventResponse event)
-
-responseUsageValue :: ResponseUsage -> Usage
-responseUsageValue usage =
-  Usage
-    (responseInputTokens usage)
-    (responseOutputTokens usage)
-    (responseCachedTokens usage)
-    ((-) <$> responseInputTokens usage <*> responseCachedTokens usage)
 
 decodeResponsesEvent :: ByteString -> Either ProviderFailure ResponsesEvent
 decodeResponsesEvent =
@@ -421,10 +379,7 @@ chunkEvents chunk
   | otherwise =
       let choices = filter ((== 0) . choiceIndex) (chunkChoices chunk)
           finish = foldl (\acc choice -> choiceFinishReason choice <|> acc) Nothing choices
-       in (,) (concatMap choiceEvents choices <> usageEvents chunk) <$> traverse parseFinish finish
-
-usageEvents :: ChatChunk -> [ModelEvent]
-usageEvents = maybeToList . fmap ModelUsage . chunkUsage
+       in (,) (concatMap choiceEvents choices) <$> traverse parseFinish finish
 
 choiceEvents :: ChatChoice -> [ModelEvent]
 choiceEvents choice =
@@ -479,8 +434,7 @@ nonEmpty values = bool (Just values) Nothing (null values)
 
 data ChatChunk = ChatChunk
   { chunkChoices :: [ChatChoice],
-    chunkError :: Maybe Value,
-    chunkUsage :: Maybe Usage
+    chunkError :: Maybe Value
   }
 
 data ChatChoice = ChatChoice
@@ -523,12 +477,6 @@ data ResponseItem = ResponseItem
     responseItemArguments :: Maybe Text
   }
 
-data ResponseUsage = ResponseUsage
-  { responseInputTokens :: Maybe Int,
-    responseOutputTokens :: Maybe Int,
-    responseCachedTokens :: Maybe Int
-  }
-
 instance FromJSON ResponsesEvent where
   parseJSON = withObject "ResponsesEvent" $ \fields ->
     ResponsesEvent
@@ -548,16 +496,9 @@ instance FromJSON ResponseItem where
       <*> fields .:? "name"
       <*> fields .:? "arguments"
 
-instance FromJSON ResponseUsage where
-  parseJSON = withObject "ResponseUsage" $ \fields ->
-    ResponseUsage
-      <$> fields .:? "input_tokens"
-      <*> fields .:? "output_tokens"
-      <*> (fields .:? "input_tokens_details" >>= maybe (pure Nothing) (withObject "InputTokenDetails" (.:? "cached_tokens")))
-
 instance FromJSON ChatChunk where
   parseJSON = withObject "ChatCompletionChunk" $ \fields ->
-    ChatChunk <$> (fields .:? "choices" .!= []) <*> fields .:? "error" <*> fields .:? "usage"
+    ChatChunk <$> (fields .:? "choices" .!= []) <*> fields .:? "error"
 
 instance FromJSON ChatChoice where
   parseJSON = withObject "ChatCompletionChoice" $ \fields ->
@@ -583,6 +524,13 @@ instance FromJSON DeltaToolCall where
 instance FromJSON DeltaFunction where
   parseJSON = withObject "ChatCompletionFunctionDelta" $ \fields ->
     DeltaFunction <$> fields .:? "name" <*> fields .:? "arguments"
+
+firstPresent :: (FromJSON value) => Object -> [Key] -> Parser (Maybe value)
+firstPresent fields =
+  foldr (\key rest -> fields .:? key >>= maybe rest (pure . Just)) (pure Nothing)
+
+pair :: (ToJSON value) => Key -> Maybe value -> [Pair]
+pair key = maybe [] (pure . (key .=))
 
 emptyDelta :: ChatDelta
 emptyDelta = ChatDelta Nothing Nothing []

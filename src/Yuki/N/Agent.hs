@@ -1,27 +1,10 @@
 module Yuki.N.Agent
-  ( AgentHooks (..),
-    BackendTool (..),
-    RunOutcome (..),
+  ( BackendTool (..),
     artifactReadTool,
-    ResponseState,
     Runtime (..),
     ToolContext (..),
-    ToolExecution (..),
-    ToolOutcome (..),
-    closeModelTurn,
-    compactHistory,
-    defaultHooks,
-    emptyResponse,
-    failAgent,
-    forcedCompaction,
-    historyChars,
-    jsonTool,
     newId,
     runAgent,
-    runtimeContextWindow,
-    spliceTargets,
-    stepModelEvent,
-    toChatMessages,
   )
 where
 
@@ -33,10 +16,8 @@ import Control.Monad (void, (>=>))
 import Data.Aeson
   ( FromJSON (..),
     Result (..),
-    ToJSON,
     Value,
     eitherDecodeStrict',
-    encode,
     fromJSON,
     object,
     withObject,
@@ -45,16 +26,13 @@ import Data.Aeson
   )
 import Data.Bifunctor (first)
 import Data.Bool (bool)
-import Data.ByteString.Lazy qualified as LazyByteString
 import Data.Foldable (traverse_)
 import Data.Functor (($>), (<&>))
 import Data.IORef
 import Data.List (sortOn)
 import Data.Map.Strict (Map)
 import Data.Map.Strict qualified as Map
-import Data.Maybe (catMaybes, fromMaybe, isJust, listToMaybe, mapMaybe, maybeToList)
-import Data.Set (Set)
-import Data.Set qualified as Set
+import Data.Maybe (fromMaybe, isJust, listToMaybe, mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as TextEncoding
@@ -77,14 +55,11 @@ import Yuki.N.Background (BackgroundRegistry)
 import Yuki.N.Context
 import Yuki.N.Model
 import Yuki.N.Runs
-  ( RunCancelled (..),
-    RunDescriptor (..),
+  ( RunDescriptor (..),
     RunInfo (..),
-    RunKind (..),
     RunRegistry,
     cancelRun,
     childrenOf,
-    drainFollowUps,
     drainSteering,
     withRunRegistrationFor,
     writeCompletion,
@@ -97,24 +72,21 @@ data Runtime = Runtime
     runtimeToolExecution :: ToolExecution,
     runtimeMaxTurns :: Int,
     runtimeSystemPrompt :: Text,
-    runtimeHooks :: AgentHooks,
+    runtimeAfterRun :: AGUI.RunAgentInput -> [ChatMessage] -> IO (),
     runtimeNewId :: IO Text,
     runtimeArtifactStore :: Maybe ArtifactStore,
     runtimeBackground :: BackgroundRegistry,
-    runtimeDepth :: Int,
     runtimeSubAgentMaxParallel :: Int,
     runtimeProviderRetries :: Int,
     runtimeFallbacks :: [Model],
-    runtimeSplice :: Maybe SpliceConfig,
-    runtimeContext :: Maybe ContextConfig,
-    runtimeRuns :: Maybe RunRegistry,
-    runtimeSteer :: Int -> IO [ChatMessage],
-    runtimeFollowUp :: Int -> IO [ChatMessage]
+    runtimeSplice :: SpliceConfig,
+    runtimeContext :: ContextConfig,
+    runtimeRuns :: RunRegistry
   }
 
 data BackendTool = BackendTool
   { backendToolSpec :: AGUI.ToolSpec,
-    runBackendTool :: ToolContext -> Value -> IO ToolOutcome
+    runBackendTool :: ToolContext -> Value -> IO Text
   }
 
 data ToolContext = ToolContext
@@ -123,37 +95,6 @@ data ToolContext = ToolContext
     toolContextCallId :: Text,
     toolContextEmit :: Event -> IO ()
   }
-
-newtype AgentHooks = AgentHooks
-  { afterRun :: AGUI.RunAgentInput -> [ChatMessage] -> IO ()
-  }
-
-data RunOutcome
-  = RunSucceeded
-  | RunFailed Text Text
-  | RunWasCancelled
-  deriving stock (Eq, Show)
-
-defaultHooks :: AgentHooks
-defaultHooks = AgentHooks {afterRun = \_ _ -> pure ()}
-
-instance Semigroup AgentHooks where
-  left <> right =
-    AgentHooks
-      { afterRun = \input messages -> afterRun left input messages *> afterRun right input messages
-      }
-
-instance Monoid AgentHooks where
-  mempty = defaultHooks
-
-jsonTool :: (FromJSON input, ToJSON output) => AGUI.ToolSpec -> (input -> IO (Either Text output)) -> BackendTool
-jsonTool spec execute = BackendTool spec (const (decode . fromJSON))
- where
-  decode = \case
-    Error message -> pure (failure ("invalid tool arguments: " <> Text.pack message))
-    Success input ->
-      execute input
-        <&> either failure (success . TextEncoding.decodeUtf8 . LazyByteString.toStrict . encode)
 
 artifactReadTool :: ArtifactStore -> BackendTool
 artifactReadTool store = BackendTool spec (const readBack)
@@ -170,10 +111,10 @@ artifactReadTool store = BackendTool spec (const readBack)
           ]
       )
   readBack arguments = case fromJSON arguments of
-    Error message -> pure (failure ("invalid tool arguments: " <> Text.pack message))
+    Error message -> pure ("invalid tool arguments: " <> Text.pack message)
     Success (ArtifactRead identifier) ->
       artifactFetch store identifier
-        >>= maybe (pure (failure ("unknown artifact: " <> identifier))) (pure . success)
+        <&> fromMaybe ("unknown artifact: " <> identifier)
 
 newtype ArtifactRead = ArtifactRead Text
 
@@ -186,25 +127,19 @@ runAgent runtime input emit =
  where
   runId = AGUI.runId input
   descriptor = descriptorOf input
-  registered = maybe id (\registry -> withRunRegistrationFor registry runId descriptor) (runtimeRuns runtime)
-  runtime' =
-    runtime
-      { runtimeSteer = maybe (runtimeSteer runtime) (\registry _ -> drainSteering registry runId) (runtimeRuns runtime),
-        runtimeFollowUp = maybe (runtimeFollowUp runtime) (\registry _ -> drainFollowUps registry runId) (runtimeRuns runtime)
-      }
+  registered = withRunRegistrationFor (runtimeRuns runtime) runId descriptor
   emit' = deliver
-  hooks = runtimeHooks runtime
   deliver event = try @SomeException (emit event) >>= either relay pure
   relay exception
-    | isJust (fromException exception :: Maybe RunCancelled) = throwIO exception
+    | isJust (fromException exception :: Maybe Runs.RunCancelled) = throwIO exception
     | isJust (fromException exception :: Maybe SomeAsyncException) = throwIO exception
     | otherwise = throwIO (DeliveryFailure exception)
-  settle checkpoint =
+  settle checkpoint cancelled =
     newIORef False >>= settled
    where
     settled accounted =
-      emit' (RunStarted (AGUI.runThreadId input) runId (AGUI.runParentId input))
-        *> ( (terminal checkpoint >>= conclude accounted)
+      emit' (RunStarted (AGUI.runThreadId input) runId)
+        *> ( (terminal checkpoint cancelled >>= conclude accounted)
                `onException` ( readIORef checkpoint
                                  >>= void
                                    . runAfter accounted
@@ -217,56 +152,47 @@ runAgent runtime input emit =
           >>= closeCompleted messages
       Failed message code ->
         cascadeChildren
-          *> bestEffortAfter accounted (readIORef checkpoint)
           *> readIORef checkpoint
-          >>= closeFailed code message
+          >>= finishCheckpoint accounted (closeFailed code message)
       Cancelled ->
         cascadeChildren
-          *> bestEffortAfter accounted (readIORef checkpoint)
           *> readIORef checkpoint
-          >>= closeCancelled
+          >>= finishCheckpoint accounted closeCancelled
     closeCompleted messages (Left persistenceError) =
       recordCompletion Runs.Completed (finalText messages)
-        *> emit' (RunError ("durable run close failed: " <> persistenceError) (Just "PERSISTENCE_ERROR"))
+        *> emit' (RunError ("durable run close failed: " <> persistenceError) "PERSISTENCE_ERROR")
     closeCompleted messages (Right ()) =
       recordCompletion Runs.Completed (finalText messages)
-        *> emit' (RunFinished (AGUI.runThreadId input) runId Nothing)
+        *> emit' (RunFinished (AGUI.runThreadId input) runId)
     closeFailed code message history =
-      recordCompletion (failureOutcome code message) (finalText history)
-        *> emit' (RunError message (Just code))
+      recordCompletion (Runs.Failed (code <> ": " <> message)) (finalText history)
+        *> emit' (RunError message code)
     closeCancelled history =
       recordCompletion Runs.Cancelled (finalText history)
-        *> emit' (Custom "run.cancelled" (object ["runId" .= runId]))
-        *> emit' (RunFinished (AGUI.runThreadId input) runId Nothing)
+        *> emit' (RunCancelled runId)
     cascadeChildren =
       quietlyOrch "cascade" $
-        maybe
-          (pure ())
-          (\registry -> childrenOf registry runId >>= traverse_ (cancelRun registry . runInfoId))
-          (runtimeRuns runtime)
+        childrenOf registry runId >>= traverse_ (cancelRun registry . runInfoId)
+     where
+      registry = runtimeRuns runtime
     recordCompletion outcome result =
-      maybe
-        (pure ())
-        (\registry -> writeCompletion registry runId (AGUI.runParentId input) outcome result)
-        (runtimeRuns runtime)
+      traverse_
+        (\parent -> writeCompletion (runtimeRuns runtime) runId parent outcome result)
+        (AGUI.runParentId input)
     runAfter accounted messages =
       trySync
         ( once
             accounted
-            (afterRun hooks input messages)
+            (runtimeAfterRun runtime input messages)
         )
-    bestEffortAfter accounted load =
-      load >>= runAfter accounted >>= reportPersistence
-    reportPersistence (Left persistenceError) =
-      emit'
-        ( Custom
-            "run.persistence_error"
-            (object ["runId" .= runId, "message" .= persistenceError])
-        )
-    reportPersistence (Right ()) = pure ()
-  terminal checkpoint =
-    (Completed <$> runCore runtime' input emit' checkpoint)
-      `catches` [ Handler (\RunCancelled {} -> pure Cancelled),
+    finishCheckpoint accounted close history =
+      runAfter accounted history *> close history
+  terminal checkpoint cancelled =
+    bool
+      (Completed <$> runCore runtime input emit' checkpoint)
+      (pure Cancelled)
+      cancelled
+      `catches` [ Handler (\Runs.RunCancelled -> pure Cancelled),
                   Handler (\(AgentFailure code message) -> pure (Failed message code)),
                   Handler (\(ProviderFailure message) -> pure (Failed message "PROVIDER_ERROR")),
                   Handler (\(DeliveryFailure exception) -> throwIO exception),
@@ -288,11 +214,6 @@ data Terminal
   = Completed [ChatMessage]
   | Failed Text Text
   | Cancelled
-
-failureOutcome :: Text -> Text -> Runs.CompletionOutcome
-failureOutcome code message
-  | Text.null code = Runs.Failed message
-  | otherwise = Runs.Failed (code <> ": " <> message)
 
 finalText :: [ChatMessage] -> Text
 finalText =
@@ -316,32 +237,15 @@ quietlyOrch label action =
       (fromException exception :: Maybe SomeAsyncException)
   report (Right ()) = pure ()
 
-workerNotice :: Text -> Maybe (Text, Text, Text)
-workerNotice text =
-  Text.stripPrefix "[worker " text >>= parse
- where
-  parse rest =
-    let (worker, afterId) = Text.breakOn " " rest
-        (outcome, summary) = Text.breakOn "] " (Text.drop 1 afterId)
-     in if Text.null worker || Text.null outcome || Text.null summary
-          then Nothing
-          else Just (worker, outcome, Text.drop 2 summary)
-
 descriptorOf :: AGUI.RunAgentInput -> RunDescriptor
 descriptorOf input =
   RunDescriptor
-    (AGUI.runThreadId input)
-    ""
     (AGUI.runParentId input)
-    (maybe RunTask (const RunWorker) (AGUI.runParentId input))
     (objectiveOf input)
 
 objectiveOf :: AGUI.RunAgentInput -> Maybe Text
 objectiveOf input =
-  Text.take 120 <$> listToMaybe [text | AGUI.User message <- AGUI.runMessages input, Just text <- [contentText (AGUI.userContent message)]]
- where
-  contentText (AGUI.UserText text) = Just text
-  contentText (AGUI.UserParts parts) = listToMaybe [text | AGUI.InputText text <- parts]
+  Text.take 120 <$> listToMaybe [AGUI.userContent message | AGUI.User message <- AGUI.runMessages input]
 
 newtype ContextOverflow = ContextOverflow ProviderFailure
   deriving stock Show
@@ -371,22 +275,18 @@ newtype DeliveryFailure = DeliveryFailure SomeException
 
 instance Exception DeliveryFailure
 
-failAgent :: Text -> IO value
-failAgent = throwIO . AgentFailure "AGENT_ERROR"
-
 runCore :: Runtime -> AGUI.RunAgentInput -> (Event -> IO ()) -> IORef [ChatMessage] -> IO [ChatMessage]
 runCore runtime input emit checkpoint =
   mkContext >>= start
  where
-  tools = availableTools runtime input
-  clientTools = Set.fromList (AGUI.toolName <$> AGUI.runTools input)
+  tools = availableTools runtime
   mkContext =
     RunContext (AGUI.runId input) (AGUI.runThreadId input)
       <$> newIORef Map.empty
       <*> newIORef Map.empty
 
   start runContext =
-    either failAgent pure (initialMessages runtime input) >>= loop runContext 1
+    loop runContext 1 (initialMessages runtime input)
 
   loop runContext stepNum history
     | stepNum > runtimeMaxTurns runtime =
@@ -399,28 +299,27 @@ runCore runtime input emit checkpoint =
               )
           )
     | otherwise =
-        runtimeSteer runtime stepNum >>= appendSteering stepNum history >>= afterSteer stepNum
+        steering >>= afterSteer stepNum . (history <>)
    where
     afterSteer step history' =
       spliceContext runtime runContext history' >>= afterSplice step
-    afterSplice step (spliced, events) =
-      traverse_ emit events
-        *> emitContextStatus runtime tools False spliced emit
-        *> compactContext runtime step tools False emit spliced
+    afterSplice step spliced =
+      emitContextStatus runtime tools False spliced emit
+        *> compactContext runtime tools False emit spliced
         >>= afterCompact step
     afterCompact step compacted =
-      writeIORef checkpoint compacted *> modelTurn step compacted compacted
+      writeIORef checkpoint compacted *> modelTurn step compacted
 
-    modelTurn turn messages transformed =
+    modelTurn turn messages =
       emit (StepStarted "model")
-        *> request messages transformed
+        *> request messages
         >>= uncurry (finishTurn turn)
      where
-      request base context =
-        ((,) base <$> streamTurn runtime context tools emit) `catch` recover base
+      request base =
+        ((,) base <$> streamTurn runtime base tools emit) `catch` recover base
       recover base (ContextOverflow cause) =
         emitContextStatus runtime tools True base emit
-          *> compactContext runtime turn tools True emit base
+          *> compactContext runtime tools True emit base
           >>= restream
        where
         restream compacted =
@@ -437,49 +336,25 @@ runCore runtime input emit checkpoint =
           failTruncated runtime calls emit >>= loop runContext (turn + 1) . (messages <>)
       | otherwise =
           emit (StepStarted "tools")
-            *> executeTools runtime runContext clientTools calls emit
+            *> executeTools runtime runContext calls emit
             >>= finishTools turn messages
 
     answer _ _ ToolUse =
       throwIO (ProviderFailure "provider reported tool use without a tool call")
     answer turn messages _ = continueAfterAnswer turn messages
 
-    finishTools turn messages (results, awaitsFrontend, terminate) =
+    finishTools turn messages results =
       emit (StepFinished "tools")
-        *> bool (loop runContext (turn + 1) final) (pure final) (awaitsFrontend || terminate)
-     where
-      final = messages <> results
+        *> loop runContext (turn + 1) (messages <> results)
 
     continueAfterAnswer turn messages =
-      runtimeSteer runtime next >>= continueSteering
+      steering >>= continueSteering
      where
       next = turn + 1
-      continueSteering [] =
-        runtimeFollowUp runtime next >>= continueFollowUp
-      continueSteering extra = appendSteering next messages extra >>= loop runContext next
-      continueFollowUp [] = pure messages
-      continueFollowUp extra = appendFollowUp next messages extra >>= loop runContext next
+      continueSteering [] = pure messages
+      continueSteering extra = loop runContext next (messages <> extra)
 
-    appendSteering = appendQueued "steering.inject"
-    appendFollowUp = appendQueued "followup.inject"
-    appendQueued _ _ base [] = pure base
-    appendQueued kind step base extra =
-      emit (Custom kind (object ["step" .= step, "count" .= length extra]))
-        *> traverse_ (emit . workerNoticeEvent) (workerNotices kind)
-        $> base <> extra
-     where
-      workerNotices "steering.inject" = mapMaybe workerNotice [text | ChatSystem text <- extra]
-      workerNotices _ = []
-      workerNoticeEvent (worker, outcome, summary) =
-        Custom
-          "worker.notice"
-          ( object
-              [ "runId" .= worker,
-                "parentRunId" .= AGUI.runId input,
-                "outcome" .= outcome,
-                "summary" .= summary
-              ]
-          )
+    steering = drainSteering (runtimeRuns runtime) (AGUI.runId input)
 
 historyChars :: [ChatMessage] -> Int
 historyChars = sum . fmap messageChars
@@ -501,38 +376,30 @@ spliceTargets keep messages =
 dropLast :: Int -> [value] -> [value]
 dropLast count values = take (length values - count) values
 
-spliceContext :: Runtime -> RunContext -> [ChatMessage] -> IO ([ChatMessage], [Event])
+spliceContext :: Runtime -> RunContext -> [ChatMessage] -> IO [ChatMessage]
 spliceContext runtime runContext messages =
-  maybe (pure (messages, [])) stub ((,) <$> runtimeArtifactStore runtime <*> runtimeSplice runtime)
+  maybe (pure messages) (stub (runtimeSplice runtime)) (runtimeArtifactStore runtime)
  where
-  stub (store, config)
-    | historyChars messages <= spliceChars config = pure (messages, [])
+  stub config store
+    | historyChars messages <= spliceChars config = pure messages
     | otherwise =
-        traverse (stubOne store) (spliceTargets (spliceKeep config) messages) >>= finish config
+        traverse (stubOne store) (spliceTargets (spliceKeep config) messages) >>= finish
   stubOne store (index, callId, content) =
     toolNameOf callId >>= saveSplice
    where
     saveSplice name =
-      artifactSave store name content >>= finishSplice name
+      artifactSave store content >>= finishSplice name
     finishSplice name identifier =
       let stubbed = artifactStub identifier name content
-       in pure ((index, ChatToolResult callId stubbed), Text.length content - Text.length stubbed)
+       in pure (index, ChatToolResult callId stubbed)
   toolNameOf callId = Map.findWithDefault "tool" callId <$> readIORef (runContextNames runContext)
-  finish config done =
-    pure
-      ( [Map.findWithDefault message index replaced | (index, message) <- zip [0 ..] messages],
-        [ Custom
-            "context.splice"
-            (object ["stubbed" .= length done, "savedChars" .= saved, "keep" .= spliceKeep config])
-        | not (null done)
-        ]
-      )
+  finish done =
+    pure [Map.findWithDefault message index replaced | (index, message) <- zip [0 ..] messages]
    where
-    replaced = Map.fromList (fmap fst done)
-    saved = sum (fmap snd done)
+    replaced = Map.fromList done
 
-compactContext :: Runtime -> Int -> [AGUI.ToolSpec] -> Bool -> (Event -> IO ()) -> [ChatMessage] -> IO [ChatMessage]
-compactContext runtime step tools emergency emit messages =
+compactContext :: Runtime -> [AGUI.ToolSpec] -> Bool -> (Event -> IO ()) -> [ChatMessage] -> IO [ChatMessage]
+compactContext runtime tools emergency emit messages =
   maybe (pure messages) materialize (planCompaction runtime emergency tools messages)
  where
   materialize =
@@ -542,144 +409,71 @@ compactContext runtime step tools emergency emit messages =
       ( Custom
           "context.compact"
           ( object
-              [ "step" .= step,
-                "beforeTokens" .= compactionBeforeTokens compaction,
-                "afterTokens" .= compactionAfterTokens compaction,
-                "budgetTokens" .= compactionBudgetTokens compaction,
-                "droppedMessages" .= length (compactionDropped compaction),
-                "keptUnits" .= compactionKeptUnits compaction,
-                "emergency" .= emergency
+              [ "beforeTokens" .= compactionBeforeTokens compaction,
+                "afterTokens" .= compactionAfterTokens compaction
               ]
           )
       )
       $> compactionMessages compaction
 
-forcedCompaction :: Runtime -> [AGUI.ToolSpec] -> [ChatMessage] -> Maybe Compaction
-forcedCompaction runtime tools messages =
-  runtimeContext runtime >>= build
- where
-  build config =
-    let budget = max 64 (min (contextBudget config (runtimeContextWindow runtime) tools) (estimateMessagesTokens messages * 2 `div` 3))
-     in Just
-          ( fromMaybe
-              (syntheticCompaction budget messages)
-              (compactToBudget config budget messages)
-          )
-
-syntheticCompaction :: Int -> [ChatMessage] -> Compaction
-syntheticCompaction budget messages =
-  Compaction
-    { compactionMessages = leading <> [ChatSystem contextSummaryMarker] <> body,
-      compactionDropped = [],
-      compactionBeforeTokens = before,
-      compactionAfterTokens = estimateMessagesTokens (leading <> [ChatSystem contextSummaryMarker] <> body),
-      compactionBudgetTokens = budget,
-      compactionKeptUnits = length body,
-      compactionSummary = contextSummaryMarker,
-      compactionPayload = "synthetic compaction without token pressure"
-    }
- where
-  before = estimateMessagesTokens messages
-  (leading, body) = span systemMessage messages
-  systemMessage ChatSystem {} = True
-  systemMessage _ = False
-
-compactHistory :: Runtime -> Bool -> [ChatMessage] -> IO (Maybe Compaction)
-compactHistory runtime emergency messages =
-  maybe (pure Nothing) (fmap Just . materializeCompaction runtime) planned
- where
-  tools = backendToolSpec <$> Map.elems (runtimeTools runtime)
-  planned = planCompaction runtime emergency tools messages
-
 planCompaction :: Runtime -> Bool -> [AGUI.ToolSpec] -> [ChatMessage] -> Maybe Compaction
-planCompaction runtime emergency tools messages =
-  runtimeContext runtime >>= plan
- where
-  plan config =
-    (if emergency then emergencyCompactMessages else compactMessages)
-      config
-      (runtimeContextWindow runtime)
-      tools
-      messages
+planCompaction runtime emergency =
+  bool
+    compactMessages
+    emergencyCompactMessages
+    emergency
+    (runtimeContext runtime)
+    (runtimeContextWindow runtime)
 
 materializeCompaction :: Runtime -> Compaction -> IO Compaction
 materializeCompaction runtime initial =
   maybe
     (pure initial)
-    (\store -> artifactSave store "context_compaction" (compactionPayload initial) <&> flip attachCompactionArtifact initial)
+    (\store -> artifactSave store (compactionPayload initial) <&> flip attachCompactionArtifact initial)
     (runtimeArtifactStore runtime)
 
 emitContextStatus :: Runtime -> [AGUI.ToolSpec] -> Bool -> [ChatMessage] -> (Event -> IO ()) -> IO ()
 emitContextStatus runtime tools emergency messages emit =
-  traverse_
-    ( \config ->
-        let normal = contextBudget config (runtimeContextWindow runtime) tools
-            budget =
-              bool
-                normal
-                (max 256 (normal `div` 2))
-                emergency
-            before = estimateMessagesTokens messages
-            window = contextWindow config (runtimeContextWindow runtime)
-            toolTokens = estimateToolsTokens tools
-         in emit
-              ( Custom
-                  "context.status"
-                  ( object
-                      [ "tokens" .= before,
-                        "windowTokens" .= window,
-                        "reserveTokens" .= contextReserveTokens config,
-                        "toolTokens" .= toolTokens,
-                        "budgetTokens" .= budget,
-                        "willCompact" .= (before > budget),
-                        "emergency" .= emergency
-                      ]
-                  )
-              )
+  emit
+    ( Custom
+        "context.status"
+        ( object
+            [ "tokens" .= before,
+              "budgetTokens" .= budget,
+              "willCompact" .= (before > budget),
+              "emergency" .= emergency
+            ]
+        )
     )
-    (runtimeContext runtime)
+ where
+  config = runtimeContext runtime
+  normal = contextBudget config (runtimeContextWindow runtime) tools
+  budget = bool normal (max 256 (normal `div` 2)) emergency
+  before = estimateMessagesTokens messages
 
-runtimeContextWindow :: Runtime -> Maybe Int
-runtimeContextWindow runtime =
-  case mapMaybe modelContextTokens (runtimeModel runtime : runtimeFallbacks runtime) of
-    [] -> Nothing
-    windows -> Just (minimum windows)
+runtimeContextWindow :: Runtime -> Int
+runtimeContextWindow = minimum . fmap modelContextTokens . liftA2 (:) runtimeModel runtimeFallbacks
 
-initialMessages :: Runtime -> AGUI.RunAgentInput -> Either Text [ChatMessage]
+initialMessages :: Runtime -> AGUI.RunAgentInput -> [ChatMessage]
 initialMessages runtime input =
-  (prefix <>) <$> toChatMessages (AGUI.runMessages input)
+  prefix <> toChatMessages (AGUI.runMessages input)
  where
   prefix =
-    [ ChatSystem text
-    | text <- [runtimeSystemPrompt runtime, renderContext (AGUI.runContext input)],
-      not (Text.null text)
-    ]
+    [ChatSystem prompt | let prompt = runtimeSystemPrompt runtime, not (Text.null prompt)]
 
-renderContext :: [AGUI.ContextItem] -> Text
-renderContext =
-  Text.intercalate "\n\n"
-    . fmap (liftA2 (<>) ((<> ":\n") . AGUI.contextDescription) AGUI.contextValue)
-
-toChatMessages :: [AGUI.Message] -> Either Text [ChatMessage]
+toChatMessages :: [AGUI.Message] -> [ChatMessage]
 toChatMessages (AGUI.Reasoning reasoning : AGUI.Assistant assistant : rest) =
-  (assistantMessage (Just (AGUI.reasoningContent reasoning)) assistant :) <$> toChatMessages rest
-toChatMessages (AGUI.Developer developer : rest) =
-  (ChatSystem (AGUI.developerContent developer) :) <$> toChatMessages rest
+  assistantMessage (Just (AGUI.reasoningContent reasoning)) assistant : toChatMessages rest
 toChatMessages (AGUI.System system : rest) =
-  (ChatSystem (AGUI.systemContent system) :) <$> toChatMessages rest
+  ChatSystem (AGUI.systemContent system) : toChatMessages rest
 toChatMessages (AGUI.Assistant assistant : rest) =
-  (assistantMessage Nothing assistant :) <$> toChatMessages rest
+  assistantMessage Nothing assistant : toChatMessages rest
 toChatMessages (AGUI.User user : rest) =
-  AGUI.userText (AGUI.userContent user) >>= prependUser rest
+  ChatUser (AGUI.userContent user) : toChatMessages rest
 toChatMessages (AGUI.Tool tool : rest) =
-  (ChatToolResult (AGUI.toolMessageCallId tool) (AGUI.toolMessageContent tool) :)
-    <$> toChatMessages rest
-toChatMessages (AGUI.Activity _ : rest) = toChatMessages rest
+  ChatToolResult (AGUI.toolMessageCallId tool) (AGUI.toolMessageContent tool) : toChatMessages rest
 toChatMessages (AGUI.Reasoning _ : rest) = toChatMessages rest
-toChatMessages [] = Right []
-
-prependUser :: [AGUI.Message] -> Text -> Either Text [ChatMessage]
-prependUser rest text = (ChatUser text :) <$> toChatMessages rest
+toChatMessages [] = []
 
 assistantMessage :: Maybe Text -> AGUI.AssistantMessage -> ChatMessage
 assistantMessage reasoning message =
@@ -698,13 +492,8 @@ assistantMessage reasoning message =
         modelToolArguments = AGUI.functionArguments (AGUI.toolCallFunction call)
       }
 
-availableTools :: Runtime -> AGUI.RunAgentInput -> [AGUI.ToolSpec]
-availableTools runtime input = reverse . snd $ foldl add (Set.empty, []) candidates
- where
-  candidates = (backendToolSpec <$> Map.elems (runtimeTools runtime)) <> AGUI.runTools input
-  add (seen, tools) tool
-    | AGUI.toolName tool `Set.member` seen = (seen, tools)
-    | otherwise = (Set.insert (AGUI.toolName tool) seen, tool : tools)
+availableTools :: Runtime -> [AGUI.ToolSpec]
+availableTools = fmap backendToolSpec . Map.elems . runtimeTools
 
 data ResponseState = ResponseState
   { responseText :: Text,
@@ -712,8 +501,7 @@ data ResponseState = ResponseState
     responseReasoning :: Text,
     responseReasoningOpen :: Bool,
     responseReasoningClosed :: Bool,
-    responseTools :: Map Int PendingToolCall,
-    responseUsage :: Maybe Usage
+    responseTools :: Map Int PendingToolCall
   }
   deriving stock Eq
 
@@ -733,8 +521,7 @@ emptyResponse =
       responseReasoning = "",
       responseReasoningOpen = False,
       responseReasoningClosed = False,
-      responseTools = Map.empty,
-      responseUsage = Nothing
+      responseTools = Map.empty
     }
 
 emptyPendingTool :: PendingToolCall
@@ -775,7 +562,7 @@ streamTurn runtime messages tools emit =
       | state == emptyResponse && isContextOverflow cause = throwIO (ContextOverflow cause)
       | state == emptyResponse && trial < maxAttempts =
           announce cause *> backoff *> attempt messageId reasoningId model rest (trial + 1) stateRef
-      | otherwise = demote messageId reasoningId model rest stateRef cause
+      | otherwise = demote messageId reasoningId rest stateRef cause
     delayMs = 1000 * 2 ^ (trial - 1)
     backoff = threadDelay (delayMs * 1000)
     announce (ProviderFailure reason) =
@@ -785,29 +572,17 @@ streamTurn runtime messages tools emit =
             ( object
                 [ "attempt" .= trial,
                   "maxAttempts" .= maxAttempts,
-                  "delayMs" .= delayMs,
                   "reason" .= reason
                 ]
             )
         )
-  demote messageId reasoningId model rest stateRef cause =
+  demote messageId reasoningId rest stateRef cause =
     readIORef stateRef >>= advance rest
    where
-    advance (next : remaining) state
+    advance fallbacks@(_ : _) state
       | state == emptyResponse =
-          crossover model next cause *> chain messageId reasoningId (next : remaining) stateRef
+          chain messageId reasoningId fallbacks stateRef
     advance _ _ = throwIO cause
-  crossover from to (ProviderFailure reason) =
-    emit
-      ( Custom
-          "provider.fallback"
-          ( object
-              [ "from" .= (modelProvider from <> "/" <> modelName from),
-                "to" .= (modelProvider to <> "/" <> modelName to),
-                "reason" .= reason
-              ]
-          )
-      )
   consume messageId reasoningId stateRef event =
     readIORef stateRef >>= accept
    where
@@ -826,7 +601,6 @@ stepModelEvent ::
   ModelEvent ->
   Either ProviderFailure (ResponseState, [Event])
 stepModelEvent messageId reasoningId state = \case
-  ModelUsage usage -> Right (state {responseUsage = Just usage}, [])
   ModelReasoningDelta delta
     | Text.null delta -> Right (state, [])
     | responseReasoningClosed state ->
@@ -856,7 +630,7 @@ stepModelEvent messageId reasoningId state = \case
               <> [TextMessageContent messageId delta]
           )
   ModelToolCallDelta index callId name arguments ->
-    let (state', events) = applyToolDelta messageId state index callId name arguments
+    let (state', events) = applyToolDelta state index callId name arguments
      in Right
           ( state' {responseReasoningOpen = False, responseReasoningClosed = True},
             reasoningEnds reasoningId state <> events
@@ -868,14 +642,13 @@ reasoningEnds reasoningId state =
     <> [ReasoningEnded reasoningId | responseReasoningOpen state]
 
 applyToolDelta ::
-  Text ->
   ResponseState ->
   Int ->
   Maybe Text ->
   Maybe Text ->
   Text ->
   (ResponseState, [Event])
-applyToolDelta messageId state index callId name arguments =
+applyToolDelta state index callId name arguments =
   (state {responseTools = Map.insert index current' (responseTools state)}, announcements)
  where
   old = Map.findWithDefault emptyPendingTool index (responseTools state)
@@ -893,7 +666,7 @@ applyToolDelta messageId state index callId name arguments =
       | pendingStarted old ->
           [ToolCallArguments identifier arguments | not (Text.null arguments)]
       | otherwise ->
-          [ToolCallStarted identifier toolName (Just messageId)]
+          [ToolCallStarted identifier toolName]
             <> [ToolCallArguments identifier (pendingArguments current) | not (Text.null (pendingArguments current))]
 
 closeModelTurn ::
@@ -908,8 +681,7 @@ closeModelTurn messageId reasoningId state =
   assemble closed =
     ( reasoningEnds reasoningId state
         <> [TextMessageEnded messageId | responseTextStarted state]
-        <> concatMap fst closed
-        <> maybeToList (usageEvent <$> responseUsage state),
+        <> concatMap fst closed,
       AssistantTurn
         { turnMessageId = messageId,
           turnText = nonEmpty (responseText state),
@@ -919,24 +691,12 @@ closeModelTurn messageId reasoningId state =
     )
   closeTool (_, PendingToolCall (Just identifier) (Just name) arguments started) =
     Right
-      ( [ToolCallStarted identifier name (Just messageId) | not started]
+      ( [ToolCallStarted identifier name | not started]
           <> [ToolCallArguments identifier arguments | not started && not (Text.null arguments)]
           <> [ToolCallEnded identifier],
         modelTool identifier name arguments
       )
   closeTool _ = Left (ProviderFailure "provider returned an incomplete tool call")
-
-usageEvent :: Usage -> Event
-usageEvent usage =
-  Custom
-    "usage"
-    ( object
-        [ "promptTokens" .= usagePromptTokens usage,
-          "completionTokens" .= usageCompletionTokens usage,
-          "cacheHitTokens" .= usageCacheHitTokens usage,
-          "cacheMissTokens" .= usageCacheMissTokens usage
-        ]
-    )
 
 modelTool :: Text -> Text -> Text -> ModelToolCall
 modelTool identifier name arguments =
@@ -948,12 +708,7 @@ modelTool identifier name arguments =
 
 data PreparedTool
   = Execute ModelToolCall BackendTool Value ToolContext
-  | Resolve ModelToolCall ToolOutcome
-  | Defer ModelToolCall
-
-data ResolvedTool
-  = Resolved ModelToolCall ToolOutcome
-  | Deferred
+  | Resolve ModelToolCall Text
 
 data RunContext = RunContext
   { runContextRunId :: Text,
@@ -965,22 +720,21 @@ data RunContext = RunContext
 executeTools ::
   Runtime ->
   RunContext ->
-  Set Text ->
   [ModelToolCall] ->
   (Event -> IO ()) ->
-  IO ([ChatMessage], Bool, Bool)
-executeTools runtime runContext clientTools calls emit =
-  traverse prepare calls >>= resolveAll (runtimeToolExecution runtime) >>= conclude
+  IO [ChatMessage]
+executeTools runtime runContext calls emit =
+  traverse prepare calls >>= resolveAll (runtimeToolExecution runtime) >>= traverse emitResult
  where
   prepare call =
     either
-      (pure . Resolve call . failure)
+      (pure . Resolve call)
       (pure . dispatch call)
       (decodeArguments call)
 
   dispatch call arguments =
     maybe
-      (missing call)
+      (Resolve call ("unknown tool: " <> modelToolName call))
       (\tool -> Execute call tool arguments (context call))
       (Map.lookup (modelToolName call) (runtimeTools runtime))
 
@@ -992,31 +746,24 @@ executeTools runtime runContext clientTools calls emit =
         toolContextEmit = emit
       }
 
-  missing call
-    | modelToolName call `Set.member` clientTools = Defer call
-    | otherwise = Resolve call (failure ("unknown tool: " <> modelToolName call))
-
   resolveAll Sequential = traverse resolve
   resolveAll Parallel = mapConcurrently resolve
 
   resolve = \case
     Execute call tool arguments toolContext ->
-      Resolved call <$> safely (runBackendTool tool toolContext arguments)
-    Resolve call outcome -> pure (Resolved call outcome)
-    Defer _ -> pure Deferred
+      (call,) <$> safely (runBackendTool tool toolContext arguments)
+    Resolve call outcome -> pure (call, outcome)
 
-  emitResult = \case
-    Deferred -> pure Nothing
-    Resolved call outcome -> runtimeNewId runtime >>= emitResolved call outcome
+  emitResult (call, content) = runtimeNewId runtime >>= emitResolved call content
 
-  emitResolved call outcome messageId =
-    present (modelToolName call) (toolOutcomeContent outcome)
+  emitResolved call content messageId =
+    present (modelToolName call) content
       >>= announce
    where
-    announce content =
-      Just (ChatToolResult (modelToolCallId call) content)
+    announce presented =
+      ChatToolResult (modelToolCallId call) presented
         <$ modifyIORef' (runContextNames runContext) (Map.insert (modelToolCallId call) (modelToolName call))
-        <* emit (ToolCallResult messageId (modelToolCallId call) (toolOutcomeContent outcome))
+        <* emit (ToolCallResult messageId (modelToolCallId call) content)
 
   present name content =
     maybe (pure content) dedup (runtimeArtifactStore runtime)
@@ -1033,18 +780,9 @@ executeTools runtime runContext clientTools calls emit =
         | original == content = pure (artifactStub identifier name content)
       decide _ = retain
       retain =
-        artifactSave store name content >>= storeResult
+        artifactSave store content >>= storeResult
       storeResult identifier =
         content <$ modifyIORef' (runContextSeen runContext) (Map.insert key (identifier, content))
-
-  conclude resolved =
-    traverse emitResult resolved <&> summarize
-   where
-    summarize results =
-      let outcomes = [outcome | Resolved _ outcome <- resolved]
-          awaitsFrontend = any isDeferred resolved
-          terminate = not (null outcomes) && all toolOutcomeTerminate outcomes && not awaitsFrontend
-       in (catMaybes results, awaitsFrontend, terminate)
 
 failTruncated :: Runtime -> [ModelToolCall] -> (Event -> IO ()) -> IO [ChatMessage]
 failTruncated runtime calls emit =
@@ -1062,28 +800,18 @@ decodeArguments call =
     (\message -> "invalid JSON arguments for " <> modelToolName call <> ": " <> Text.pack message)
     (eitherDecodeStrict' (TextEncoding.encodeUtf8 (modelToolArguments call)))
 
-safely :: IO ToolOutcome -> IO ToolOutcome
+safely :: IO Text -> IO Text
 safely action =
-  (try action :: IO (Either SomeException ToolOutcome)) >>= either recover pure
+  try @SomeException action >>= either recover pure
  where
   recover exception =
     maybe
-      (pure (failure (Text.pack (displayException exception))))
+      (pure (Text.pack (displayException exception)))
       throwIO
       (rethrowable exception)
   rethrowable exception =
     ((fromException exception :: Maybe SomeAsyncException) $> exception)
-      <|> ((fromException exception :: Maybe RunCancelled) $> exception)
-
-isDeferred :: ResolvedTool -> Bool
-isDeferred Deferred = True
-isDeferred _ = False
-
-success :: Text -> ToolOutcome
-success content = ToolOutcome content False False
-
-failure :: Text -> ToolOutcome
-failure content = ToolOutcome content True False
+      <|> ((fromException exception :: Maybe Runs.RunCancelled) $> exception)
 
 nonEmpty :: Text -> Maybe Text
 nonEmpty text = bool (Just text) Nothing (Text.null text)

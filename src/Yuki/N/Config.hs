@@ -1,6 +1,5 @@
 module Yuki.N.Config
   ( Settings (..),
-    loadSettings,
     resolveSettings,
   )
 where
@@ -12,9 +11,8 @@ import Data.Map.Strict qualified as Map
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
-import System.Environment (getEnvironment)
 import Text.Read (readMaybe)
-import Yuki.N.Agent (ToolExecution (..))
+import Yuki.N.Model (ToolExecution (..))
 import Yuki.N.Provider.OpenAI
 
 data Settings = Settings
@@ -28,7 +26,6 @@ data Settings = Settings
     settingsArtifactDir :: Maybe String,
     settingsTranscriptDir :: Maybe String,
     settingsWorkDir :: Maybe String,
-    settingsSubAgentDepth :: Int,
     settingsSubAgentMaxParallel :: Int,
     settingsProviderRetries :: Int,
     settingsSpliceChars :: Int,
@@ -40,9 +37,6 @@ data Settings = Settings
     settingsFallbackProviders :: [Text]
   }
 
-loadSettings :: IO (Either Text Settings)
-loadSettings = resolveSettings . Map.fromList <$> getEnvironment
-
 resolveSettings :: Map String String -> Either Text Settings
 resolveSettings environment =
   make
@@ -50,7 +44,6 @@ resolveSettings environment =
     <*> positiveBounded "YUKI_PORT" 65535 (value "YUKI_PORT" `orElse` "18080")
     <*> positive "YUKI_MAX_TURNS" (value "YUKI_MAX_TURNS" `orElse` "32")
     <*> parseExecution (value "YUKI_TOOL_EXECUTION" `orElse` "parallel")
-    <*> nonNegative "YUKI_SUBAGENT_DEPTH" (value "YUKI_SUBAGENT_DEPTH" `orElse` "1")
     <*> positive "YUKI_SUBAGENT_MAX_PARALLEL" (value "YUKI_SUBAGENT_MAX_PARALLEL" `orElse` "4")
     <*> nonNegative "YUKI_PROVIDER_RETRIES" (value "YUKI_PROVIDER_RETRIES" `orElse` "3")
     <*> positive "YUKI_SPLICE_CHARS" (value "YUKI_SPLICE_CHARS" `orElse` "200000")
@@ -61,7 +54,7 @@ resolveSettings environment =
     <*> parseFallbacks (Text.pack <$> Map.lookup "YUKI_FALLBACK_PROVIDERS" environment)
  where
   value key = Map.lookup key environment
-  make provider port maxTurns execution subAgentDepth subAgentMaxParallel providerRetries spliceChars spliceKeep reserveTokens keepUnits summaryTokens fallbacks =
+  make provider port maxTurns execution subAgentMaxParallel providerRetries spliceChars spliceKeep reserveTokens keepUnits summaryTokens fallbacks =
     Settings
       { settingsHost = value "YUKI_HOST" `orElse` "127.0.0.1",
         settingsPort = port,
@@ -73,7 +66,6 @@ resolveSettings environment =
         settingsArtifactDir = value "YUKI_ARTIFACT_DIR",
         settingsTranscriptDir = value "YUKI_TRANSCRIPT_DIR",
         settingsWorkDir = value "YUKI_WORK_DIR",
-        settingsSubAgentDepth = subAgentDepth,
         settingsSubAgentMaxParallel = subAgentMaxParallel,
         settingsProviderRetries = providerRetries,
         settingsSpliceChars = spliceChars,
@@ -93,14 +85,14 @@ providerSettings environment =
     <*> requiredText "YUKI_API_KEY" (text "YUKI_API_KEY" <|> (presetKeyVariable preset >>= text))
     <*> dialectSettings
     <*> traverse (positive "YUKI_MAX_TOKENS" . Text.unpack) (text "YUKI_MAX_TOKENS")
-    <*> (Just <$> positive "YUKI_CONTEXT_TOKENS" (value "YUKI_CONTEXT_TOKENS" `orElse` "1000000"))
+    <*> positive "YUKI_CONTEXT_TOKENS" (value "YUKI_CONTEXT_TOKENS" `orElse` "1000000")
  where
   provider = text "YUKI_PROVIDER" `orElse` "deepseek"
   preset = providerPreset provider
   value key = Map.lookup key environment
   text key = Text.pack <$> Map.lookup key environment
   dialectSettings =
-    maybe (Right (presetDialect preset)) parseDialect (text "YUKI_API_DIALECT")
+    maybe (Right (presetDialect preset)) parseDialectText (text "YUKI_API_DIALECT")
       >>= withThinking
   withThinking dialect =
     (,) dialect <$> parseThinking dialect (text "YUKI_THINKING") (text "YUKI_REASONING_EFFORT") preset
@@ -186,12 +178,6 @@ parseEffort = \case
   "high" -> Right High
   "max" -> Right Max
   other -> Left ("YUKI_REASONING_EFFORT must be high or max, got " <> other)
-
-parseDialect :: Text -> Either Text ApiDialect
-parseDialect = \case
-  "deepseek" -> Right DeepSeek
-  "openai-compatible" -> Right OpenAICompatible
-  other -> Left ("YUKI_API_DIALECT must be deepseek or openai-compatible, got " <> other)
 
 parseFallbacks :: Maybe Text -> Either Text [Text]
 parseFallbacks = maybe (Right []) names

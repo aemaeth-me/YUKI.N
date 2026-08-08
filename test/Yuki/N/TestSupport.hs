@@ -2,7 +2,6 @@ module Yuki.N.TestSupport
   ( afterSpy,
     waitUntil,
     streamInput,
-    cancelRequest,
     decodeChunks,
     contextConfig,
     contextConversation,
@@ -115,17 +114,6 @@ streamRequest body =
         pathInfo = ["agent"],
         requestHeaders = [(hContentType, "application/json")]
       }
-cancelRequest :: Text -> SRequest
-cancelRequest run =
-  SRequest
-    { simpleRequest =
-        defaultRequest
-          { requestMethod = methodPost,
-            pathInfo = ["agent", "cancel"],
-            requestHeaders = [(hContentType, "application/json")]
-          },
-      simpleRequestBody = encode (object ["runId" .= run])
-    }
 decodeChunks :: IORef [Builder.Builder] -> IO [Event]
 decodeChunks ref =
   readIORef ref >>= decodeAll . foldl feed (emptySseDecoder, []) . fmap bytes . reverse

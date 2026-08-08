@@ -10,22 +10,22 @@ import Network.HTTP.Client (Manager)
 import Network.HTTP.Client.TLS (newTlsManager)
 import System.Environment (getEnvironment)
 import System.Exit (die)
-import Yuki.N.AGUI.Types (toolName)
+import Yuki.N.AGUI.Types qualified as AGUI
 import Yuki.N.Agent
 import Yuki.N.AgentsMd (agentsMdSection, appendAgentsMd)
-import Yuki.N.Artifact (ArtifactStore, SpliceConfig (..), artifactReadToolName, newArtifactStore)
-import Yuki.N.Background (BackgroundRegistry, newBackgroundRegistry, shutdownBackground, shutdownBackgroundThread)
+import Yuki.N.Artifact (ArtifactStore, SpliceConfig (..), newArtifactStore)
+import Yuki.N.Background (BackgroundRegistry, newBackgroundRegistry, shutdownBackground)
 import Yuki.N.Config
 import Yuki.N.Context (ContextConfig (..))
-import Yuki.N.Model (Model)
+import Yuki.N.Model (ChatMessage, Model)
 import Yuki.N.Provider.OpenAI
-import Yuki.N.Providers (ProviderRegistry, loadAuthJson, loadProviders, providerConfig, providerKeyMap, providerListing)
+import Yuki.N.Providers (ProviderRegistry, loadAuthJson, loadProviders, providerConfig, providerKeyMap)
 import Yuki.N.Runs (RunRegistry, newRunRegistry)
 import Yuki.N.Server
-import Yuki.N.Sessions (SessionService (..), migrateSessionOwners, newSessionStore)
+import Yuki.N.Sessions (newSessionStore)
+import Yuki.N.SubAgent (registerSubAgent)
 import Yuki.N.ThreadConfig
-import Yuki.N.Tools (backgroundTools, workTools)
-import Yuki.N.Transcript (TranscriptStore (..), newTranscriptStore, transcriptHooks)
+import Yuki.N.Transcript (newTranscriptStore, transcriptHook)
 
 runFromEnvironment :: IO ()
 runFromEnvironment =
@@ -51,57 +51,32 @@ serve env manager artifacts settings runs background =
      in fallbackModels manager settings registry keyMap
           >>= serveFallbacks registry keyMap
   serveFallbacks registry keyMap fallbacks =
-    (,,) <$> transcriptOf settings <*> configStore <*> newSessionStore (settingsDataDir settings)
+    (,) <$> newTranscriptStore transcriptDir <*> newSessionStore (settingsDataDir settings)
       >>= serveStores registry keyMap fallbacks
-  serveStores registry keyMap fallbacks (transcripts, store, sessions) =
-    migrateSessionOwners sessions store
-      >>= either (die . Text.unpack) (serveReady registry keyMap fallbacks transcripts store sessions)
-  serveReady registry keyMap fallbacks (transcriptHooks', transcripts) store sessions () =
+  serveStores registry keyMap fallbacks (transcripts, sessions) =
     putStrLn (banner settings)
       *> runServer
         settings
-        (Just service)
-        (Just (view store registry keyMap))
-        artifacts
-        (resolve store registry keyMap transcriptHooks' fallbacks)
-   where
-    service = SessionService sessions transcripts store (shutdownBackgroundThread background)
-  defaults = globalThreadConfig settings
-  configStore = newThreadConfigStore (settingsDataDir settings)
-  view store registry keyMap =
-    ConfigView
-      (renderGlobalConfig settings defaults)
-      store
-      defaults
-      (pure (Right [openAIModelName (settingsProvider settings)]))
-      (providerListing manager registry keyMap)
-  base fallbacks =
-    runtime background defaultHooks manager artifacts settings fallbacks <&> withRuntime
-  withRuntime foundation = foundation {runtimeRuns = Just runs}
-  resolve store registry keyMap transcriptHooks' fallbacks threadId =
-    threadConfigRead store threadId >>= resolveSession
+        sessions
+        transcripts
+        (resolve registry keyMap (transcriptHook transcripts) fallbacks)
+  transcriptDir = fromMaybe (settingsDataDir settings) (settingsTranscriptDir settings)
+  defaults = mempty {configCwd = maybe CwdNone CwdPath (settingsWorkDir settings)}
+  resolve registry keyMap afterRun fallbacks threadId =
+    loadThreadConfig (settingsDataDir settings) threadId >>= resolveSession
    where
     resolveSession session =
-      let config = resolveThreadConfig session defaults
-       in base fallbacks
-            >>= \foundation ->
-              resolveRuntime manager (settingsProvider settings) artifacts foundation config registry keyMap
-                >>= assemble config
+      let config = session <> defaults
+       in resolveRuntime manager (settingsProvider settings) artifacts (runtime background afterRun manager artifacts settings runs fallbacks) config registry keyMap
+            >>= assemble config
     assemble config resolved =
       agentsMdSection (cwdPath (configCwd config))
         <&> registerAgent resolved
     registerAgent resolved section =
-      resolved
-        { runtimeSystemPrompt = appendAgentsMd section (runtimeSystemPrompt resolved),
-          runtimeHooks = runtimeHooks resolved <> transcriptHooks'
-        }
-
-transcriptOf :: Settings -> IO (AgentHooks, TranscriptStore)
-transcriptOf settings =
-  build (fromMaybe (settingsDataDir settings) (settingsTranscriptDir settings))
- where
-  build dir = newTranscriptStore dir <&> withHooks
-  withHooks store = (transcriptHooks store, store)
+      registerSubAgent
+        resolved
+          { runtimeSystemPrompt = appendAgentsMd section (runtimeSystemPrompt resolved)
+          }
 
 fallbackModels :: Manager -> Settings -> ProviderRegistry -> Map.Map String Text -> IO [Model]
 fallbackModels manager settings registry keyMap =
@@ -118,43 +93,29 @@ fallbackModels manager settings registry keyMap =
     Nothing
       <$ putStrLn ("YUKI_FALLBACK_PROVIDERS: skipping " <> Text.unpack name <> " (" <> reason <> ")")
 
-runtime :: BackgroundRegistry -> AgentHooks -> Manager -> Maybe ArtifactStore -> Settings -> [Model] -> IO Runtime
-runtime background hooks manager artifacts settings fallbacks =
-  buildRuntime <$> workToolSet background
- where
-  buildRuntime tools =
-    Runtime
-      { runtimeModel = openAIModel manager (settingsProvider settings),
-        runtimeTools = artifactTools <> tools,
-        runtimeToolExecution = settingsToolExecution settings,
-        runtimeMaxTurns = settingsMaxTurns settings,
-        runtimeSystemPrompt = settingsSystemPrompt settings,
-        runtimeHooks = hooks,
-        runtimeNewId = newId,
-        runtimeArtifactStore = artifacts,
-        runtimeBackground = background,
-        runtimeDepth = settingsSubAgentDepth settings,
-        runtimeSubAgentMaxParallel = settingsSubAgentMaxParallel settings,
-        runtimeProviderRetries = settingsProviderRetries settings,
-        runtimeFallbacks = fallbacks,
-        runtimeSplice = Just (SpliceConfig (settingsSpliceChars settings) (settingsSpliceKeep settings)),
-        runtimeContext =
-          Just
-            ( ContextConfig
-                (settingsContextReserveTokens settings)
-                (settingsContextKeepUnits settings)
-                (settingsContextSummaryTokens settings)
-                (settingsSpliceChars settings)
-            ),
-        runtimeRuns = Nothing,
-        runtimeSteer = const (pure []),
-        runtimeFollowUp = const (pure [])
-      }
-  artifactTools = maybe Map.empty (Map.singleton artifactReadToolName . artifactReadTool) artifacts
-  workToolSet registry = maybe (pure Map.empty) (fmap fromTools . withBackground registry) (settingsWorkDir settings)
-  withBackground registry cwd = (<> backgroundTools registry cwd) <$> workTools artifacts cwd
-  fromTools = Map.fromList . fmap toolEntry
-  toolEntry tool = (toolName (backendToolSpec tool), tool)
+runtime :: BackgroundRegistry -> (AGUI.RunAgentInput -> [ChatMessage] -> IO ()) -> Manager -> Maybe ArtifactStore -> Settings -> RunRegistry -> [Model] -> Runtime
+runtime background afterRun manager artifacts settings runs fallbacks =
+  Runtime
+    { runtimeModel = openAIModel manager (settingsProvider settings),
+      runtimeTools = Map.empty,
+      runtimeToolExecution = settingsToolExecution settings,
+      runtimeMaxTurns = settingsMaxTurns settings,
+      runtimeSystemPrompt = settingsSystemPrompt settings,
+      runtimeAfterRun = afterRun,
+      runtimeNewId = newId,
+      runtimeArtifactStore = artifacts,
+      runtimeBackground = background,
+      runtimeSubAgentMaxParallel = settingsSubAgentMaxParallel settings,
+      runtimeProviderRetries = settingsProviderRetries settings,
+      runtimeFallbacks = fallbacks,
+      runtimeSplice = SpliceConfig (settingsSpliceChars settings) (settingsSpliceKeep settings),
+      runtimeContext =
+        ContextConfig
+          (settingsContextReserveTokens settings)
+          (settingsContextKeepUnits settings)
+          (settingsContextSummaryTokens settings),
+      runtimeRuns = runs
+    }
 
 banner :: Settings -> String
 banner settings =

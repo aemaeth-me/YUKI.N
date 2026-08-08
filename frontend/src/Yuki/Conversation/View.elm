@@ -15,6 +15,7 @@ view model yuki =
     div [ class "chat-panel" ]
         [ header [ class "chat-head" ]
             [ span [ class "chat-title" ] [ text (chatTitle model) ]
+            , span [ class "chat-thread" ] [ text (Maybe.withDefault "" model.threadId) ]
             ]
         , loadingNote model
         , statusLine model
@@ -31,10 +32,10 @@ chatTitle model =
                 "主对话"
 
             else
-                "任务对话"
+                "对话"
 
         Nothing ->
-            "主对话"
+            "对话"
 
 
 loadingNote : State.Model -> Html Types.Msg
@@ -142,7 +143,8 @@ itemView item =
                     text ""
 
                   else
-                    Markdown.toHtml [] assistant.content
+                    div [ class "chat-bubble-content" ]
+                        [ Markdown.toHtml [] assistant.content ]
                 ]
 
         ReasoningItem reasoning ->
